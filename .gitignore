@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.venv/
+venv/
+env/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database backups (keep in backups/ but not root)
+*.db.backup
+dump.sql
+
+# Temp files
+*.tmp
+*.temp
+
+# Misc
+backend/migrate_*.py
+backend/fix_*.py
+backend/update_*.py
+backend/revert_*.py
