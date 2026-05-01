@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -276,10 +276,11 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
     });
   };
 
-  // Auto-calculate line amounts and parent totals whenever products change
-  const products = form.watch("products");
-
-  const { totalBoxes, totalWeight, totalAmount } = React.useMemo(() => {
+  // 实时计算汇总（直接在渲染时计算，不依赖 useMemo）
+  const products = form.watch("products") || [];
+  
+  // 实时计算行金额并更新表单值
+  useEffect(() => {
     const currentProducts = form.getValues("products") || [];
     let tBoxes = 0;
     let tWeight = 0;
@@ -291,21 +292,43 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
       const boxCount = Number(form.getValues(`products.${i}.box_count`) || 0);
       const lineAmount = netWeight * unitPrice;
 
-      // Sync line total_amount
-      form.setValue(`products.${i}.total_amount`, Number(lineAmount.toFixed(2)), { shouldValidate: false });
+      // 同步行金额
+      const currentAmount = form.getValues(`products.${i}.total_amount`);
+      const newAmount = Number(lineAmount.toFixed(2));
+      if (currentAmount !== newAmount) {
+        form.setValue(`products.${i}.total_amount`, newAmount, { shouldValidate: false });
+      }
 
       tBoxes += boxCount;
       tWeight += netWeight;
       tAmount += lineAmount;
     });
 
-    form.setValue("total_boxes", tBoxes, { shouldValidate: false });
-    form.setValue("total_weight_kg", Number(tWeight.toFixed(3)), { shouldValidate: false });
-    form.setValue("total_amount_usd", Number(tAmount.toFixed(2)), { shouldValidate: false });
-
-    return { totalBoxes: tBoxes, totalWeight: tWeight, totalAmount: tAmount };
+    // 同步汇总字段
+    const currentTotalBoxes = form.getValues("total_boxes");
+    const currentTotalWeight = form.getValues("total_weight_kg");
+    const currentTotalAmount = form.getValues("total_amount_usd");
+    
+    if (currentTotalBoxes !== tBoxes) {
+      form.setValue("total_boxes", tBoxes, { shouldValidate: false });
+    }
+    if (currentTotalWeight !== Number(tWeight.toFixed(3))) {
+      form.setValue("total_weight_kg", Number(tWeight.toFixed(3)), { shouldValidate: false });
+    }
+    if (currentTotalAmount !== Number(tAmount.toFixed(2))) {
+      form.setValue("total_amount_usd", Number(tAmount.toFixed(2)), { shouldValidate: false });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [products]);
+  }, [JSON.stringify(products)]);
+
+  // 从 products 计算显示值
+  const totalBoxes = products.reduce((sum: number, p: any) => sum + Number(p?.box_count || 0), 0);
+  const totalWeight = products.reduce((sum: number, p: any) => sum + Number(p?.net_weight_kg || 0), 0);
+  const totalAmount = products.reduce((sum: number, p: any) => {
+    const netWeight = Number(p?.net_weight_kg || 0);
+    const unitPrice = Number(p?.unit_price || 0);
+    return sum + (netWeight * unitPrice);
+  }, 0);
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { onOpenChange(false); resetForm(); } }}>
