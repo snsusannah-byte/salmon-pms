@@ -258,3 +258,83 @@ async def get_finance_summary(
     """财务汇总统计"""
     summary = await FinanceService.get_summary(db)
     return FinanceSummary(**summary)
+
+
+# ==================== 批量导入 ====================
+
+@router.post("/batch-import", status_code=status.HTTP_201_CREATED)
+async def batch_import_finance(
+    records: List[dict],
+    db: AsyncSession = Depends(get_db),
+):
+    """批量导入财务记录
+    
+    支持导入: 购汇记录 / 税费 / 清关费
+    返回: {created: 新增数, errors: 错误列表}
+    """
+    from decimal import Decimal
+    from datetime import datetime
+    from app.models import ImportInvoice
+    
+    created_count = 0
+    errors = []
+    
+    for idx, record in enumerate(records):
+        try:
+            record_type = record.get("type", "").strip().lower()
+            invoice_no = record.get("invoice_no", "").strip()
+            
+            # 查找发票ID
+            invoice_id = None
+            if invoice_no:
+                result = await db.execute(select(ImportInvoice.id).where(ImportInvoice.invoice_no == invoice_no))
+                invoice_id = result.scalar_one_or_none()
+            
+            if record_type in ["exchange", "购汇"]:
+                data = {
+                    "invoice_id": invoice_id,
+                    "exchange_date": datetime.strptime(record.get("date", ""), "%Y-%m-%d").date(),
+                    "amount_usd": Decimal(str(record.get("amount_usd", 0))),
+                    "exchange_rate": Decimal(str(record.get("exchange_rate", 0))),
+                    "amount_cny": Decimal(str(record.get("amount_cny", 0))),
+                    "fee_cny": Decimal(str(record.get("fee_cny", 0))),
+                    "bank_account_id": record.get("bank_account_id"),
+                    "status": "completed",
+                    "notes": record.get("notes", ""),
+                }
+                await FinanceService.create_exchange_record(db, data)
+                created_count += 1
+                
+            elif record_type in ["tax", "税费"]:
+                data = {
+                    "invoice_id": invoice_id,
+                    "tax_date": datetime.strptime(record.get("date", ""), "%Y-%m-%d").date(),
+                    "customs_declaration_no": record.get("customs_declaration_no", ""),
+                    "total_tax": Decimal(str(record.get("total_tax", 0))),
+                    "notes": record.get("notes", ""),
+                }
+                await FinanceService.create_import_tax(db, data)
+                created_count += 1
+                
+            elif record_type in ["clearance", "清关费"]:
+                data = {
+                    "invoice_id": invoice_id,
+                    "cost_date": datetime.strptime(record.get("date", ""), "%Y-%m-%d").date(),
+                    "customs_declaration_no": record.get("customs_declaration_no", ""),
+                    "customs_broker_id": record.get("customs_broker_id"),
+                    "total_cost": Decimal(str(record.get("total_cost", 0))),
+                    "notes": record.get("notes", ""),
+                }
+                await FinanceService.create_clearance_cost(db, data)
+                created_count += 1
+                
+            else:
+                errors.append({"row": idx + 1, "error": f"未知的记录类型: {record_type}"})
+                
+        except Exception as e:
+            errors.append({"row": idx + 1, "error": str(e)})
+    
+    return {
+        "created": created_count,
+        "errors": errors,
+    }

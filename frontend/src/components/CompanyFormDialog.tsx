@@ -97,6 +97,16 @@ interface Company {
 export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType }: CompanyFormDialogProps) {
   const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [users, setUsers] = useState<{id: number; full_name: string}[]>([]);
+
+  // 获取用户列表（用于业务员选择）
+  useEffect(() => {
+    if (open) {
+      api.get("/v1/auth/users")
+        .then(res => setUsers(res.data || []))
+        .catch(() => setUsers([]));
+    }
+  }, [open]);
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -376,7 +386,26 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="salesperson_id">业务员</Label>
-                  <Input id="salesperson_id" type="number" {...form.register("salesperson_id")} placeholder="用户ID" />
+                  <Select
+                    value={form.watch("salesperson_id") || undefined}
+                    onValueChange={(v) => form.setValue("salesperson_id", v || "")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择业务员">
+                        {(() => {
+                          const selected = users.find((u) => String(u.id) === form.watch("salesperson_id"));
+                          return selected?.full_name ?? "选择业务员";
+                        })()}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {users.map((u) => (
+                        <SelectItem key={u.id} value={String(u.id)}>
+                          {u.full_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="space-y-2">

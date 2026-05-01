@@ -470,3 +470,117 @@ async def delete_invoice_product(
     await InvoiceService.delete_product(db, product)
     return None
 
+
+# ==================== 批量导入 ====================
+
+@router.post("/batch-import", status_code=status.HTTP_201_CREATED)
+async def batch_import_invoices(
+    records: List[dict],
+    db: AsyncSession = Depends(get_db),
+):
+    """批量导入进口单证
+    
+    每行数据需要包含: invoice_no, invoice_date, kill_date, processing_plant, fish_farm, exporter
+    自动查找或创建加工厂/渔场/出口商
+    返回: {created: 新增数, errors: 错误列表, items: 发票列表}
+    """
+    from app.services.company_service import CompanyService
+    from app.models import CompanyType
+    from datetime import datetime
+    
+    created_count = 0
+    result_items = []
+    errors = []
+    
+    for idx, record in enumerate(records):
+        try:
+            invoice_no = record.get("invoice_no", "").strip()
+            if not invoice_no:
+                errors.append({"row": idx + 1, "error": "发票号不能为空"})
+                continue
+            
+            # 检查是否已存在
+            existing = await InvoiceService.get_by_invoice_no(db, invoice_no)
+            if existing:
+                errors.append({"row": idx + 1, "error": f"发票号 {invoice_no} 已存在"})
+                continue
+            
+            # 解析日期
+            invoice_date = record.get("invoice_date", "").strip()
+            kill_date = record.get("kill_date", "").strip()
+            
+            def parse_date(d):
+                if not d:
+                    return None
+                try:
+                    return datetime.strptime(d, "%Y-%m-%d").date()
+                except ValueError:
+                    try:
+                        return datetime.strptime(d, "%Y/%m/%d").date()
+                    except ValueError:
+                        return None
+            
+            invoice_date_parsed = parse_date(invoice_date)
+            kill_date_parsed = parse_date(kill_date)
+            
+            if not invoice_date_parsed:
+                errors.append({"row": idx + 1, "error": "发票日期格式错误"})
+                continue
+            
+            # 查找或创建加工厂
+            pp_name = record.get("processing_plant", "").strip()
+            pp_id = None
+            if pp_name:
+                pp = await CompanyService.get_or_create_company(db, name=pp_name, type=CompanyType.PROCESSING_PLANT)
+                pp_id = pp.id
+            
+            # 查找或创建渔场
+            ff_name = record.get("fish_farm", "").strip()
+            ff_id = None
+            if ff_name:
+                ff = await CompanyService.get_or_create_company(db, name=ff_name, type=CompanyType.FISH_FARM)
+                ff_id = ff.id
+            
+            # 查找或创建出口商
+            ex_name = record.get("exporter", "").strip()
+            ex_id = None
+            if ex_name:
+                ex = await CompanyService.get_or_create_company(db, name=ex_name, type=CompanyType.EXPORTER)
+                ex_id = ex.id
+            
+            # 创建发票
+            invoice_data = {
+                "invoice_no": invoice_no,
+                "invoice_date": invoice_date_parsed,
+                "kill_date": kill_date_parsed,
+                "processing_plant_id": pp_id,
+                "fish_farm_id": ff_id,
+                "exporter_id": ex_id,
+                "total_amount_usd": Decimal(str(record.get("total_amount_usd", 0))),
+                "total_boxes": int(record.get("total_boxes", 0)),
+                "total_weight_kg": Decimal(str(record.get("total_weight_kg", 0))),
+                "awb_no": record.get("awb_no", ""),
+                "gross_weight_kg": Decimal(str(record.get("gross_weight_kg", 0))),
+                "eta": record.get("eta", ""),
+                "departure_date": parse_date(record.get("departure_date", "").strip()),
+                "flight_info": record.get("flight_info", ""),
+                "origin_certificate": record.get("origin_certificate", ""),
+                "inspection_certificate": record.get("inspection_certificate", ""),
+                "customs_status": "pending_customs",
+                "exchange_status": "not_exchanged",
+                "notes": record.get("notes", ""),
+            }
+            
+            invoice = await InvoiceService.create(db, invoice_data)
+            created_count += 1
+            result_items.append(invoice)
+            
+        except Exception as e:
+            errors.append({"row": idx + 1, "error": str(e)})
+    
+    return {
+        "created": created_count,
+        "errors": errors,
+        "items": result_items,
+    }
+

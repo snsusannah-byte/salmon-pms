@@ -249,3 +249,100 @@ async def get_sales_summary(
     """销售汇总统计"""
     summary = await SalesService.get_summary(db)
     return SaleSummary(**summary)
+
+
+# ==================== 批量导入 ====================
+
+@router.post("/batch-import", status_code=status.HTTP_201_CREATED)
+async def batch_import_sales(
+    records: List[dict],
+    db: AsyncSession = Depends(get_db),
+):
+    """批量导入整鱼销售记录
+    
+    每行数据需要包含: customer_name, sale_date, weight_kg, unit_price
+    自动查找或创建客户，自动计算金额
+    返回: {created: 新增数, errors: 错误列表, items: 销售列表}
+    """
+    from app.services.company_service import CompanyService
+    from app.services.batch_service import BatchService
+    from decimal import Decimal
+    from datetime import date, datetime
+    
+    created_count = 0
+    result_items = []
+    errors = []
+    
+    for idx, record in enumerate(records):
+        try:
+            customer_name = record.get("customer_name", "").strip()
+            if not customer_name:
+                errors.append({"row": idx + 1, "error": "客户名称不能为空"})
+                continue
+            
+            # 查找或创建客户
+            customer = await CompanyService.get_or_create_customer(
+                db=db,
+                name=customer_name,
+                contact_person=record.get("contact_person"),
+                phone=record.get("phone"),
+                address=record.get("address"),
+                customer_category=record.get("customer_category"),
+            )
+            
+            # 解析批次（按 batch_code 查找）
+            batch_id = None
+            batch_code = record.get("batch_code", "").strip()
+            if batch_code:
+                batch = await BatchService.get_by_code(db, batch_code)
+                if batch:
+                    batch_id = batch.id
+            
+            # 解析销售日期
+            sale_date_str = record.get("sale_date", "").strip()
+            sale_date = date.today()
+            if sale_date_str:
+                try:
+                    sale_date = datetime.strptime(sale_date_str, "%Y-%m-%d").date()
+                except ValueError:
+                    try:
+                        sale_date = datetime.strptime(sale_date_str, "%Y/%m/%d").date()
+                    except ValueError:
+                        pass
+            
+            # 解析重量和单价
+            weight_kg = Decimal(str(record.get("weight_kg", 0)))
+            unit_price = Decimal(str(record.get("unit_price", 0)))
+            scan_fee = Decimal(str(record.get("scan_fee", 0)))
+            
+            # 计算金额
+            gross_amount = (weight_kg * unit_price).quantize(Decimal("0.01"))
+            net_amount = gross_amount - scan_fee
+            
+            # 创建销售记录
+            sale_data = {
+                "customer_id": customer.id,
+                "batch_id": batch_id,
+                "sale_date": sale_date,
+                "weight_kg": weight_kg,
+                "unit_price": unit_price,
+                "gross_amount": gross_amount,
+                "scan_fee": scan_fee,
+                "net_amount": net_amount,
+                "paid_amount": Decimal("0"),
+                "status": "pending",
+                "notes": record.get("notes", ""),
+            }
+            
+            sale = await SalesService.create_sale(db, sale_data)
+            created_count += 1
+            result_items.append(await _build_sale_response(db, sale))
+            
+        except Exception as e:
+            errors.append({"row": idx + 1, "error": str(e)})
+    
+    return {
+        "created": created_count,
+        "errors": errors,
+        "items": result_items,
+    }
