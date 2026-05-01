@@ -1,0 +1,18 @@
+
+> frontend@0.0.0 dev /home/sannah/.openclaw/workspace-codeingman/projects/salmon-pms/frontend
+> vite --host 0.0.0.0
+
+
+  VITE v8.0.10  ready in 281 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: http://192.168.78.68:5173/
+8:04:37 PM [vite] (client) hmr update /src/pages/InvoicesPage.tsx, /src/index.css
+8:04:48 PM [vite] (client) hmr update /src/pages/InvoicesPage.tsx, /src/index.css
+8:14:00 PM [vite] (client) hmr update /src/pages/InvoicesPage.tsx, /src/index.css
+8:14:14 PM [vite] (client) hmr update /src/pages/InvoicesPage.tsx, /src/index.css
+8:14:28 PM [vite] (client) hmr update /src/pages/InvoicesPage.tsx, /src/index.css
+8:14:43 PM [vite] (client) hmr update /src/pages/InvoicesPage.tsx, /src/index.css
+8:15:00 PM [vite] (client) hmr update /src/pages/InvoicesPage.tsx, /src/index.css
+8:16:25 PM [vite] (client) hmr update /src/index.css, /src/components/BatchImportButton.tsx
+ ELIFECYCLE  Command failed.

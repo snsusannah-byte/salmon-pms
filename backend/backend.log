@@ -1,0 +1,54 @@
+INFO:     Will watch for changes in these directories: ['/home/sannah/.openclaw/workspace-codeingman/projects/salmon-pms/backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [17194] using WatchFiles
+INFO:     Started server process [17196]
+INFO:     Waiting for application startup.
+2026-04-29 12:45:40,677 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-04-29 12:45:40,677 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("companies")
+2026-04-29 12:45:40,677 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,679 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("bank_accounts")
+2026-04-29 12:45:40,679 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,679 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("users")
+2026-04-29 12:45:40,680 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,680 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("import_invoices")
+2026-04-29 12:45:40,680 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,681 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("invoice_products")
+2026-04-29 12:45:40,681 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,681 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("shipments")
+2026-04-29 12:45:40,681 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,682 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("batches")
+2026-04-29 12:45:40,682 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,682 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("batch_invoices")
+2026-04-29 12:45:40,682 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,683 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("exchange_records")
+2026-04-29 12:45:40,683 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,683 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("import_taxes")
+2026-04-29 12:45:40,683 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,684 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("clearance_costs")
+2026-04-29 12:45:40,684 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,684 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("whole_fish_sales")
+2026-04-29 12:45:40,685 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,685 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("sales_receipts")
+2026-04-29 12:45:40,685 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,685 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("aftersales_records")
+2026-04-29 12:45:40,685 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,686 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("transaction_records")
+2026-04-29 12:45:40,686 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,686 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("inventory")
+2026-04-29 12:45:40,686 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,687 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("inventory_movements")
+2026-04-29 12:45:40,687 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,687 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("audit_trail")
+2026-04-29 12:45:40,687 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,688 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("notifications")
+2026-04-29 12:45:40,688 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,688 INFO sqlalchemy.engine.Engine PRAGMA main.table_info("system_configs")
+2026-04-29 12:45:40,688 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-04-29 12:45:40,689 INFO sqlalchemy.engine.Engine COMMIT
+INFO:     Application startup complete.
+INFO:     127.0.0.1:42416 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [17196]
+INFO:     Stopping reloader process [17194]
