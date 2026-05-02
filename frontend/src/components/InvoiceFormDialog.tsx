@@ -33,9 +33,9 @@ const formSchema = z.object({
   invoice_date: z.string().min(1, "发票日期不能为空"),
   kill_date: z.string().min(1, "宰杀日期不能为空"),
   arrival_date: z.string().optional().or(z.literal("")),
-  processing_plant_id: z.coerce.number().min(0, "加工厂ID不能为负数"),
-  fish_farm_id: z.coerce.number().min(0, "渔场ID不能为负数"),
-  exporter_id: z.coerce.number().min(0, "出口商ID不能为负数"),
+  processing_plant_id: z.coerce.number().min(1, "请选择加工厂"),
+  fish_farm_id: z.coerce.number().min(0, "渔场ID不能为负数").optional(),
+  exporter_id: z.coerce.number().min(1, "请选择出口商"),
   total_amount_usd: z.coerce.number().min(0, "金额不能为负数"),
   total_boxes: z.coerce.number().min(0, "箱数不能为负数"),
   total_weight_kg: z.coerce.number().min(0, "重量不能为负数"),
@@ -347,7 +347,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                 <Input id="kill_date" type="date" {...form.register("kill_date")} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="processing_plant_id">加工厂</Label>
+                <Label htmlFor="processing_plant_id">加工厂 *</Label>
                 <Select
                   value={form.watch("processing_plant_id") ? String(form.watch("processing_plant_id")) : undefined}
                   onValueChange={(v) => form.setValue("processing_plant_id", parseInt(v || "0"))}
@@ -381,7 +381,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                 {form.formState.errors.fish_farm_id && <p className="text-xs text-red-500">{form.formState.errors.fish_farm_id.message}</p>}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="exporter_id">出口商</Label>
+                <Label htmlFor="exporter_id">出口商 *</Label>
                 <Select
                   value={form.watch("exporter_id") ? String(form.watch("exporter_id")) : undefined}
                   onValueChange={(v) => form.setValue("exporter_id", parseInt(v || "0"))}
