@@ -239,8 +239,34 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
   const onSubmit = async (data: any) => {
     setIsSubmitting(true);
     try {
+      // 计算汇总数据
+      const currentProducts = data.products || [];
+      let tBoxes = 0;
+      let tWeight = 0;
+      let tAmount = 0;
+      
+      const productsWithAmount = currentProducts.map((p: any) => {
+        const netWeight = Number(p?.net_weight_kg || 0);
+        const unitPrice = Number(p?.unit_price || 0);
+        const boxCount = Number(p?.box_count || 0);
+        const lineAmount = netWeight * unitPrice;
+        
+        tBoxes += boxCount;
+        tWeight += netWeight;
+        tAmount += lineAmount;
+        
+        return {
+          ...p,
+          total_amount: Number(lineAmount.toFixed(2)),
+        };
+      });
+
       const payload = {
         ...data,
+        products: productsWithAmount,
+        total_boxes: tBoxes,
+        total_weight_kg: Number(tWeight.toFixed(3)),
+        total_amount_usd: Number(tAmount.toFixed(2)),
         kill_date: data.kill_date || undefined,
         arrival_date: data.arrival_date || undefined,
       };
@@ -276,59 +302,20 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
     });
   };
 
-  // 实时计算汇总（直接在渲染时计算，不依赖 useMemo）
+  // 实时计算汇总（直接在渲染时计算，不触发 setValue 避免无限循环）
   const products = form.watch("products") || [];
-  
-  // 实时计算行金额并更新表单值
-  useEffect(() => {
-    const currentProducts = form.getValues("products") || [];
-    let tBoxes = 0;
-    let tWeight = 0;
-    let tAmount = 0;
+  let totalBoxes = 0;
+  let totalWeight = 0;
+  let totalAmount = 0;
 
-    currentProducts.forEach((_, i) => {
-      const netWeight = Number(form.getValues(`products.${i}.net_weight_kg`) || 0);
-      const unitPrice = Number(form.getValues(`products.${i}.unit_price`) || 0);
-      const boxCount = Number(form.getValues(`products.${i}.box_count`) || 0);
-      const lineAmount = netWeight * unitPrice;
-
-      // 同步行金额
-      const currentAmount = form.getValues(`products.${i}.total_amount`);
-      const newAmount = Number(lineAmount.toFixed(2));
-      if (currentAmount !== newAmount) {
-        form.setValue(`products.${i}.total_amount`, newAmount, { shouldValidate: false });
-      }
-
-      tBoxes += boxCount;
-      tWeight += netWeight;
-      tAmount += lineAmount;
-    });
-
-    // 同步汇总字段
-    const currentTotalBoxes = form.getValues("total_boxes");
-    const currentTotalWeight = form.getValues("total_weight_kg");
-    const currentTotalAmount = form.getValues("total_amount_usd");
-    
-    if (currentTotalBoxes !== tBoxes) {
-      form.setValue("total_boxes", tBoxes, { shouldValidate: false });
-    }
-    if (currentTotalWeight !== Number(tWeight.toFixed(3))) {
-      form.setValue("total_weight_kg", Number(tWeight.toFixed(3)), { shouldValidate: false });
-    }
-    if (currentTotalAmount !== Number(tAmount.toFixed(2))) {
-      form.setValue("total_amount_usd", Number(tAmount.toFixed(2)), { shouldValidate: false });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(products)]);
-
-  // 从 products 计算显示值
-  const totalBoxes = products.reduce((sum: number, p: any) => sum + Number(p?.box_count || 0), 0);
-  const totalWeight = products.reduce((sum: number, p: any) => sum + Number(p?.net_weight_kg || 0), 0);
-  const totalAmount = products.reduce((sum: number, p: any) => {
+  products.forEach((p: any) => {
     const netWeight = Number(p?.net_weight_kg || 0);
     const unitPrice = Number(p?.unit_price || 0);
-    return sum + (netWeight * unitPrice);
-  }, 0);
+    const boxCount = Number(p?.box_count || 0);
+    totalBoxes += boxCount;
+    totalWeight += netWeight;
+    totalAmount += netWeight * unitPrice;
+  });
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { onOpenChange(false); resetForm(); } }}>
