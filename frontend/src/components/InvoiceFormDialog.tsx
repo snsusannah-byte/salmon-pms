@@ -24,7 +24,7 @@ const productSchema = z.object({
   box_count: z.coerce.number().min(1, "箱数至少为1"),
   net_weight_kg: z.coerce.number().min(0.001, "重量必须大于0"),
   unit_price: z.coerce.number().min(0.0001, "单价必须大于0"),
-  total_amount: z.coerce.number().min(0.01, "金额必须大于0"),
+  total_amount: z.coerce.number().min(0, "金额不能为负数"),
   notes: z.string().optional().or(z.literal("")),
 });
 
@@ -39,9 +39,9 @@ const formSchema = z.object({
   total_amount_usd: z.coerce.number().min(0, "金额不能为负数"),
   total_boxes: z.coerce.number().min(0, "箱数不能为负数"),
   total_weight_kg: z.coerce.number().min(0, "重量不能为负数"),
-  awb_no: z.string().min(1, "AWB不能为空"),
+  awb_no: z.string().max(50).optional().or(z.literal("")),
   gross_weight_kg: z.coerce.number().min(0, "重量不能为负数").optional().or(z.literal(0)),
-  eta: z.string().min(1, "ETA不能为空"),
+  eta: z.string().optional().or(z.literal("")),
   departure_date: z.string().optional().or(z.literal("")),
   flight_info: z.string().max(100).optional().or(z.literal("")),
   origin_certificate: z.string().max(100).optional().or(z.literal("")),
@@ -324,7 +324,10 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
           <DialogTitle>{initialData ? "编辑发票" : "新增发票"}</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        <form onSubmit={form.handleSubmit(onSubmit, (errors) => {
+          console.error("表单验证错误:", errors);
+          toast.error("请检查表单必填项");
+        })} className="space-y-8">
           {/* 基本信息 */}
           <div className="space-y-6">
             <h3 className="text-sm font-semibold text-foreground">基本信息</h3>
