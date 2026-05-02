@@ -283,7 +283,15 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
       onOpenChange(false);
       resetForm();
     } catch (error: any) {
-      const msg = error.response?.data?.detail ?? "操作失败";
+      const detail = error.response?.data?.detail;
+      let msg: string;
+      if (Array.isArray(detail)) {
+        msg = detail.map((d: any) => d.msg).join("; ");
+      } else if (typeof detail === "string") {
+        msg = detail;
+      } else {
+        msg = "操作失败";
+      }
       toast.error(msg);
     } finally {
       setIsSubmitting(false);
