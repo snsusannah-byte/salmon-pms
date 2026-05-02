@@ -201,7 +201,7 @@ class InvoiceService:
         
         # 手动删除关联的产品明细（避免外键约束问题）
         await db.execute(
-            sqlalchemy.delete(InvoiceProduct).where(InvoiceProduct.invoice_id == invoice.id)
+            delete(InvoiceProduct).where(InvoiceProduct.invoice_id == invoice.id)
         )
         
         await db.delete(invoice)
