@@ -1,5 +1,6 @@
 from typing import List, Optional
 from datetime import datetime, date
+from decimal import Decimal
 
 from sqlalchemy import select, func, and_, delete
 from sqlalchemy.orm import selectinload
@@ -166,7 +167,7 @@ class InvoiceService:
     
     @staticmethod
     async def update(db: AsyncSession, invoice: ImportInvoice, data: InvoiceUpdate) -> ImportInvoice:
-        """更新发票"""
+        """更新发票（支持更新产品明细）"""
         if invoice.is_locked:
             from fastapi import HTTPException
             raise HTTPException(
@@ -176,14 +177,47 @@ class InvoiceService:
         
         update_data = data.model_dump(exclude_unset=True)
         
+        # 提取产品明细
+        products_data = update_data.pop("products", None)
+        
         # 处理日期
         for field in ["invoice_date", "kill_date", "arrival_date"]:
             if field in update_data and update_data[field]:
                 if isinstance(update_data[field], str):
                     update_data[field] = date.fromisoformat(update_data[field])
         
+        # 更新主表字段
         for field, value in update_data.items():
-            setattr(invoice, field, value)
+            if value is not None:
+                setattr(invoice, field, value)
+        
+        # 如果提供了产品明细，替换旧的产品明细
+        if products_data is not None:
+            # 删除旧的产品明细
+            await db.execute(
+                delete(InvoiceProduct).where(InvoiceProduct.invoice_id == invoice.id)
+            )
+            
+            # 创建新的产品明细
+            total_amount = Decimal("0")
+            total_boxes = 0
+            total_weight = Decimal("0")
+            
+            for product_data in products_data:
+                # product_data 是字典（已从 Pydantic model_dump）
+                product = InvoiceProduct(
+                    invoice_id=invoice.id,
+                    **product_data
+                )
+                db.add(product)
+                total_amount += Decimal(str(product_data.get("total_amount", 0)))
+                total_boxes += product_data.get("box_count", 0)
+                total_weight += Decimal(str(product_data.get("net_weight_kg", 0)))
+            
+            # 更新汇总字段
+            invoice.total_amount_usd = total_amount
+            invoice.total_boxes = total_boxes
+            invoice.total_weight_kg = total_weight
         
         await db.commit()
         await db.refresh(invoice)

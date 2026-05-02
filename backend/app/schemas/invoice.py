@@ -108,6 +108,9 @@ class InvoiceUpdate(BaseModel):
     exchange_status: Optional[ExchangeStatus] = None
     is_locked: Optional[bool] = None
     notes: Optional[str] = None
+    
+    # 产品明细（编辑时可选）
+    products: Optional[List[InvoiceProductCreate]] = Field(None, description="产品明细列表（编辑时覆盖旧数据）")
 
 
 class InvoiceResponse(InvoiceBase):

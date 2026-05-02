@@ -341,7 +341,86 @@ async def update_invoice(
         )
     
     updated = await InvoiceService.update(db, invoice, data)
-    return InvoiceResponse.model_validate(updated)
+    
+    # 手动构建响应（避免 ORM 关系映射问题）
+    from sqlalchemy import select
+    from app.models import Company, InvoiceProduct
+    
+    invoice_dict = {
+        "id": updated.id,
+        "invoice_no": updated.invoice_no,
+        "invoice_date": updated.invoice_date,
+        "kill_date": updated.kill_date,
+        "arrival_date": updated.arrival_date,
+        "processing_plant_id": updated.processing_plant_id,
+        "fish_farm_id": updated.fish_farm_id,
+        "exporter_id": updated.exporter_id,
+        "total_amount_usd": updated.total_amount_usd,
+        "total_boxes": updated.total_boxes,
+        "total_weight_kg": updated.total_weight_kg,
+        "awb_no": updated.awb_no,
+        "gross_weight_kg": updated.gross_weight_kg,
+        "eta": updated.eta,
+        "departure_date": updated.departure_date,
+        "flight_info": updated.flight_info,
+        "origin_certificate": updated.origin_certificate,
+        "inspection_certificate": updated.inspection_certificate,
+        "customs_status": updated.customs_status,
+        "exchange_status": updated.exchange_status,
+        "is_locked": updated.is_locked,
+        "notes": updated.notes,
+        "created_at": updated.created_at,
+        "updated_at": updated.updated_at,
+        "processing_plant_name": None,
+        "processing_plant_code": None,
+        "fish_farm_name": None,
+        "fish_farm_code": None,
+        "exporter_name": None,
+        "exporter_code": None,
+        "products": [],
+    }
+    
+    # 查询关联名称和编号
+    if updated.processing_plant_id:
+        company_result = await db.execute(
+            select(Company.name, Company.code).where(Company.id == updated.processing_plant_id)
+        )
+        row = company_result.one_or_none()
+        if row:
+            invoice_dict["processing_plant_name"] = row[0]
+            invoice_dict["processing_plant_code"] = row[1]
+    
+    if updated.exporter_id:
+        company_result = await db.execute(
+            select(Company.name, Company.code).where(Company.id == updated.exporter_id)
+        )
+        row = company_result.one_or_none()
+        if row:
+            invoice_dict["exporter_name"] = row[0]
+            invoice_dict["exporter_code"] = row[1]
+    
+    # 查询产品明细
+    product_result = await db.execute(
+        select(InvoiceProduct).where(InvoiceProduct.invoice_id == updated.id)
+    )
+    products = product_result.scalars().all()
+    
+    for p in products:
+        invoice_dict["products"].append({
+            "id": p.id,
+            "invoice_id": p.invoice_id,
+            "product_name": p.product_name,
+            "product_spec": p.product_spec,
+            "box_count": p.box_count,
+            "net_weight_kg": p.net_weight_kg,
+            "unit_price": p.unit_price,
+            "total_amount": p.total_amount,
+            "notes": p.notes,
+            "created_at": p.created_at,
+            "updated_at": p.updated_at,
+        })
+    
+    return InvoiceResponse.model_construct(**invoice_dict)
 
 
 @router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
