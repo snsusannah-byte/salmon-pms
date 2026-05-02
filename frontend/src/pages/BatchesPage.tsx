@@ -396,7 +396,7 @@ export function BatchesPage() {
                   加载中...
                 </TableCell>
               </TableRow>
-            ) : data?.items.length === 0 ? (
+            ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   暂无数据

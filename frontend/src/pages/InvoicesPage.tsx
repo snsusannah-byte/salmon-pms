@@ -211,7 +211,7 @@ export function InvoicesPage() {
         open={detailOpen}
         onOpenChange={setDetailOpen}
         onEdit={(id) => {
-          const invoice = data?.items.find((i) => i.id === id);
+          const invoice = data?.items?.find((i) => i.id === id);
           if (invoice) {
             setDetailOpen(false);
             handleEdit(invoice);
@@ -329,7 +329,7 @@ export function InvoicesPage() {
                   加载中...
                 </TableCell>
               </TableRow>
-            ) : data?.items.length === 0 ? (
+            ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
                 <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
                   暂无数据

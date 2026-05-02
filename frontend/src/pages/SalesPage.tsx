@@ -341,7 +341,7 @@ export function SalesPage() {
               <TableRow>
                 <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">加载中...</TableCell>
               </TableRow>
-            ) : data?.items.length === 0 ? (
+            ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
                 <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">暂无数据</TableCell>
               </TableRow>

@@ -185,7 +185,7 @@ export function SalespersonPage() {
                   加载中...
                 </TableCell>
               </TableRow>
-            ) : data?.items.length === 0 ? (
+            ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                   暂无业务员
