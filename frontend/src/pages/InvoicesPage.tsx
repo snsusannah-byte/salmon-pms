@@ -155,18 +155,35 @@ export function InvoicesPage() {
     setDetailOpen(true);
   };
 
+  const [deleteConfirm, setDeleteConfirm] = useState<Invoice | null>(null);
+
   const handleDelete = async (invoice: Invoice) => {
     if (invoice.is_locked) {
       toast.error("发票已锁定，不能删除");
       return;
     }
-    if (!confirm(`确定要删除发票 "${invoice.invoice_no}" 吗？`)) return;
+    setDeleteConfirm(invoice);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm) return;
     try {
-      await api.delete(`/v1/invoices/${invoice.id}`);
+      await api.delete(`/v1/invoices/${deleteConfirm.id}`);
       toast.success("发票已删除");
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
     } catch (error: any) {
-      toast.error(error.response?.data?.detail ?? "删除失败");
+      const detail = error.response?.data?.detail;
+      let msg: string;
+      if (Array.isArray(detail)) {
+        msg = detail.map((d: any) => d.msg).join("; ");
+      } else if (typeof detail === "string") {
+        msg = detail;
+      } else {
+        msg = "删除失败";
+      }
+      toast.error(msg);
+    } finally {
+      setDeleteConfirm(null);
     }
   };
 
@@ -437,6 +454,26 @@ export function InvoicesPage() {
             >
               下一页
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* 删除确认弹窗 */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-background rounded-lg p-6 max-w-sm w-full mx-4 shadow-lg">
+            <h3 className="text-lg font-semibold mb-2">确认删除</h3>
+            <p className="text-muted-foreground mb-6">
+              确定要删除发票 "{deleteConfirm.invoice_no}" 吗？此操作不可撤销。
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
+                取消
+              </Button>
+              <Button variant="destructive" onClick={confirmDelete}>
+                删除
+              </Button>
+            </div>
           </div>
         </div>
       )}
