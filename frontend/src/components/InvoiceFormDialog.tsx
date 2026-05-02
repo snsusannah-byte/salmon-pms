@@ -350,12 +350,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   onValueChange={(v) => form.setValue("processing_plant_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="选择加工厂">
-                    {(() => {
-                      const selected = processingPlants.find(p => p.id === Number(form.watch("processing_plant_id")));
-                      return selected?.name || "选择加工厂";
-                    })()}
-                  </SelectValue>
+                    <SelectValue placeholder="选择加工厂" />
                   </SelectTrigger>
                   <SelectContent>
                     {processingPlants.map((c) => (
@@ -372,12 +367,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   onValueChange={(v) => form.setValue("fish_farm_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="选择渔场">
-                    {(() => {
-                      const selected = fishFarms.find(f => f.id === Number(form.watch("fish_farm_id")));
-                      return selected?.name || "选择渔场";
-                    })()}
-                  </SelectValue>
+                    <SelectValue placeholder="选择渔场" />
                   </SelectTrigger>
                   <SelectContent>
                     {fishFarms.map((c) => (
@@ -394,12 +384,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   onValueChange={(v) => form.setValue("exporter_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="选择出口商">
-                    {(() => {
-                      const selected = exporters.find(e => e.id === Number(form.watch("exporter_id")));
-                      return selected?.name || "选择出口商";
-                    })()}
-                  </SelectValue>
+                    <SelectValue placeholder="选择出口商" />
                   </SelectTrigger>
                   <SelectContent>
                     {exporters.map((c) => (
