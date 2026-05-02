@@ -252,7 +252,7 @@ class ImportInvoice(Base, TimestampMixin):
     processing_plant: Mapped["Company"] = relationship("Company", foreign_keys=[processing_plant_id])
     fish_farm: Mapped["Company"] = relationship("Company", foreign_keys=[fish_farm_id])
     exporter: Mapped["Company"] = relationship("Company", foreign_keys=[exporter_id])
-    products: Mapped[List["InvoiceProduct"]] = relationship("InvoiceProduct", back_populates="invoice", lazy="raise", uselist=True)
+    products: Mapped[List["InvoiceProduct"]] = relationship("InvoiceProduct", back_populates="invoice", lazy="raise", uselist=True, cascade="all, delete-orphan")
 
 
 class ProductCategory(str, Enum):

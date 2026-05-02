@@ -1,7 +1,7 @@
 from typing import List, Optional
 from datetime import datetime, date
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -191,7 +191,7 @@ class InvoiceService:
     
     @staticmethod
     async def delete(db: AsyncSession, invoice: ImportInvoice) -> None:
-        """删除发票（软删除：标记为不活跃）"""
+        """删除发票（级联删除产品明细）"""
         if invoice.is_locked:
             from fastapi import HTTPException
             raise HTTPException(
@@ -199,9 +199,9 @@ class InvoiceService:
                 detail=f"发票 {invoice.invoice_no} 已锁定，不能删除"
             )
         
-        # 级联删除产品明细
+        # 手动删除关联的产品明细（避免外键约束问题）
         await db.execute(
-            select(InvoiceProduct).where(InvoiceProduct.invoice_id == invoice.id)
+            sqlalchemy.delete(InvoiceProduct).where(InvoiceProduct.invoice_id == invoice.id)
         )
         
         await db.delete(invoice)
