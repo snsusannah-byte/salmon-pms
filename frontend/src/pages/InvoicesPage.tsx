@@ -80,6 +80,7 @@ interface Invoice {
   eta: string | null;
   awb_no: string | null;
   gross_weight_kg: string | null;
+  net_weight_kg_sum?: string | null; // 产品明细净重汇总（后端计算）
   departure_date: string | null;
   flight_info: string | null;
   origin_certificate: string | null;
@@ -307,7 +308,7 @@ export function InvoicesPage() {
         <div className="bg-muted/50 rounded-lg p-3 text-center">
           <div className="text-xs text-muted-foreground">总重量(kg)</div>
           <div className="text-lg font-bold text-primary">
-            {(allData?.items ?? []).reduce((sum, inv) => sum + (parseFloat(String(inv.total_weight_kg)) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            {(allData?.items ?? []).reduce((sum, inv) => sum + (parseFloat(String((inv as any).net_weight_kg_sum || inv.total_weight_kg)) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
           </div>
         </div>
         <div className="bg-muted/50 rounded-lg p-3 text-center">
@@ -373,7 +374,7 @@ export function InvoicesPage() {
                       {specSummary || "-"}
                     </TableCell>
                     <TableCell>{invoice.total_boxes}</TableCell>
-                    <TableCell>{Number(invoice.total_weight_kg).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                    <TableCell>{Number((invoice as any).net_weight_kg_sum || invoice.total_weight_kg).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
                     <TableCell>${Number(invoice.total_amount_usd).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
                     <TableCell>{invoice.awb_no ?? "-"}</TableCell>
                     <TableCell>
@@ -416,7 +417,7 @@ export function InvoicesPage() {
                   {data.items.reduce((sum, inv) => sum + (inv.total_boxes || 0), 0)}
                 </TableCell>
                 <TableCell>
-                  {data.items.reduce((sum, inv) => sum + Number(inv.total_weight_kg || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                  {data.items.reduce((sum, inv) => sum + Number((inv as any).net_weight_kg_sum || inv.total_weight_kg || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                 </TableCell>
                 <TableCell className="text-primary font-semibold">
                   ${data.items.reduce((sum, inv) => sum + Number(inv.total_amount_usd || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}

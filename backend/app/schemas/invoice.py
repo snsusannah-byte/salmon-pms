@@ -172,6 +172,9 @@ class InvoiceResponse(InvoiceBase):
     
     # 产品明细 - 使用普通列表避免ORM映射问题
     products: List[InvoiceProductResponse] = []
+    
+    # 产品净重汇总（从明细计算，用于列表页显示真正的净重）
+    net_weight_kg_sum: Optional[Decimal] = Field(None, description="产品明细净重汇总(kg)")
 
 
 class InvoiceListResponse(BaseModel):

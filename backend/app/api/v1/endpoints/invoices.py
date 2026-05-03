@@ -69,6 +69,11 @@ async def list_invoices(
         )
         products = product_result.scalars().all()
         
+        # 计算产品净重汇总（用于列表页显示真正的净重）
+        net_weight_kg_sum = sum(
+            Decimal(str(p.net_weight_kg)) for p in products if p.net_weight_kg is not None
+        ) if products else Decimal("0")
+        
         # 手动构建响应对象
         item_dict = {
             "id": item.id,
@@ -95,6 +100,7 @@ async def list_invoices(
             "notes": item.notes,
             "created_at": item.created_at,
             "updated_at": item.updated_at,
+            "net_weight_kg_sum": net_weight_kg_sum,
             "processing_plant_name": None,
             "processing_plant_code": None,
             "fish_farm_name": None,
