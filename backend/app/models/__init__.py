@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum as PyEnum
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -481,6 +481,47 @@ class FinishedProductSale(Base, TimestampMixin):
     status: Mapped[SalesStatus] = mapped_column(Enum(SalesStatus), default=SalesStatus.PENDING)
     salesperson_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    receipts: Mapped[List["FinishedProductReceipt"]] = relationship(
+        "FinishedProductReceipt",
+        foreign_keys="FinishedProductReceipt.sale_id",
+        lazy="raise",
+        cascade="all, delete-orphan",
+    )
+    aftersales_records: Mapped[List["FinishedProductAftersales"]] = relationship(
+        "FinishedProductAftersales",
+        foreign_keys="FinishedProductAftersales.sale_id",
+        lazy="raise",
+        cascade="all, delete-orphan",
+    )
+
+
+class FinishedProductReceipt(Base, TimestampMixin):
+    """成品销售收款记录"""
+    __tablename__ = "finished_product_receipts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("finished_product_sales.id"), nullable=False)
+    receipt_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(50))
+    bank_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bank_accounts.id"))
+    reference_no: Mapped[Optional[str]] = mapped_column(String(100))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class FinishedProductAftersales(Base, TimestampMixin):
+    """成品销售售后记录"""
+    __tablename__ = "finished_product_aftersales"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("finished_product_sales.id"), nullable=False)
+    record_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    type: Mapped[str] = mapped_column(String(50))  # return, refund, discount, compensation
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
 

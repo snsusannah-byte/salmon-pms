@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import React, { useState, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   Select,
@@ -28,8 +29,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Eye, Pencil, Trash2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Plus,
+  Search,
+  Eye,
+  Pencil,
+  Trash2,
+  X,
+  DollarSign,
+  Receipt,
+  AlertTriangle,
+  Upload,
+  FileSpreadsheet,
+  Download,
+} from "lucide-react";
 import { toast } from "sonner";
+
+// ==================== 状态映射 ====================
 
 const statusMap: Record<string, { label: string; color: string }> = {
   pending: { label: "待收款", color: "bg-red-100 text-red-800" },
@@ -37,6 +54,46 @@ const statusMap: Record<string, { label: string; color: string }> = {
   fully_paid: { label: "全部收款", color: "bg-green-100 text-green-800" },
   after_sales: { label: "售后中", color: "bg-purple-100 text-purple-800" },
 };
+
+const aftersalesTypeMap: Record<string, string> = {
+  return: "退货",
+  refund: "退款",
+  discount: "折扣",
+  compensation: "赔偿",
+};
+
+const paymentMethodOptions = [
+  { value: "cash", label: "现金" },
+  { value: "bank_transfer", label: "银行转账" },
+  { value: "check", label: "支票" },
+  { value: "wechat", label: "微信支付" },
+  { value: "alipay", label: "支付宝" },
+  { value: "other", label: "其他" },
+];
+
+// ==================== 接口定义 ====================
+
+interface Receipt {
+  id: number;
+  sale_id: number;
+  receipt_date: string;
+  amount: string;
+  payment_method: string;
+  bank_account_id: number | null;
+  reference_no: string | null;
+  notes: string | null;
+}
+
+interface Aftersales {
+  id: number;
+  sale_id: number;
+  record_date: string;
+  type: string;
+  amount: string;
+  reason: string | null;
+  status: string;
+  notes: string | null;
+}
 
 interface Sale {
   id: number;
@@ -59,6 +116,8 @@ interface Sale {
   salesperson_name: string | null;
   notes: string | null;
   is_locked: boolean;
+  receipts: Receipt[];
+  aftersales: Aftersales[];
 }
 
 interface SaleListResponse {
@@ -70,19 +129,38 @@ interface SaleListResponse {
 
 const PAGE_SIZE = 10;
 
+// ==================== 批量导入模板配置 ====================
+
+const FINISHED_PRODUCT_IMPORT_HEADERS = [
+  { en: "customer_name", cn: "客户名称" },
+  { en: "sale_date", cn: "销售日期" },
+  { en: "product_code", cn: "产品编码" },
+  { en: "product_name", cn: "产品名称" },
+  { en: "quantity", cn: "数量" },
+  { en: "unit_price", cn: "单价(USD)" },
+  { en: "scan_fee", cn: "扫码费" },
+  { en: "discount", cn: "折扣" },
+  { en: "notes", cn: "备注" },
+];
+
+// ==================== 页面主组件 ====================
+
 export function FinishedProductSalesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailSale, setDetailSale] = useState<Sale | null>(null);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery<SaleListResponse>({
-    queryKey: ["finished-product-sales", statusFilter, page],
+    queryKey: ["finished-product-sales", statusFilter, page, search],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
+      if (search.trim()) params.append("search", search.trim());
       params.append("skip", String((page - 1) * PAGE_SIZE));
       params.append("limit", String(PAGE_SIZE));
       const res = await api.get(`/v1/finished-product-sales/?${params.toString()}`);
@@ -107,6 +185,11 @@ export function FinishedProductSalesPage() {
     }
   };
 
+  const handleView = (sale: Sale) => {
+    setDetailSale(sale);
+    setDetailOpen(true);
+  };
+
   const handleEdit = (sale: Sale) => {
     if (sale.is_locked) {
       toast.error("销售记录已锁定，不能编辑");
@@ -128,22 +211,48 @@ export function FinishedProductSalesPage() {
         }}
       />
 
+      {/* 详情弹窗 */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-[800px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="pb-4 border-b flex flex-row items-center justify-between">
+            <div>
+              <DialogTitle>成品销售详情</DialogTitle>
+              <DialogDescription>
+                销售 #{detailSale?.id} · {detailSale?.customer_name}
+              </DialogDescription>
+            </div>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDetailOpen(false)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </DialogHeader>
+
+          {detailSale && (
+            <SaleDetailDialog sale={detailSale} onClose={() => setDetailOpen(false)} />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 标题栏 */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">成品销售</h1>
           <p className="text-sm text-muted-foreground">共 {data?.total ?? 0} 条销售记录</p>
         </div>
-        <Button onClick={() => { setEditingSale(null); setFormOpen(true); }}>
-          <Plus className="h-4 w-4 mr-2" />
-          新增销售
-        </Button>
+        <div className="flex gap-2">
+          <FinishedProductBatchImportButton />
+          <Button onClick={() => { setEditingSale(null); setFormOpen(true); }}>
+            <Plus className="h-4 w-4 mr-2" />
+            新增销售
+          </Button>
+        </div>
       </div>
 
+      {/* 筛选栏 */}
       <div className="flex gap-4">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="搜索客户..."
+            placeholder="搜索客户或产品..."
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             className="pl-9"
@@ -162,6 +271,7 @@ export function FinishedProductSalesPage() {
         </Select>
       </div>
 
+      {/* 数据表格 */}
       <div className="border rounded-lg">
         <Table>
           <TableHeader>
@@ -180,9 +290,13 @@ export function FinishedProductSalesPage() {
           </TableHeader>
           <TableBody>
             {isLoading ? (
-              <TableRow><TableCell colSpan={10} className="text-center py-8 text-muted-foreground">加载中...</TableCell></TableRow>
+              <TableRow>
+                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">加载中...</TableCell>
+              </TableRow>
             ) : (data?.items?.length ?? 0) === 0 ? (
-              <TableRow><TableCell colSpan={10} className="text-center py-8 text-muted-foreground">暂无数据</TableCell></TableRow>
+              <TableRow>
+                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">暂无数据</TableCell>
+              </TableRow>
             ) : (
               data?.items.map((sale) => {
                 const statusInfo = statusMap[sale.status] ?? { label: sale.status, color: "" };
@@ -206,10 +320,15 @@ export function FinishedProductSalesPage() {
                       ${unpaid.toLocaleString()}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={statusInfo.color}>{statusInfo.label}</Badge>
+                      <Badge variant="secondary" className={statusInfo.color}>
+                        {statusInfo.label}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleView(sale)} title="查看">
+                          <Eye className="h-4 w-4" />
+                        </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(sale)} title="编辑" disabled={sale.is_locked}>
                           <Pencil className={cn("h-4 w-4", sale.is_locked && "text-muted-foreground")} />
                         </Button>
@@ -226,6 +345,7 @@ export function FinishedProductSalesPage() {
         </Table>
       </div>
 
+      {/* 分页 */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
           <div className="text-sm text-muted-foreground">
@@ -238,6 +358,481 @@ export function FinishedProductSalesPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ==================== 详情弹窗组件 ====================
+
+function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState("info");
+
+  // Receipt form state
+  const [receiptFormOpen, setReceiptFormOpen] = useState(false);
+  const [receiptDate, setReceiptDate] = useState("");
+  const [receiptAmount, setReceiptAmount] = useState("");
+  const [receiptMethod, setReceiptMethod] = useState("bank_transfer");
+  const [receiptRef, setReceiptRef] = useState("");
+  const [receiptNotes, setReceiptNotes] = useState("");
+
+  // Aftersales form state
+  const [aftersalesFormOpen, setAftersalesFormOpen] = useState(false);
+  const [editingAftersalesId, setEditingAftersalesId] = useState<number | null>(null);
+  const [aftersalesDate, setAftersalesDate] = useState("");
+  const [aftersalesType, setAftersalesType] = useState("refund");
+  const [aftersalesAmount, setAftersalesAmount] = useState("");
+  const [aftersalesReason, setAftersalesReason] = useState("");
+  const [aftersalesStatus, setAftersalesStatus] = useState("pending");
+  const [aftersalesNotes, setAftersalesNotes] = useState("");
+
+  // Refresh detail data
+  const refreshDetail = async () => {
+    try {
+      const res = await api.get(`/v1/finished-product-sales/${sale.id}`);
+      // Update the detail sale data in parent would require lifting state,
+      // but we can invalidate the list query to refresh
+      queryClient.invalidateQueries({ queryKey: ["finished-product-sales"] });
+    } catch {
+      // silent
+    }
+  };
+
+  // Create receipt mutation
+  const createReceiptMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await api.post(`/v1/finished-product-sales/${sale.id}/receipts`, payload);
+      return res.data;
+    },
+    onSuccess: () => {
+      toast.success("收款记录添加成功");
+      queryClient.invalidateQueries({ queryKey: ["finished-product-sales"] });
+      resetReceiptForm();
+      setReceiptFormOpen(false);
+      refreshDetail();
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail ?? "添加失败");
+    },
+  });
+
+  // Delete receipt mutation
+  const deleteReceiptMutation = useMutation({
+    mutationFn: async (receiptId: number) => {
+      await api.delete(`/v1/finished-product-sales/${sale.id}/receipts/${receiptId}`);
+    },
+    onSuccess: () => {
+      toast.success("收款记录已删除");
+      queryClient.invalidateQueries({ queryKey: ["finished-product-sales"] });
+      refreshDetail();
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail ?? "删除失败");
+    },
+  });
+
+  // Create aftersales mutation
+  const createAftersalesMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await api.post(`/v1/finished-product-sales/${sale.id}/aftersales`, payload);
+      return res.data;
+    },
+    onSuccess: () => {
+      toast.success(editingAftersalesId ? "售后记录更新成功" : "售后记录添加成功");
+      queryClient.invalidateQueries({ queryKey: ["finished-product-sales"] });
+      resetAftersalesForm();
+      setAftersalesFormOpen(false);
+      setEditingAftersalesId(null);
+      refreshDetail();
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail ?? "操作失败");
+    },
+  });
+
+  // Update aftersales mutation
+  const updateAftersalesMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: number; payload: any }) => {
+      const res = await api.put(`/v1/finished-product-sales/${sale.id}/aftersales/${id}`, payload);
+      return res.data;
+    },
+    onSuccess: () => {
+      toast.success("售后记录更新成功");
+      queryClient.invalidateQueries({ queryKey: ["finished-product-sales"] });
+      resetAftersalesForm();
+      setAftersalesFormOpen(false);
+      setEditingAftersalesId(null);
+      refreshDetail();
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail ?? "更新失败");
+    },
+  });
+
+  // Delete aftersales mutation
+  const deleteAftersalesMutation = useMutation({
+    mutationFn: async (recordId: number) => {
+      await api.delete(`/v1/finished-product-sales/${sale.id}/aftersales/${recordId}`);
+    },
+    onSuccess: () => {
+      toast.success("售后记录已删除");
+      queryClient.invalidateQueries({ queryKey: ["finished-product-sales"] });
+      refreshDetail();
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail ?? "删除失败");
+    },
+  });
+
+  const resetReceiptForm = () => {
+    setReceiptDate("");
+    setReceiptAmount("");
+    setReceiptMethod("bank_transfer");
+    setReceiptRef("");
+    setReceiptNotes("");
+  };
+
+  const resetAftersalesForm = () => {
+    setAftersalesDate("");
+    setAftersalesType("refund");
+    setAftersalesAmount("");
+    setAftersalesReason("");
+    setAftersalesStatus("pending");
+    setAftersalesNotes("");
+  };
+
+  const handleReceiptSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!receiptDate || !receiptAmount) {
+      toast.error("请填写日期和金额");
+      return;
+    }
+    createReceiptMutation.mutate({
+      receipt_date: receiptDate,
+      amount: Number(receiptAmount),
+      payment_method: receiptMethod,
+      reference_no: receiptRef.trim() || null,
+      notes: receiptNotes.trim() || null,
+    });
+  };
+
+  const handleAftersalesSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!aftersalesDate || !aftersalesAmount) {
+      toast.error("请填写日期和金额");
+      return;
+    }
+    const payload = {
+      record_date: aftersalesDate,
+      type: aftersalesType,
+      amount: Number(aftersalesAmount),
+      reason: aftersalesReason.trim() || null,
+      status: aftersalesStatus,
+      notes: aftersalesNotes.trim() || null,
+    };
+    if (editingAftersalesId) {
+      updateAftersalesMutation.mutate({ id: editingAftersalesId, payload });
+    } else {
+      createAftersalesMutation.mutate(payload);
+    }
+  };
+
+  const startEditAftersales = (a: Aftersales) => {
+    setEditingAftersalesId(a.id);
+    setAftersalesDate(a.record_date);
+    setAftersalesType(a.type);
+    setAftersalesAmount(String(a.amount));
+    setAftersalesReason(a.reason ?? "");
+    setAftersalesStatus(a.status);
+    setAftersalesNotes(a.notes ?? "");
+    setAftersalesFormOpen(true);
+  };
+
+  const unpaid = Number(sale.net_amount) - Number(sale.paid_amount);
+
+  return (
+    <div className="py-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="info">基本信息</TabsTrigger>
+          <TabsTrigger value="receipts">
+            <Receipt className="h-3 w-3 mr-1" />
+            收款记录 ({sale.receipts?.length ?? 0})
+          </TabsTrigger>
+          <TabsTrigger value="aftersales">
+            <AlertTriangle className="h-3 w-3 mr-1" />
+            售后记录 ({sale.aftersales?.length ?? 0})
+          </TabsTrigger>
+        </TabsList>
+
+        {/* 基本信息 Tab */}
+        <TabsContent value="info" className="space-y-4 pt-4">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div><span className="text-muted-foreground">销售ID:</span> <span className="ml-1">#{sale.id}</span></div>
+            <div><span className="text-muted-foreground">日期:</span> <span className="ml-1">{sale.sale_date}</span></div>
+            <div><span className="text-muted-foreground">客户:</span> <span className="ml-1">{sale.customer_name ?? "-"}</span></div>
+            <div><span className="text-muted-foreground">产品:</span> <span className="ml-1">{sale.product_name ?? "-"} {sale.product_spec ?? ""}</span></div>
+            <div><span className="text-muted-foreground">数量:</span> <span className="ml-1">{sale.quantity}</span></div>
+            <div><span className="text-muted-foreground">单价:</span> <span className="ml-1">${Number(sale.unit_price).toLocaleString()}</span></div>
+            <div><span className="text-muted-foreground">销售员:</span> <span className="ml-1">{sale.salesperson_name ?? "-"}</span></div>
+            <div><span className="text-muted-foreground">状态:</span> <span className="ml-1">
+              <Badge variant="secondary" className={statusMap[sale.status]?.color}>
+                {statusMap[sale.status]?.label ?? sale.status}
+              </Badge>
+            </span></div>
+          </div>
+          {sale.notes && (
+            <div className="text-sm">
+              <span className="text-muted-foreground">备注:</span> <span className="ml-1">{sale.notes}</span>
+            </div>
+          )}
+          <div className="bg-muted p-3 rounded-md space-y-2 text-sm">
+            <div className="flex justify-between"><span>毛金额</span><span>${Number(sale.gross_amount).toLocaleString()}</span></div>
+            {Number(sale.scan_fee) > 0 && <div className="flex justify-between text-red-500"><span>扫码费</span><span>-${Number(sale.scan_fee).toLocaleString()}</span></div>}
+            {Number(sale.discount) > 0 && <div className="flex justify-between text-red-500"><span>折扣</span><span>-${Number(sale.discount).toLocaleString()}</span></div>}
+            {Number(sale.commission) > 0 && <div className="flex justify-between text-red-500"><span>佣金</span><span>-${Number(sale.commission).toLocaleString()}</span></div>}
+            <div className="flex justify-between font-semibold border-t pt-1">
+              <span>净金额</span>
+              <span>${Number(sale.net_amount).toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between text-green-600">
+              <span>已付</span>
+              <span>${Number(sale.paid_amount).toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between text-orange-600 font-medium">
+              <span>未付</span>
+              <span>${unpaid.toLocaleString()}</span>
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* 收款记录 Tab */}
+        <TabsContent value="receipts" className="space-y-4 pt-4">
+          {/* 添加收款表单 */}
+          <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium flex items-center gap-1">
+                <DollarSign className="h-4 w-4" />
+                {receiptFormOpen ? "添加收款" : "收款操作"}
+              </h4>
+              {!receiptFormOpen && (
+                <Button size="sm" onClick={() => setReceiptFormOpen(true)}>
+                  <Plus className="h-3 w-3 mr-1" />添加收款
+                </Button>
+              )}
+            </div>
+            {receiptFormOpen && (
+              <form onSubmit={handleReceiptSubmit} className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">收款日期 *</Label>
+                    <Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">金额 *</Label>
+                    <Input type="number" step="0.01" value={receiptAmount} onChange={(e) => setReceiptAmount(e.target.value)} placeholder="输入金额" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">支付方式</Label>
+                    <Select value={receiptMethod} onValueChange={setReceiptMethod}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {paymentMethodOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">参考号</Label>
+                    <Input value={receiptRef} onChange={(e) => setReceiptRef(e.target.value)} placeholder="可选" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">备注</Label>
+                  <Input value={receiptNotes} onChange={(e) => setReceiptNotes(e.target.value)} placeholder="可选" />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => { setReceiptFormOpen(false); resetReceiptForm(); }}>取消</Button>
+                  <Button type="submit" size="sm" disabled={createReceiptMutation.isPending}>
+                    {createReceiptMutation.isPending ? "保存中..." : "保存"}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* 收款列表 */}
+          {sale.receipts && sale.receipts.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">日期</TableHead>
+                  <TableHead className="text-xs">方式</TableHead>
+                  <TableHead className="text-xs text-right">金额</TableHead>
+                  <TableHead className="text-xs">参考号</TableHead>
+                  <TableHead className="text-xs">备注</TableHead>
+                  <TableHead className="text-xs text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sale.receipts.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="text-sm">{r.receipt_date}</TableCell>
+                    <TableCell className="text-sm">
+                      {paymentMethodOptions.find((o) => o.value === r.payment_method)?.label ?? r.payment_method}
+                    </TableCell>
+                    <TableCell className="text-sm text-right">${Number(r.amount).toLocaleString()}</TableCell>
+                    <TableCell className="text-sm">{r.reference_no ?? "-"}</TableCell>
+                    <TableCell className="text-sm">{r.notes ?? "-"}</TableCell>
+                    <TableCell className="text-sm text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-red-500"
+                        onClick={() => {
+                          if (confirm("确定删除此收款记录？")) {
+                            deleteReceiptMutation.mutate(r.id);
+                          }
+                        }}
+                        disabled={deleteReceiptMutation.isPending}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="text-sm text-muted-foreground text-center py-8">暂无收款记录</div>
+          )}
+        </TabsContent>
+
+        {/* 售后记录 Tab */}
+        <TabsContent value="aftersales" className="space-y-4 pt-4">
+          {/* 添加/编辑售后表单 */}
+          <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-medium flex items-center gap-1">
+                <AlertTriangle className="h-4 w-4" />
+                {aftersalesFormOpen ? (editingAftersalesId ? "编辑售后记录" : "添加售后记录") : "售后操作"}
+              </h4>
+              {!aftersalesFormOpen && (
+                <Button size="sm" onClick={() => { setAftersalesFormOpen(true); setEditingAftersalesId(null); resetAftersalesForm(); }}>
+                  <Plus className="h-3 w-3 mr-1" />添加售后
+                </Button>
+              )}
+            </div>
+            {aftersalesFormOpen && (
+              <form onSubmit={handleAftersalesSubmit} className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">日期 *</Label>
+                    <Input type="date" value={aftersalesDate} onChange={(e) => setAftersalesDate(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">类型 *</Label>
+                    <Select value={aftersalesType} onValueChange={setAftersalesType}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(aftersalesTypeMap).map(([key, label]) => (
+                          <SelectItem key={key} value={key}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">金额 *</Label>
+                    <Input type="number" step="0.01" value={aftersalesAmount} onChange={(e) => setAftersalesAmount(e.target.value)} placeholder="输入金额" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">状态</Label>
+                    <Select value={aftersalesStatus} onValueChange={setAftersalesStatus}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pending">待处理</SelectItem>
+                        <SelectItem value="processing">处理中</SelectItem>
+                        <SelectItem value="resolved">已解决</SelectItem>
+                        <SelectItem value="closed">已关闭</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">原因</Label>
+                  <Input value={aftersalesReason} onChange={(e) => setAftersalesReason(e.target.value)} placeholder="可选" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">备注</Label>
+                  <Input value={aftersalesNotes} onChange={(e) => setAftersalesNotes(e.target.value)} placeholder="可选" />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => { setAftersalesFormOpen(false); setEditingAftersalesId(null); resetAftersalesForm(); }}>取消</Button>
+                  <Button type="submit" size="sm" disabled={createAftersalesMutation.isPending || updateAftersalesMutation.isPending}>
+                    {createAftersalesMutation.isPending || updateAftersalesMutation.isPending ? "保存中..." : "保存"}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* 售后列表 */}
+          {sale.aftersales && sale.aftersales.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">日期</TableHead>
+                  <TableHead className="text-xs">类型</TableHead>
+                  <TableHead className="text-xs text-right">金额</TableHead>
+                  <TableHead className="text-xs">原因</TableHead>
+                  <TableHead className="text-xs">状态</TableHead>
+                  <TableHead className="text-xs text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sale.aftersales.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="text-sm">{a.record_date}</TableCell>
+                    <TableCell className="text-sm">{aftersalesTypeMap[a.type] ?? a.type}</TableCell>
+                    <TableCell className="text-sm text-right">${Number(a.amount).toLocaleString()}</TableCell>
+                    <TableCell className="text-sm">{a.reason ?? "-"}</TableCell>
+                    <TableCell className="text-sm">{a.status}</TableCell>
+                    <TableCell className="text-sm text-right">
+                      <div className="flex gap-1 justify-end">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => startEditAftersales(a)}
+                          title="编辑"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-red-500"
+                          onClick={() => {
+                            if (confirm("确定删除此售后记录？")) {
+                              deleteAftersalesMutation.mutate(a.id);
+                            }
+                          }}
+                          disabled={deleteAftersalesMutation.isPending}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="text-sm text-muted-foreground text-center py-8">暂无售后记录</div>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -271,7 +866,6 @@ function SaleFormDialog({
   const grossAmount = (Number(quantity) || 0) * (Number(unitPrice) || 0);
   const netAmount = grossAmount - (Number(scanFee) || 0) - (Number(discount) || 0) - (Number(commission) || 0);
 
-  // 弹窗打开时重置表单
   React.useEffect(() => {
     if (open) {
       resetForm();
@@ -347,7 +941,7 @@ function SaleFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { onOpenChange(false); resetForm(); } }}>
-      <DialogContent className="max-w-[500px]">
+      <DialogContent className="max-w-[500px] w-[95vw] max-h-[90vh] overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{initialData ? "编辑销售记录" : "新增销售记录"}</DialogTitle>
         </DialogHeader>
@@ -386,5 +980,298 @@ function SaleFormDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ==================== 批量导入按钮组件 ====================
+
+function FinishedProductBatchImportButton() {
+  const queryClient = useQueryClient();
+  const [isUploading, setIsUploading] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<any[]>([]);
+  const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
+  const [previewErrors, setPreviewErrors] = useState<string[]>([]);
+  const [parsedRows, setParsedRows] = useState<any[]>([]);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const downloadTemplate = () => {
+    const headers = FINISHED_PRODUCT_IMPORT_HEADERS.map((h) => h.cn).join(",");
+    const sample = FINISHED_PRODUCT_IMPORT_HEADERS.map(() => "").join(",");
+    const csvContent = `data:text/csv;charset=utf-8,\uFEFF${headers}\n${sample}`;
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "成品销售导入模板.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("模板已下载");
+  };
+
+  const parseCSV = (text: string) => {
+    const lines = text.trim().split("\n");
+    if (lines.length < 2) {
+      throw new Error("文件内容为空，至少需要表头+一行数据");
+    }
+
+    const rawHeaders = lines[0].split(",").map((h) => h.trim().replace(/^\uFEFF/, ""));
+    const headerMap: Record<string, string> = {};
+    const displayHeaders: string[] = [];
+
+    rawHeaders.forEach((h) => {
+      const found = FINISHED_PRODUCT_IMPORT_HEADERS.find((th) => th.cn === h || th.en === h);
+      if (found) {
+        headerMap[h] = found.en;
+        displayHeaders.push(found.cn);
+      } else {
+        headerMap[h] = h;
+        displayHeaders.push(h);
+      }
+    });
+
+    const rows = lines
+      .slice(1)
+      .map((line, idx) => {
+        const cells = line.split(",").map((c) => c.trim());
+        const row: Record<string, any> = {};
+        rawHeaders.forEach((h, i) => {
+          const key = headerMap[h] || h;
+          row[key] = cells[i] || "";
+        });
+        row.__line = idx + 2;
+        return row;
+      })
+      .filter((r) => Object.values(r).some((v) => String(v).trim() !== "" && v !== r.__line));
+
+    return {
+      headers: displayHeaders,
+      rawHeaders: rawHeaders.map((h) => headerMap[h] || h),
+      rows,
+    };
+  };
+
+  const validateRows = (rows: any[]) => {
+    const errors: string[] = [];
+    rows.forEach((row) => {
+      if (!row.customer_name) {
+        errors.push(`第${row.__line}行：客户名称不能为空`);
+      }
+      if (!row.sale_date) {
+        errors.push(`第${row.__line}行：销售日期不能为空`);
+      }
+      if (!row.product_code && !row.product_name) {
+        errors.push(`第${row.__line}行：产品编码和产品名称至少填一个`);
+      }
+      if (!row.quantity || isNaN(Number(row.quantity)) || Number(row.quantity) <= 0) {
+        errors.push(`第${row.__line}行：数量必须是大于0的数字`);
+      }
+      if (!row.unit_price || isNaN(Number(row.unit_price))) {
+        errors.push(`第${row.__line}行：单价必须是有效数字`);
+      }
+    });
+    return errors;
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportFile(file);
+    setIsUploading(true);
+    try {
+      const text = await file.text();
+      const { headers, rows } = parseCSV(text);
+
+      if (rows.length === 0) {
+        toast.error("未解析到有效数据行");
+        setImportFile(null);
+        return;
+      }
+
+      const errors = validateRows(rows);
+      setPreviewHeaders(headers);
+      setPreviewData(rows.slice(0, 5));
+      setPreviewErrors(errors);
+      setParsedRows(rows);
+    } catch (error: any) {
+      toast.error(error.message || "解析失败");
+      setImportFile(null);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleClearImport = () => {
+    setImportFile(null);
+    setPreviewData([]);
+    setParsedRows([]);
+    setPreviewErrors([]);
+    setPreviewHeaders([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (previewErrors.length > 0) {
+      toast.error("请先修正数据错误");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const res = await api.post("/v1/finished-product-sales/batch-import", {
+        rows: parsedRows,
+      });
+      const result = res.data;
+      toast.success(`导入完成：新增 ${result.created || 0} 条，更新 ${result.updated || 0} 条`);
+      queryClient.invalidateQueries({ queryKey: ["finished-product-sales"] });
+      setDialogOpen(false);
+      handleClearImport();
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || error.message || "导入失败");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  return (
+    <>
+      <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
+        <Upload className="h-4 w-4 mr-2" />
+        批量导入
+      </Button>
+
+      <Dialog open={dialogOpen} onOpenChange={(v) => { if (!v) { setDialogOpen(false); handleClearImport(); } }}>
+        <DialogContent className="max-w-[900px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5" />
+              批量导入成品销售记录
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div
+              className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-colors"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600 mb-2">
+                {importFile ? importFile.name : "点击或拖拽 CSV 文件到此处"}
+              </p>
+              <p className="text-sm text-gray-400">支持 .csv 格式（UTF-8 编码）</p>
+            </div>
+
+            <div className="text-sm text-gray-600 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="font-medium">CSV 格式要求（第一行标题，数据从第二行开始）：</p>
+                <Button variant="ghost" size="sm" onClick={downloadTemplate}>
+                  <Download className="h-4 w-4 mr-2" />
+                  下载模板
+                </Button>
+              </div>
+              <div className="bg-slate-50 p-3 rounded text-xs font-mono overflow-x-auto">
+                {FINISHED_PRODUCT_IMPORT_HEADERS.map((h) => h.cn).join(" | ")}
+              </div>
+              <p className="text-xs text-gray-500">
+                请使用中文表头或英文表头，系统会自动匹配字段
+              </p>
+            </div>
+
+            {previewErrors.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-red-500 font-medium text-sm">
+                  <AlertTriangle className="h-4 w-4" />
+                  发现 {previewErrors.length} 个问题，请修正后重新上传
+                </div>
+                <div className="bg-red-50 rounded-lg p-3 space-y-1 max-h-32 overflow-y-auto">
+                  {previewErrors.map((err, i) => (
+                    <p key={i} className="text-xs text-red-600">{err}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {previewData.length > 0 && (
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-slate-50 px-3 py-2 text-sm font-medium flex items-center justify-between">
+                  <span>导入预览</span>
+                  <Badge variant="secondary">{parsedRows.length} 条</Badge>
+                </div>
+                <div className="max-h-60 overflow-y-auto">
+                  <Table>
+                    <TableHeader className="bg-muted sticky top-0">
+                      <TableRow>
+                        {previewHeaders.map((key) => (
+                          <TableHead key={key} className="text-xs whitespace-nowrap">{key}</TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {previewData.map((row, i) => (
+                        <TableRow key={i}>
+                          {previewHeaders.map((key, j) => {
+                            const rawKey = FINISHED_PRODUCT_IMPORT_HEADERS.find((th) => th.cn === key)?.en || key;
+                            const val = row[rawKey] || "";
+                            const hasError = previewErrors.some(
+                              (e) => e.includes(`第${row.__line}行`) && !val
+                            );
+                            return (
+                              <TableCell key={j} className="text-xs max-w-[120px] truncate" title={String(val)}>
+                                {hasError ? (
+                                  <Badge variant="destructive" className="text-[10px]">必填</Badge>
+                                ) : (
+                                  String(val) || "-"
+                                )}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  {parsedRows.length > 5 && (
+                    <div className="px-2 py-2 text-xs text-gray-500 text-center bg-muted/30">
+                      ... 还有 {parsedRows.length - 5} 条数据
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setDialogOpen(false); handleClearImport(); }}>
+              <X className="h-4 w-4 mr-2" />
+              取消
+            </Button>
+            {importFile && (
+              <Button variant="ghost" onClick={handleClearImport} disabled={isUploading}>
+                重新选择
+              </Button>
+            )}
+            <Button
+              onClick={handleConfirmImport}
+              disabled={isUploading || parsedRows.length === 0 || previewErrors.length > 0}
+            >
+              {isUploading ? "导入中..." : `确认导入 (${parsedRows.length} 条)`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

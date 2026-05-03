@@ -7,6 +7,76 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models import SalesStatus
 
 
+# ==================== 收款记录 ====================
+
+class FinishedProductReceiptBase(BaseModel):
+    """成品销售收款记录基础"""
+    receipt_date: date = Field(..., description="收款日期")
+    amount: Decimal = Field(..., gt=0, description="收款金额")
+    payment_method: str = Field(..., max_length=50, description="支付方式")
+    bank_account_id: Optional[int] = Field(None, description="银行账户ID")
+    reference_no: Optional[str] = Field(None, max_length=100, description="参考号")
+    notes: Optional[str] = Field(None, description="备注")
+
+
+class FinishedProductReceiptCreate(FinishedProductReceiptBase):
+    pass
+
+
+class FinishedProductReceiptUpdate(BaseModel):
+    receipt_date: Optional[date] = None
+    amount: Optional[Decimal] = Field(None, gt=0)
+    payment_method: Optional[str] = Field(None, max_length=50)
+    bank_account_id: Optional[int] = None
+    reference_no: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+
+class FinishedProductReceiptResponse(FinishedProductReceiptBase):
+    """成品销售收款记录响应"""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    sale_id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+# ==================== 售后记录 ====================
+
+class FinishedProductAftersalesBase(BaseModel):
+    """成品销售售后记录基础"""
+    record_date: date = Field(..., description="记录日期")
+    type: str = Field(..., max_length=50, description="类型")  # return, refund, discount, compensation
+    amount: Decimal = Field(..., gt=0, description="金额")
+    reason: Optional[str] = Field(None, description="原因")
+    status: str = Field("pending", max_length=20, description="状态")
+    notes: Optional[str] = Field(None, description="备注")
+
+
+class FinishedProductAftersalesCreate(FinishedProductAftersalesBase):
+    pass
+
+
+class FinishedProductAftersalesUpdate(BaseModel):
+    record_date: Optional[date] = None
+    type: Optional[str] = Field(None, max_length=50)
+    amount: Optional[Decimal] = Field(None, gt=0)
+    reason: Optional[str] = None
+    status: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = None
+
+
+class FinishedProductAftersalesResponse(FinishedProductAftersalesBase):
+    """成品销售售后记录响应"""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    sale_id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+# ==================== 成品销售 ====================
+
 class FinishedProductSaleBase(BaseModel):
     """成品销售基础"""
     sale_date: date = Field(..., description="销售日期")
@@ -57,6 +127,8 @@ class FinishedProductSaleResponse(FinishedProductSaleBase):
     product_name: Optional[str] = None
     product_spec: Optional[str] = None
     salesperson_name: Optional[str] = None
+    receipts: List[FinishedProductReceiptResponse] = []
+    aftersales: List[FinishedProductAftersalesResponse] = []
 
 
 class FinishedProductSaleListResponse(BaseModel):

@@ -55,6 +55,22 @@ from .invoice import (
     InvoiceListResponse,
     InvoiceSummary,
 )
+from .finished_product_sales import (
+    FinishedProductSaleBase,
+    FinishedProductSaleCreate,
+    FinishedProductSaleUpdate,
+    FinishedProductSaleResponse,
+    FinishedProductSaleListResponse,
+    FinishedProductSaleSummary,
+    FinishedProductReceiptBase,
+    FinishedProductReceiptCreate,
+    FinishedProductReceiptUpdate,
+    FinishedProductReceiptResponse,
+    FinishedProductAftersalesBase,
+    FinishedProductAftersalesCreate,
+    FinishedProductAftersalesUpdate,
+    FinishedProductAftersalesResponse,
+)
 from .product import (
     ProductBase,
     ProductCreate,
