@@ -389,7 +389,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
   // Refresh detail data
   const refreshDetail = async () => {
     try {
-      await api.get(`/v1/finished-product-sales/${sale.id}`);
+      const res = await api.get(`/v1/finished-product-sales/${sale.id}`);
       // Update the detail sale data in parent would require lifting state,
       // but we can invalidate the list query to refresh
       queryClient.invalidateQueries({ queryKey: ["finished-product-sales"] });
@@ -850,6 +850,7 @@ function SaleFormDialog({
   initialData: Sale | null;
   onSuccess: () => void;
 }) {
+  const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [saleDate, setSaleDate] = useState("");
@@ -946,7 +947,7 @@ function SaleFormDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2"><Label>销售日期 *</Label><Input type="date" value={saleDate} onChange={(e) => setSaleDate(e.target.value)} /></div>
+            <div className="space-y-2"><Label>销售日期 *</Label><Input type="date" value={saleDate} onChange={(e) => setSaleDate(e.target.value)} /></div>              
             <div className="space-y-2">
               <Label>客户 *</Label>
               <Select value={customerId} onValueChange={(v) => setCustomerId(v ?? "")}>

@@ -19,6 +19,14 @@ class ProductBase(BaseModel):
     portion_weight_g: Optional[int] = Field(None, description="单份重量(g)")
     portion_boxes: Optional[int] = Field(None, description="份内盒数")
     is_active: bool = Field(True, description="是否启用")
+    # 成品价格策略
+    cost_price: Optional[Decimal] = Field(None, description="成本价（自动计算）")
+    suggested_retail_price: Optional[Decimal] = Field(None, description="建议零售价")
+    wholesale_price: Optional[Decimal] = Field(None, description="批发价")
+    min_price: Optional[Decimal] = Field(None, description="最低价")
+    # 成品库存
+    stock_quantity: Optional[int] = Field(0, description="库存数量")
+    safety_stock: Optional[int] = Field(0, description="安全库存线")
     notes: Optional[str] = Field(None, description="备注")
 
 
@@ -39,6 +47,14 @@ class ProductUpdate(BaseModel):
     portion_weight_g: Optional[int] = Field(None)
     portion_boxes: Optional[int] = Field(None)
     is_active: Optional[bool] = Field(None)
+    # 成品价格策略
+    cost_price: Optional[Decimal] = Field(None)
+    suggested_retail_price: Optional[Decimal] = Field(None)
+    wholesale_price: Optional[Decimal] = Field(None)
+    min_price: Optional[Decimal] = Field(None)
+    # 成品库存
+    stock_quantity: Optional[int] = Field(None)
+    safety_stock: Optional[int] = Field(None)
     notes: Optional[str] = None
 
 

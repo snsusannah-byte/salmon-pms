@@ -141,7 +141,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
   const { data: productsData } = useQuery({
     queryKey: ["products", "whole_fish"],
     queryFn: async () => {
-      const res = await api.get("/v1/products/?category=whole_fish&limit=500");
+      const res = await api.get("/v1/products/?category=WHOLE_FISH&limit=500");
       return res.data.items as { id: number; name: string; spec: string | null }[];
     },
     enabled: open,

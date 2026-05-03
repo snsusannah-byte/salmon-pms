@@ -357,8 +357,8 @@ export function InvoicesPage() {
               data?.items.map((invoice) => {
                 const customsInfo = customsStatusMap[invoice.customs_status] ?? { label: invoice.customs_status, color: "" };
                 const exchangeInfo = exchangeStatusMap[invoice.exchange_status] ?? { label: invoice.exchange_status, color: "" };
-                // 规格汇总：产品名称 + 规格 + 箱数
-                const specSummary = invoice.products.map(p => `${p.product_name} ${p.product_spec}(${p.box_count})`).join(", ");
+                // 规格汇总：规格 + 箱数
+                const specSummary = invoice.products.map(p => `${p.product_spec}(${p.box_count})`).join(", ");
                 return (
                   <TableRow key={invoice.id}>
                     <TableCell className="font-medium">

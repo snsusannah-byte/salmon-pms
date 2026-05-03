@@ -15,6 +15,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { SalespersonPage } from "@/pages/SalespersonPage";
 import { CommissionPage } from "@/pages/CommissionPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
+import NotificationsPage from "@/pages/NotificationsPage";
 
 const router = createBrowserRouter([
   {
@@ -39,6 +40,7 @@ const router = createBrowserRouter([
       { path: "settings", element: <SettingsPage /> },
       { path: "salespersons", element: <SalespersonPage /> },
       { path: "commissions", element: <CommissionPage /> },
+      { path: "notifications", element: <NotificationsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

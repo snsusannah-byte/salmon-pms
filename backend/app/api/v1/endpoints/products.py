@@ -10,7 +10,6 @@ from app.schemas.product import (
     ProductResponse,
     ProductListResponse,
     ProductBOMCreate,
-    ProductBOMUpdate,
     ProductBOMResponse,
     ProductPackagingCreate,
     ProductPackagingUpdate,
@@ -61,6 +60,12 @@ async def list_products(
             "portion_boxes": item.portion_boxes,
             "is_active": item.is_active,
             "notes": item.notes,
+            "cost_price": item.cost_price,
+            "suggested_retail_price": item.suggested_retail_price,
+            "wholesale_price": item.wholesale_price,
+            "min_price": item.min_price,
+            "stock_quantity": item.stock_quantity,
+            "safety_stock": item.safety_stock,
             "created_at": item.created_at,
             "updated_at": item.updated_at,
         }
@@ -91,6 +96,12 @@ async def create_product(
         portion_boxes=product.portion_boxes,
         is_active=product.is_active,
         notes=product.notes,
+        cost_price=product.cost_price,
+        suggested_retail_price=product.suggested_retail_price,
+        wholesale_price=product.wholesale_price,
+        min_price=product.min_price,
+        stock_quantity=product.stock_quantity,
+        safety_stock=product.safety_stock,
         created_at=product.created_at,
         updated_at=product.updated_at,
     )
@@ -123,6 +134,12 @@ async def get_product(
         portion_boxes=product.portion_boxes,
         is_active=product.is_active,
         notes=product.notes,
+        cost_price=product.cost_price,
+        suggested_retail_price=product.suggested_retail_price,
+        wholesale_price=product.wholesale_price,
+        min_price=product.min_price,
+        stock_quantity=product.stock_quantity,
+        safety_stock=product.safety_stock,
         created_at=product.created_at,
         updated_at=product.updated_at,
     )
@@ -156,6 +173,12 @@ async def update_product(
         portion_boxes=product.portion_boxes,
         is_active=product.is_active,
         notes=product.notes,
+        cost_price=product.cost_price,
+        suggested_retail_price=product.suggested_retail_price,
+        wholesale_price=product.wholesale_price,
+        min_price=product.min_price,
+        stock_quantity=product.stock_quantity,
+        safety_stock=product.safety_stock,
         created_at=product.created_at,
         updated_at=product.updated_at,
     )
@@ -183,6 +206,34 @@ async def get_series_codes(
     """获取成品系列选项（系列代号+系列名称），用于下拉选择"""
     options = await ProductService.get_series_options(db)
     return options
+
+
+@router.get("/{product_id}/cost")
+async def get_product_cost(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """自动计算成品成本"""
+    cost = await ProductService.calculate_cost(db, product_id)
+    return {"product_id": product_id, "cost_price": cost}
+
+
+@router.get("/low-stock")
+async def get_low_stock_products(
+    db: AsyncSession = Depends(get_db),
+):
+    """获取低库存成品列表"""
+    products = await ProductService.check_low_stock(db)
+    return [
+        {
+            "id": p.id,
+            "code": p.code,
+            "name": p.name,
+            "stock_quantity": p.stock_quantity,
+            "safety_stock": p.safety_stock,
+        }
+        for p in products
+    ]
 
 
 # ==================== BOM管理 ====================

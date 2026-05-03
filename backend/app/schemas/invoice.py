@@ -51,11 +51,11 @@ class InvoiceBase(BaseModel):
     kill_date: Optional[date] = Field(None, description="宰杀日期")
     arrival_date: Optional[date] = Field(None, description="到货日期")
     
-    processing_plant_id: int = Field(..., description="加工厂ID")
-    fish_farm_id: int = Field(..., description="渔场ID")
-    exporter_id: int = Field(..., description="出口商ID")
+    processing_plant_id: Optional[int] = Field(None, description="加工厂ID")
+    fish_farm_id: Optional[int] = Field(None, description="渔场ID")
+    exporter_id: Optional[int] = Field(None, description="出口商ID")
     
-    total_amount_usd: Decimal = Field(..., ge=0, description="总金额(USD)")
+    total_amount_usd: Optional[Decimal] = Field(None, ge=0, description="总金额(USD)")
     total_boxes: int = Field(0, ge=0, description="总箱数")
     total_weight_kg: Decimal = Field(Decimal("0"), ge=0, description="总净重(kg)")
     

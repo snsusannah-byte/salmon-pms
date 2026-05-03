@@ -4,7 +4,6 @@ from enum import Enum as PyEnum
 from typing import List, Optional
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -281,6 +280,16 @@ class Product(Base, TimestampMixin):
     portion_boxes: Mapped[Optional[int]] = mapped_column(Integer)        # 份内盒数
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text)
+    
+    # 成品价格策略（仅成品使用）
+    cost_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 成本价（自动计算：BOM成本+包装物成本）
+    suggested_retail_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 建议零售价
+    wholesale_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 批发价
+    min_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 最低价
+    
+    # 成品库存管理（仅成品使用）
+    stock_quantity: Mapped[Optional[int]] = mapped_column(Integer, default=0)  # 库存数量
+    safety_stock: Mapped[Optional[int]] = mapped_column(Integer, default=0)  # 安全库存线
     
     # 成品特有的BOM关系
     boms: Mapped[List["ProductBOM"]] = relationship("ProductBOM", 

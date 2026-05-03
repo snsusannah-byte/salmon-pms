@@ -18,9 +18,6 @@ AsyncSessionLocal = async_sessionmaker(
 
 async def get_db():
     async with AsyncSessionLocal() as session:
-        # 启用 SQLite 外键约束
-        from sqlalchemy import text
-        await session.execute(text("PRAGMA foreign_keys = ON"))
         try:
             yield session
         finally:

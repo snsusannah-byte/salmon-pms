@@ -222,25 +222,6 @@ export function InvoiceDetailDrawer({ invoiceId, open, onOpenChange, onEdit }: I
             </div>
           </div>
 
-          {/* 金额汇总 */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-foreground">金额汇总</h3>
-            <div className="grid grid-cols-3 gap-3 text-sm bg-muted p-3 rounded-md">
-              <div className="text-center">
-                <div className="text-muted-foreground text-xs">总箱数</div>
-                <div className="text-lg font-semibold">{invoice.total_boxes}</div>
-              </div>
-              <div className="text-center">
-                <div className="text-muted-foreground text-xs">总净重</div>
-                <div className="text-lg font-semibold">{Number(invoice.total_weight_kg).toLocaleString()} kg</div>
-              </div>
-              <div className="text-center">
-                <div className="text-muted-foreground text-xs">总金额(USD)</div>
-                <div className="text-lg font-semibold">${Number(invoice.total_amount_usd).toLocaleString()}</div>
-              </div>
-            </div>
-          </div>
-
           {/* 产品明细 */}
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-foreground">产品明细</h3>

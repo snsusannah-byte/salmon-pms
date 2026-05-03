@@ -13,6 +13,7 @@ from app.api.v1.endpoints import (
     dashboard,
     settings,
     salespersons,
+    notifications,
 )
 
 api_router = APIRouter()
@@ -29,3 +30,4 @@ api_router.include_router(reports.router, prefix="/reports", tags=["报表中心
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["数据看板"])
 api_router.include_router(settings.router, prefix="/settings", tags=["系统设置"])
 api_router.include_router(salespersons.router, prefix="/salespersons", tags=["业务员管理"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["通知中心"])

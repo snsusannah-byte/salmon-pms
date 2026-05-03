@@ -1,9 +1,7 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 from decimal import Decimal
-from datetime import datetime, date
 
 from sqlalchemy import select, func, and_
-from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Product, ProductBOM, ProductCategory
@@ -121,6 +119,12 @@ class ProductService:
             portion_boxes=data.portion_boxes,
             is_active=data.is_active,
             notes=data.notes,
+            cost_price=data.cost_price,
+            suggested_retail_price=data.suggested_retail_price,
+            wholesale_price=data.wholesale_price,
+            min_price=data.min_price,
+            stock_quantity=data.stock_quantity,
+            safety_stock=data.safety_stock,
         )
         db.add(product)
         await db.commit()
@@ -238,10 +242,48 @@ class ProductService:
 
         return {"series_codes": codes, "series_names": names}
 
+    @staticmethod
+    async def calculate_cost(db: AsyncSession, product_id: int) -> Decimal:
+        """自动计算成品成本价：BOM物料成本 + 包装物成本"""
+        product = await ProductService.get_by_id(db, product_id)
+        if not product or product.category != ProductCategory.FINISHED_PRODUCT:
+            return Decimal("0")
+        
+        total_cost = Decimal("0")
+        
+        # 计算BOM成本
+        boms = await ProductService.get_boms(db, product_id)
+        for bom in boms:
+            if bom.material:
+                # 这里简化处理，实际应该取物料的采购单价
+                # 如果没有采购价，默认为0
+                material_price = getattr(bom.material, 'unit_price', None) or Decimal("0")
+                total_cost += material_price * bom.quantity
+        
+        # 计算包装物成本
+        packagings = await ProductService.get_packagings(db, product_id)
+        for pkg in packagings:
+            if pkg.material:
+                material_price = getattr(pkg.material, 'unit_price', None) or Decimal("0")
+                total_cost += material_price * pkg.quantity
+        
+        return total_cost
+
+    @staticmethod
+    async def check_low_stock(db: AsyncSession) -> List[Product]:
+        """查询低库存成品（库存 < 安全库存线）"""
+        result = await db.execute(
+            select(Product)
+            .where(Product.category == ProductCategory.FINISHED_PRODUCT)
+            .where(Product.stock_quantity < Product.safety_stock)
+            .where(Product.safety_stock > 0)
+        )
+        return result.scalars().all()
+
     # ==================== 包装物管理 ====================
 
     @staticmethod
-    async def get_packagings(db: AsyncSession, product_id: int) -> List[ProductPackaging]:
+    async def get_packagings(db: AsyncSession, product_id: int) -> List[Any]:
         """获取成品包装物清单"""
         from app.models import ProductPackaging
         result = await db.execute(
@@ -250,7 +292,7 @@ class ProductService:
         return result.scalars().all()
 
     @staticmethod
-    async def create_packaging(db: AsyncSession, product_id: int, data) -> ProductPackaging:
+    async def create_packaging(db: AsyncSession, product_id: int, data) -> Any:
         """创建包装物"""
         from app.models import ProductPackaging
         packaging = ProductPackaging(
@@ -267,7 +309,7 @@ class ProductService:
         return packaging
 
     @staticmethod
-    async def update_packaging(db: AsyncSession, packaging_id: int, data) -> Optional[ProductPackaging]:
+    async def update_packaging(db: AsyncSession, packaging_id: int, data) -> Optional[Any]:
         """更新包装物"""
         from app.models import ProductPackaging
         result = await db.execute(

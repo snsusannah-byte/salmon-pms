@@ -8,7 +8,10 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     
     # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///./salmon_pms_dev.db"
+    # SQLite (开发环境保留)
+    # DATABASE_URL: str = "sqlite+aiosqlite:///./salmon_pms_dev.db"
+    # PostgreSQL (生产环境)
+    DATABASE_URL: str = "postgresql+asyncpg://salmon:salmon123@localhost:5432/salmon_pms"
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

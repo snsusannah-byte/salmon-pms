@@ -95,15 +95,6 @@ async def _build_sale_response(
     )
 
 
-@router.get("/summary", response_model=FinishedProductSaleSummary)
-async def get_finished_product_sales_summary(
-    db: AsyncSession = Depends(get_db),
-):
-    """成品销售汇总统计"""
-    summary = await FinishedProductSaleService.get_summary(db)
-    return FinishedProductSaleSummary(**summary)
-
-
 # ==================== 成品销售 CRUD ====================
 
 
@@ -326,6 +317,18 @@ async def delete_finished_product_aftersales(
     """删除成品销售售后记录"""
     await FinishedProductSaleService.delete_aftersales(db, record_id)
     return None
+
+
+# ==================== 汇总 ====================
+
+
+@router.get("/summary", response_model=FinishedProductSaleSummary)
+async def get_finished_product_sales_summary(
+    db: AsyncSession = Depends(get_db),
+):
+    """成品销售汇总统计"""
+    summary = await FinishedProductSaleService.get_summary(db)
+    return FinishedProductSaleSummary(**summary)
 
 
 # ==================== 批量导入 ====================

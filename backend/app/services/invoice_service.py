@@ -126,6 +126,11 @@ class InvoiceService:
         products_data = data.products if data.products else []
         invoice_data = data.model_dump(exclude={"products"}, exclude_unset=True)
         
+        # PostgreSQL 外键约束：把 0 转为 None
+        for fk_field in ["processing_plant_id", "fish_farm_id", "exporter_id"]:
+            if fk_field in invoice_data and invoice_data[fk_field] == 0:
+                invoice_data[fk_field] = None
+        
         # 处理日期
         for field in ["invoice_date", "kill_date", "arrival_date"]:
             if field in invoice_data and invoice_data[field]:
@@ -163,6 +168,14 @@ class InvoiceService:
         
         await db.commit()
         await db.refresh(invoice)
+        
+        # 生成通知（预计到货 + 预计税金）
+        try:
+            from app.services.notification_service import InvoiceNotificationService
+            await InvoiceNotificationService.create_notifications(db, invoice.id)
+        except Exception as e:
+            print(f"通知生成失败: {e}")
+        
         return invoice
     
     @staticmethod
