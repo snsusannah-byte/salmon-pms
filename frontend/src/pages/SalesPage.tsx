@@ -537,7 +537,7 @@ function SaleFormDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>批次 *</Label>
-              <Select value={batchId} onValueChange={setBatchId}>
+              <Select value={batchId} onValueChange={(v) => setBatchId(v ?? "")}>
                 <SelectTrigger><SelectValue placeholder="选择批次" /></SelectTrigger>
                 <SelectContent>
                   {batchesData?.items?.map((b: any) => (
@@ -552,7 +552,7 @@ function SaleFormDialog({
             </div>
             <div className="space-y-2">
               <Label>客户 *</Label>
-              <Select value={customerId} onValueChange={setCustomerId}>
+              <Select value={customerId} onValueChange={(v) => setCustomerId(v ?? "")}>
                 <SelectTrigger><SelectValue placeholder="选择客户" /></SelectTrigger>
                 <SelectContent>
                   {customersData?.items?.map((c: any) => (

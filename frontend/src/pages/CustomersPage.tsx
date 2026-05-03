@@ -20,9 +20,19 @@ interface Company {
   id: number;
   name: string;
   chinese_name: string | null;
+  type?: string;
+  code?: string | null;
   contact_person: string | null;
   phone: string | null;
+  email?: string | null;
   address: string | null;
+  registration_code?: string | null;
+  enterprise_registration_no?: string | null;
+  coc_cert_no?: string | null;
+  farming_area?: string | null;
+  website?: string | null;
+  bank_name?: string | null;
+  bank_account?: string | null;
   logistics_info: string | null;
   credit_limit: string;
   salesperson_id: number | null;
@@ -55,7 +65,7 @@ export function CustomersPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
-  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [editingCompany, setEditingCompany] = useState<any>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Company | null>(null);
 

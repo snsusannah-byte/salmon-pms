@@ -531,13 +531,13 @@ function TransactionsTab() {
             <div><Label>日期</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-2">
               <div><Label>类型</Label>
-                <Select value={type} onValueChange={setType}>
+                <Select value={type} onValueChange={(v) => setType(v ?? "")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{Object.entries(transactionTypeMap).map(([k,v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div><Label>分类</Label>
-                <Select value={category} onValueChange={setCategory}>
+                <Select value={category} onValueChange={(v) => setCategory(v ?? "")}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{Object.entries(transactionCategoryMap).map(([k,v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
                 </Select>

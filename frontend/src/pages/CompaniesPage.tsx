@@ -53,6 +53,9 @@ interface Company {
   bank_account: string | null;
   cooperation_date: string | null;
   credit_limit: string;
+  logistics_info?: string | null;
+  salesperson_id?: number | null;
+  customer_category?: string | null;
   notes: string | null;
   is_active: boolean;
   created_at: string;
@@ -72,7 +75,7 @@ export function CompaniesPage() {
   const [type, setType] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
-  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [editingCompany, setEditingCompany] = useState<any>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Company | null>(null);
 

@@ -389,7 +389,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
   // Refresh detail data
   const refreshDetail = async () => {
     try {
-      const res = await api.get(`/v1/finished-product-sales/${sale.id}`);
+      await api.get(`/v1/finished-product-sales/${sale.id}`);
       // Update the detail sale data in parent would require lifting state,
       // but we can invalidate the list query to refresh
       queryClient.invalidateQueries({ queryKey: ["finished-product-sales"] });
@@ -634,7 +634,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">支付方式</Label>
-                    <Select value={receiptMethod} onValueChange={setReceiptMethod}>
+                    <Select value={receiptMethod} onValueChange={(v) => setReceiptMethod(v ?? "")}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {paymentMethodOptions.map((opt) => (
@@ -733,7 +733,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">类型 *</Label>
-                    <Select value={aftersalesType} onValueChange={setAftersalesType}>
+                    <Select value={aftersalesType} onValueChange={(v) => setAftersalesType(v ?? "")}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         {Object.entries(aftersalesTypeMap).map(([key, label]) => (
@@ -748,7 +748,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">状态</Label>
-                    <Select value={aftersalesStatus} onValueChange={setAftersalesStatus}>
+                    <Select value={aftersalesStatus} onValueChange={(v) => setAftersalesStatus(v ?? "")}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="pending">待处理</SelectItem>
@@ -850,7 +850,6 @@ function SaleFormDialog({
   initialData: Sale | null;
   onSuccess: () => void;
 }) {
-  const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [saleDate, setSaleDate] = useState("");
@@ -950,14 +949,14 @@ function SaleFormDialog({
             <div className="space-y-2"><Label>销售日期 *</Label><Input type="date" value={saleDate} onChange={(e) => setSaleDate(e.target.value)} /></div>
             <div className="space-y-2">
               <Label>客户 *</Label>
-              <Select value={customerId} onValueChange={setCustomerId}>
+              <Select value={customerId} onValueChange={(v) => setCustomerId(v ?? "")}>
                 <SelectTrigger><SelectValue placeholder="选择客户" /></SelectTrigger>
                 <SelectContent>{customersData?.items?.map((c: any) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label>成品 *</Label>
-              <Select value={productId} onValueChange={setProductId}>
+              <Select value={productId} onValueChange={(v) => setProductId(v ?? "")}>
                 <SelectTrigger><SelectValue placeholder="选择成品" /></SelectTrigger>
                 <SelectContent>{productsData?.items?.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name} {p.spec ?? ""}</SelectItem>)}</SelectContent>
               </Select>

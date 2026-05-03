@@ -538,7 +538,7 @@ export default function ProductsPage() {
                 <PackagingConfigSection
                   materials={bomMaterials ?? []}
                   packagings={formPackagings}
-                  onChange={setFormPackagings}
+                  onChange={setFormPackagings as (items: any[]) => void}
                 />
               </>
             ) : (
