@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models import InvoiceStatus, ExchangeStatus
 
@@ -74,6 +74,26 @@ class InvoiceBase(BaseModel):
     exchange_status: Optional[ExchangeStatus] = Field(ExchangeStatus.NOT_EXCHANGED, description="购汇状态")
     notes: Optional[str] = Field(None, description="备注")
 
+    @field_validator("customs_status", mode="before")
+    @classmethod
+    def normalize_customs_status(cls, v):
+        """同时接受大写(name)和小写(value)"""
+        if isinstance(v, str):
+            v_lower = v.lower()
+            if v_lower in ("pending_shipment", "in_transit", "pending_customs", "customs_processing", "cleared", "picked_up"):
+                return v_lower
+        return v
+
+    @field_validator("exchange_status", mode="before")
+    @classmethod
+    def normalize_exchange_status(cls, v):
+        """同时接受大写(name)和小写(value)"""
+        if isinstance(v, str):
+            v_lower = v.lower()
+            if v_lower in ("not_exchanged", "partial", "completed"):
+                return v_lower
+        return v
+
 
 class InvoiceCreate(InvoiceBase):
     """创建发票请求"""
@@ -111,6 +131,26 @@ class InvoiceUpdate(BaseModel):
     
     # 产品明细（编辑时可选）
     products: Optional[List[InvoiceProductCreate]] = Field(None, description="产品明细列表（编辑时覆盖旧数据）")
+
+    @field_validator("customs_status", mode="before")
+    @classmethod
+    def normalize_customs_status(cls, v):
+        """同时接受大写(name)和小写(value)"""
+        if isinstance(v, str):
+            v_lower = v.lower()
+            if v_lower in ("pending_shipment", "in_transit", "pending_customs", "customs_processing", "cleared", "picked_up"):
+                return v_lower
+        return v
+
+    @field_validator("exchange_status", mode="before")
+    @classmethod
+    def normalize_exchange_status(cls, v):
+        """同时接受大写(name)和小写(value)"""
+        if isinstance(v, str):
+            v_lower = v.lower()
+            if v_lower in ("not_exchanged", "partial", "completed"):
+                return v_lower
+        return v
 
 
 class InvoiceResponse(InvoiceBase):
