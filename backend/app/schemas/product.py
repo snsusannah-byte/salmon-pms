@@ -18,15 +18,24 @@ class ProductBase(BaseModel):
     series_name: Optional[str] = Field(None, max_length=100, description="系列名称 如三文鱼纯享")
     portion_weight_g: Optional[int] = Field(None, description="单份重量(g)")
     portion_boxes: Optional[int] = Field(None, description="份内盒数")
-    is_active: bool = Field(True, description="是否启用")
-    # 成品价格策略
-    cost_price: Optional[Decimal] = Field(None, description="成本价（自动计算）")
+    # 成品价格策略与库存
+    cost_price: Optional[Decimal] = Field(None, description="成本价")
     suggested_retail_price: Optional[Decimal] = Field(None, description="建议零售价")
     wholesale_price: Optional[Decimal] = Field(None, description="批发价")
     min_price: Optional[Decimal] = Field(None, description="最低价")
-    # 成品库存
-    stock_quantity: Optional[int] = Field(0, description="库存数量")
+    is_active: bool = Field(True, description="是否启用")
+    notes: Optional[str] = Field(None, description="备注")
+    # V3: 品牌
+    brand: Optional[str] = Field(None, max_length=100, description="品牌名称：无品牌/中挪三文鱼/海兴悦三文鱼/北辰海选汇")
+    # V3: 物料管理专用字段
+    supplier_id: Optional[int] = Field(None, description="供应商ID")
+    lead_time_days: Optional[int] = Field(None, description="供货周期(天)")
+    last_purchase_price: Optional[Decimal] = Field(None, description="最近采购价")
+    
+    stock_quantity: Optional[int] = Field(0, description="库存数量（件数，包装物/副产品/配套）")
+    stock_weight_kg: Optional[Decimal] = Field(Decimal("0"), description="库存重量(kg)，成品肉专用")
     safety_stock: Optional[int] = Field(0, description="安全库存线")
+    stock_quantity: Optional[int] = Field(0, description="是否启用")
     notes: Optional[str] = Field(None, description="备注")
 
 
@@ -46,16 +55,19 @@ class ProductUpdate(BaseModel):
     series_name: Optional[str] = Field(None, max_length=100)
     portion_weight_g: Optional[int] = Field(None)
     portion_boxes: Optional[int] = Field(None)
-    is_active: Optional[bool] = Field(None)
-    # 成品价格策略
     cost_price: Optional[Decimal] = Field(None)
     suggested_retail_price: Optional[Decimal] = Field(None)
     wholesale_price: Optional[Decimal] = Field(None)
     min_price: Optional[Decimal] = Field(None)
-    # 成品库存
     stock_quantity: Optional[int] = Field(None)
+    stock_weight_kg: Optional[Decimal] = Field(None)
     safety_stock: Optional[int] = Field(None)
+    is_active: Optional[bool] = Field(None)
     notes: Optional[str] = None
+    brand: Optional[str] = Field(None, max_length=100)  # V3: 品牌
+    supplier_id: Optional[int] = Field(None)  # V3: 物料-供应商
+    lead_time_days: Optional[int] = Field(None)  # V3: 物料-供货周期
+    last_purchase_price: Optional[Decimal] = Field(None)  # V3: 物料-最近采购价
 
 
 class ProductResponse(ProductBase):
@@ -141,3 +153,58 @@ class ProductPackagingResponse(ProductPackagingBase):
     material_name: Optional[str] = Field(None, description="物料名称")
     created_at: datetime
     updated_at: datetime
+
+
+# 配套产品 Schemas
+class ProductAccessoryBase(BaseModel):
+    """配套产品基础"""
+    accessory_id: int = Field(..., description="配套产品ID")
+    quantity: Decimal = Field(..., gt=0, description="每份用量")
+    unit: str = Field("个", max_length=20, description="用量单位")
+    notes: Optional[str] = Field(None, description="备注")
+
+
+class ProductAccessoryCreate(ProductAccessoryBase):
+    """创建配套产品"""
+    pass
+
+
+class ProductAccessoryUpdate(BaseModel):
+    """更新配套产品"""
+    accessory_id: Optional[int] = Field(None)
+    quantity: Optional[Decimal] = Field(None, gt=0)
+    unit: Optional[str] = Field(None, max_length=20)
+    notes: Optional[str] = None
+
+
+class ProductAccessoryResponse(ProductAccessoryBase):
+    """配套产品响应"""
+    model_config = ConfigDict(from_attributes=True)
+    
+    id: int
+    product_id: int
+    accessory_name: Optional[str] = Field(None, description="配套产品名称")
+    created_at: datetime
+    updated_at: datetime
+
+
+# 成本与库存响应 Schemas
+class ProductCostResponse(BaseModel):
+    """成品成本计算响应"""
+    product_id: int
+    product_name: str
+    bom_cost: Decimal
+    packaging_cost: Decimal
+    total_cost: Decimal
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductLowStockResponse(BaseModel):
+    """低库存响应"""
+    id: int
+    code: str
+    name: str
+    category: str
+    stock_quantity: int
+    safety_stock: int
+    model_config = ConfigDict(from_attributes=True)

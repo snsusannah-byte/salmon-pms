@@ -419,8 +419,7 @@ export function BatchesPage() {
                         {statusInfo.label}
                       </Badge>
                     </TableCell>
-                    <TableCell>{batch.invoice_nos}</TableCell>
-                    <TableCell>{batch.total_boxes}</TableCell>
+                    <TableCell>{batch.invoice_nos?.replace(/&/g, ", ")}</TableCell>
                     <TableCell>
                       {Number(batch.total_weight_kg || 0).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                     </TableCell>

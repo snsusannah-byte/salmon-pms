@@ -14,6 +14,9 @@ from app.schemas.product import (
     ProductPackagingCreate,
     ProductPackagingUpdate,
     ProductPackagingResponse,
+    ProductAccessoryCreate,
+    ProductAccessoryUpdate,
+    ProductAccessoryResponse,
 )
 from app.services.product_service import ProductService
 
@@ -23,6 +26,7 @@ router = APIRouter()
 @router.get("/", response_model=ProductListResponse)
 async def list_products(
     category: Optional[str] = Query(None, description="产品分类"),
+    categories: Optional[str] = Query(None, description="产品分类列表，逗号分隔"),
     search: Optional[str] = Query(None, description="搜索"),
     is_active: Optional[bool] = Query(None, description="是否启用"),
     skip: int = Query(0, ge=0),
@@ -31,9 +35,22 @@ async def list_products(
 ):
     """产品列表"""
     cat_enum = None
-    if category:
+    cat_enums = None
+    if categories:
+        cat_enums = []
+        for cat in categories.split(","):
+            cat_upper = cat.strip().upper()
+            try:
+                cat_enums.append(ProductCategory(cat_upper))
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"无效的产品分类: {cat}",
+                )
+    elif category:
+        cat_upper = category.strip().upper()
         try:
-            cat_enum = ProductCategory(category)
+            cat_enum = ProductCategory(cat_upper)
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -41,7 +58,7 @@ async def list_products(
             )
     
     items, total = await ProductService.list_products(
-        db, category=cat_enum, search=search, is_active=is_active, skip=skip, limit=limit
+        db, category=cat_enum, categories=cat_enums, search=search, is_active=is_active, skip=skip, limit=limit
     )
     
     result_items = []
@@ -453,5 +470,130 @@ async def delete_product_packaging(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"包装物 ID={packaging_id} 不存在",
+        )
+    return None
+
+
+# ==================== 配套产品管理 ====================
+
+@router.get("/{product_id}/accessories", response_model=List[ProductAccessoryResponse])
+async def get_product_accessories(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取成品配套产品列表"""
+    product = await ProductService.get_by_id(db, product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"产品 ID={product_id} 不存在",
+        )
+
+    accessories = await ProductService.get_accessories(db, product_id)
+
+    result = []
+    for acc in accessories:
+        accessory_name = None
+        if acc.accessory:
+            accessory_name = acc.accessory.name
+
+        result.append(ProductAccessoryResponse(
+            id=acc.id,
+            product_id=acc.product_id,
+            accessory_id=acc.accessory_id,
+            accessory_name=accessory_name,
+            quantity=acc.quantity,
+            unit=acc.unit,
+            notes=acc.notes,
+            created_at=acc.created_at,
+            updated_at=acc.updated_at,
+        ))
+
+    return result
+
+
+@router.post("/{product_id}/accessories", response_model=ProductAccessoryResponse, status_code=status.HTTP_201_CREATED)
+async def create_product_accessory(
+    product_id: int,
+    data: ProductAccessoryCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """创建配套产品"""
+    product = await ProductService.get_by_id(db, product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"产品 ID={product_id} 不存在",
+        )
+
+    if product.category != ProductCategory.FINISHED_PRODUCT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只有成品才能配置配套产品",
+        )
+
+    accessory = await ProductService.create_accessory(db, product_id, data)
+
+    accessory_name = None
+    if accessory.accessory:
+        accessory_name = accessory.accessory.name
+
+    return ProductAccessoryResponse(
+        id=accessory.id,
+        product_id=accessory.product_id,
+        accessory_id=accessory.accessory_id,
+        accessory_name=accessory_name,
+        quantity=accessory.quantity,
+        unit=accessory.unit,
+        notes=accessory.notes,
+        created_at=accessory.created_at,
+        updated_at=accessory.updated_at,
+    )
+
+
+@router.put("/{product_id}/accessories/{accessory_id}", response_model=ProductAccessoryResponse)
+async def update_product_accessory(
+    product_id: int,
+    accessory_id: int,
+    data: ProductAccessoryUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新配套产品"""
+    accessory = await ProductService.update_accessory(db, accessory_id, data)
+    if not accessory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"配套产品 ID={accessory_id} 不存在",
+        )
+
+    accessory_name = None
+    if accessory.accessory:
+        accessory_name = accessory.accessory.name
+
+    return ProductAccessoryResponse(
+        id=accessory.id,
+        product_id=accessory.product_id,
+        accessory_id=accessory.accessory_id,
+        accessory_name=accessory_name,
+        quantity=accessory.quantity,
+        unit=accessory.unit,
+        notes=accessory.notes,
+        created_at=accessory.created_at,
+        updated_at=accessory.updated_at,
+    )
+
+
+@router.delete("/{product_id}/accessories/{accessory_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_product_accessory(
+    product_id: int,
+    accessory_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除配套产品"""
+    success = await ProductService.delete_accessory(db, accessory_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"配套产品 ID={accessory_id} 不存在",
         )
     return None

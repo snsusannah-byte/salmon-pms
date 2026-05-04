@@ -9,13 +9,18 @@ import { InvoicesPage } from "@/pages/InvoicesPage";
 import { BatchesPage } from "@/pages/BatchesPage";
 import { SalesPage as WholeFishSalesPage } from "@/pages/SalesPage";
 import { FinishedProductSalesPage } from "@/pages/FinishedProductSalesPage";
+import { ProductionManagementPage } from "@/pages/ProductionManagementPage";
+import { MaterialManagementPage } from "@/pages/MaterialManagementPage";
+import { WarehousePage } from "@/pages/WarehousePage";
+import { FinishedProductReportsPage } from "@/pages/FinishedProductReportsPage";
 import { FinancePage } from "@/pages/FinancePage";
 import { ReportsPage } from "@/pages/ReportsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SalespersonPage } from "@/pages/SalespersonPage";
 import { CommissionPage } from "@/pages/CommissionPage";
-import { NotFoundPage } from "@/pages/NotFoundPage";
+import { SuppliersPage } from "@/pages/SuppliersPage";
 import NotificationsPage from "@/pages/NotificationsPage";
+import { NotFoundPage } from "@/pages/NotFoundPage";
 
 const router = createBrowserRouter([
   {
@@ -35,9 +40,14 @@ const router = createBrowserRouter([
       { path: "batches", element: <BatchesPage /> },
       { path: "whole-fish-sales", element: <WholeFishSalesPage /> },
       { path: "finished-product-sales", element: <FinishedProductSalesPage /> },
+      { path: "production", element: <ProductionManagementPage /> },
+      { path: "materials", element: <MaterialManagementPage /> },
+      { path: "warehouse", element: <WarehousePage /> },
+      { path: "finished-product-reports", element: <FinishedProductReportsPage /> },
       { path: "finance", element: <FinancePage /> },
       { path: "reports", element: <ReportsPage /> },
       { path: "settings", element: <SettingsPage /> },
+      { path: "suppliers", element: <SuppliersPage /> },
       { path: "salespersons", element: <SalespersonPage /> },
       { path: "commissions", element: <CommissionPage /> },
       { path: "notifications", element: <NotificationsPage /> },

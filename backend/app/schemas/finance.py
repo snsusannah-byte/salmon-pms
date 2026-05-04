@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class ExchangeRecordBase(BaseModel):
     """购汇记录基础"""
-    invoice_id: int = Field(..., description="发票ID")
+    invoice_id: Optional[int] = Field(None, description="发票ID")
+    batch_id: Optional[int] = Field(None, description="批次ID")
     exchange_date: date = Field(..., description="购汇日期")
     amount_usd: Decimal = Field(..., gt=0, description="购汇金额(USD)")
     exchange_rate: Decimal = Field(..., gt=0, description="汇率")
@@ -23,6 +24,8 @@ class ExchangeRecordCreate(ExchangeRecordBase):
 
 
 class ExchangeRecordUpdate(BaseModel):
+    invoice_id: Optional[int] = None
+    batch_id: Optional[int] = None
     exchange_date: Optional[date] = None
     amount_usd: Optional[Decimal] = Field(None, gt=0)
     exchange_rate: Optional[Decimal] = Field(None, gt=0)
@@ -169,3 +172,71 @@ class FinanceSummary(BaseModel):
     total_income: Decimal
     total_expense: Decimal
     net_flow: Decimal
+
+
+# ==================== 统一进口费用 (合并税费+清关) ====================
+
+class ImportFeeCreate(BaseModel):
+    """统一进口费用创建"""
+    invoice_id: int = Field(..., description="发票ID")
+    expense_date: date = Field(..., description="费用日期")
+    # 海关税费
+    import_duty: Decimal = Field(0, ge=0, description="进口关税")
+    import_vat: Decimal = Field(0, ge=0, description="进口增值税")
+    # 清关费用
+    pickup_fee: Decimal = Field(0, ge=0, description="提货费")
+    freight: Decimal = Field(0, ge=0, description="运费")
+    yard_fee: Decimal = Field(0, ge=0, description="场地费")
+    cold_storage_fee: Decimal = Field(0, ge=0, description="冷藏费")
+    clearance_service_fee: Decimal = Field(0, ge=0, description="报关服务费")
+    notes: Optional[str] = Field(None, description="备注")
+
+
+class ImportFeeResponse(BaseModel):
+    """统一进口费用响应"""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    invoice_id: int
+    invoice_no: Optional[str] = None
+    expense_date: date
+    import_duty: Decimal
+    import_vat: Decimal
+    pickup_fee: Decimal
+    freight: Decimal
+    yard_fee: Decimal
+    cold_storage_fee: Decimal
+    clearance_service_fee: Decimal
+    tax_total: Decimal
+    clearance_total: Decimal
+    grand_total: Decimal
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImportFeeListItem(BaseModel):
+    """进口费用列表项 (JOIN 视图)"""
+    invoice_id: int
+    invoice_no: Optional[str] = None
+    expense_date: Optional[date] = None
+    import_duty: Optional[Decimal] = None
+    import_vat: Optional[Decimal] = None
+    tax_total: Optional[Decimal] = None
+    pickup_fee: Optional[Decimal] = None
+    freight: Optional[Decimal] = None
+    yard_fee: Optional[Decimal] = None
+    cold_storage_fee: Optional[Decimal] = None
+    clearance_service_fee: Optional[Decimal] = None
+    clearance_total: Optional[Decimal] = None
+
+
+# ==================== 批次采购总额 ====================
+
+class BatchPurchaseTotalResponse(BaseModel):
+    """批次采购总额响应"""
+    batch_id: int
+    batch_code: Optional[str] = None
+    batch_name: Optional[str] = None
+    total_usd: Decimal
+    invoice_count: int
+    invoices: List[dict] = []

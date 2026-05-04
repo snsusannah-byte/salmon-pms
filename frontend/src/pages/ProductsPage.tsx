@@ -40,7 +40,6 @@ import {
   AlertTriangle,
   Package,
   Layers,
-  DollarSign,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PackagingConfigSection } from "@/components/PackagingConfigSection";
@@ -66,6 +65,7 @@ interface Product {
   min_price: string | null;
   stock_quantity: number;
   safety_stock: number;
+  brand: string | null;  // V3: 品牌
 }
 
 interface BOMItem {
@@ -101,7 +101,7 @@ interface LowStockItem {
 }
 
 const categoryLabels: Record<string, string> = {
-  whole_fish: "整鱼规格",
+  whole_fish: "进口规格",
   finished_product: "成品定义",
   byproduct: "副产品",
   bom_material: "BOM物料",
@@ -145,32 +145,61 @@ export default function ProductsPage() {
       notes?: string;
     }[]
   >([]);
+  // V3: 配套产品配置
+  const [formAccessories, setFormAccessories] = useState<
+    {
+      id?: number;
+      accessory_id: number;
+      accessory_name?: string;
+      quantity: number;
+      unit: string;
+    }[]
+  >([]);
   const [formNotes, setFormNotes] = useState("");
-  // 新增价格/库存字段
-  const [formRetailPrice, setFormRetailPrice] = useState("");
-  const [formWholesalePrice, setFormWholesalePrice] = useState("");
-  const [formMinPrice, setFormMinPrice] = useState("");
-  const [formStockQuantity, setFormStockQuantity] = useState("");
-  const [formSafetyStock, setFormSafetyStock] = useState("");
-  const [formCostPrice, setFormCostPrice] = useState("");
   const [formIsActive, setFormIsActive] = useState(true);
+
+  // V3: 鱼的部位配置
+  interface FishPart {
+    part_name: string; // 鱼腩 / 中段 / 鱼尾 / 鱼骨 等
+    weight_g: number;   // 每份该部位的重量(g)
+  }
+  const [formFishParts, setFormFishParts] = useState<FishPart[]>([
+    { part_name: "鱼腩", weight_g: 200 },
+    { part_name: "中段", weight_g: 200 },
+  ]);
+
+  // V3: 品牌
+  const [formBrand, setFormBrand] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 成品产品名称自动生成
+  // V3: 成品产品名称自动生成——根据鱼的部位
   useEffect(() => {
     if (formCategory === "finished_product" && !editingProduct) {
-      const spec =
+      // 计算总重量 = 各部位重量之和
+      const totalWeightG = formFishParts.reduce((sum, p) => sum + (p.weight_g || 0), 0);
+      // 部位描述：鱼腩200g+中段200g
+      const partsDesc = formFishParts
+        .filter((p) => p.part_name && p.weight_g > 0)
+        .map((p) => `${p.part_name}${p.weight_g}g`)
+        .join("+");
+      // 规格编码
+      const specCode =
         formSpec.trim() ||
         (formSeriesCode && formPortionWeight && formPortionBoxes
           ? `${formSeriesCode}${formPortionWeight}${formPortionBoxes}`
           : "");
-      if (spec) {
-        setFormName(`冰鲜三文鱼${spec}`);
+      if (partsDesc && specCode) {
+        setFormName(`${partsDesc} ${specCode}`);
+      }
+      // 自动计算单份重量
+      if (totalWeightG > 0) {
+        setFormPortionWeight(String(totalWeightG));
       }
     }
   }, [
     formCategory,
+    formFishParts,
     formSeriesCode,
     formPortionWeight,
     formPortionBoxes,
@@ -194,6 +223,17 @@ export default function ProductsPage() {
     enabled: dialogOpen && formCategory === "finished_product",
   });
 
+  // V3: 获取所有产品（用于配套产品下拉选择）
+  const { data: allProductsData } = useQuery({
+    queryKey: ["all-products"],
+    queryFn: async () => {
+      const res = await api.get("/v1/products/?limit=500");
+      return res.data.items as Product[];
+    },
+    enabled: dialogOpen && formCategory === "finished_product",
+  });
+  const allProducts = allProductsData || [];
+
   const { data: seriesOptions } = useQuery({
     queryKey: ["product-series-options"],
     queryFn: async () => {
@@ -207,7 +247,11 @@ export default function ProductsPage() {
     queryKey: ["products", activeTab, search],
     queryFn: async () => {
       const params = new URLSearchParams();
-      params.set("category", activeTab);
+      if (activeTab === "whole_fish") {
+        params.set("categories", "whole_fish,fillet");
+      } else {
+        params.set("category", activeTab);
+      }
       if (search) params.set("search", search);
       const res = await api.get(`/v1/products/?${params.toString()}`);
       return res.data as { total: number; items: Product[] };
@@ -295,7 +339,7 @@ export default function ProductsPage() {
       activeTab === "whole_fish"
         ? "挪威冰鲜三文鱼"
         : activeTab === "finished_product"
-        ? "冰鲜三文鱼"
+        ? ""
         : ""
     );
     setFormSpec("");
@@ -306,14 +350,14 @@ export default function ProductsPage() {
     setFormPortionWeight("");
     setFormPortionBoxes("");
     setFormPackagings([]);
+    setFormAccessories([]);
     setFormNotes("");
-    setFormRetailPrice("");
-    setFormWholesalePrice("");
-    setFormMinPrice("");
-    setFormStockQuantity("");
-    setFormSafetyStock("");
-    setFormCostPrice("");
+    setFormBrand("");
     setFormIsActive(true);
+    setFormFishParts([
+      { part_name: "鱼腩", weight_g: 200 },
+      { part_name: "中段", weight_g: 200 },
+    ]);
     setEditingProduct(null);
   };
 
@@ -335,13 +379,14 @@ export default function ProductsPage() {
     setFormPortionWeight(product.portion_weight_g?.toString() ?? "");
     setFormPortionBoxes(product.portion_boxes?.toString() ?? "");
     setFormNotes(product.notes ?? "");
+    setFormBrand(product.brand ?? "");
     setFormIsActive(product.is_active);
-    setFormRetailPrice(product.suggested_retail_price ?? "");
-    setFormWholesalePrice(product.wholesale_price ?? "");
-    setFormMinPrice(product.min_price ?? "");
-    setFormStockQuantity(product.stock_quantity?.toString() ?? "0");
-    setFormSafetyStock(product.safety_stock?.toString() ?? "0");
-    setFormCostPrice(product.cost_price ?? "");
+    // V3: 加载部位数据（从名称中解析，或从 product.notes 或扩展字段）
+    // 目前简单处理：默认重置
+    setFormFishParts([
+      { part_name: "鱼腩", weight_g: 200 },
+      { part_name: "中段", weight_g: 200 },
+    ]);
     // 加载包装物
     try {
       const res = await api.get(`/v1/products/${product.id}/packagings`);
@@ -358,6 +403,21 @@ export default function ProductsPage() {
       );
     } catch {
       setFormPackagings([]);
+    }
+    // 加载配套产品
+    try {
+      const res = await api.get(`/v1/products/${product.id}/accessories`);
+      setFormAccessories(
+        res.data.map((a: any) => ({
+          id: a.id,
+          accessory_id: a.accessory_id,
+          accessory_name: a.accessory_name,
+          quantity: a.quantity,
+          unit: a.unit,
+        }))
+      );
+    } catch {
+      setFormAccessories([]);
     }
     setDialogOpen(true);
   };
@@ -389,19 +449,13 @@ export default function ProductsPage() {
       payload.portion_boxes = formPortionBoxes
         ? parseInt(formPortionBoxes)
         : null;
-      payload.suggested_retail_price = formRetailPrice
-        ? parseFloat(formRetailPrice)
-        : null;
-      payload.wholesale_price = formWholesalePrice
-        ? parseFloat(formWholesalePrice)
-        : null;
-      payload.min_price = formMinPrice ? parseFloat(formMinPrice) : null;
-      payload.stock_quantity = formStockQuantity
-        ? parseInt(formStockQuantity)
-        : 0;
-      payload.safety_stock = formSafetyStock
-        ? parseInt(formSafetyStock)
-        : 0;
+      // V3: 价格/库存已删除，不提交
+      payload.suggested_retail_price = null;
+      payload.wholesale_price = null;
+      payload.min_price = null;
+      payload.stock_quantity = 0;
+      payload.safety_stock = 0;
+      payload.brand = formBrand.trim() || null;  // V3: 品牌
       // 自动计算单盒重量(kg)
       if (payload.portion_weight_g && payload.portion_boxes) {
         payload.unit_weight_kg =
@@ -459,6 +513,36 @@ export default function ProductsPage() {
             quantity: p.quantity,
             unit: p.unit || "个",
             notes: p.notes || null,
+          });
+        }
+      }
+
+      // 保存配套产品
+      if (
+        formCategory === "finished_product" &&
+        formAccessories.length > 0
+      ) {
+        // 删除旧的（编辑模式下）
+        if (editingProduct) {
+          try {
+            const oldRes = await api.get(
+              `/v1/products/${productId}/accessories`
+            );
+            for (const old of oldRes.data) {
+              await api.delete(
+                `/v1/products/${productId}/accessories/${old.id}`
+              );
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        // 创建新的
+        for (const a of formAccessories) {
+          await api.post(`/v1/products/${productId}/accessories`, {
+            accessory_id: a.accessory_id,
+            quantity: a.quantity,
+            unit: a.unit || "个",
           });
         }
       }
@@ -561,15 +645,10 @@ export default function ProductsPage() {
           </TableHead>
           <TableHead>编码</TableHead>
           <TableHead>名称</TableHead>
+          <TableHead>品牌</TableHead>
           <TableHead>规格</TableHead>
           <TableHead>单位</TableHead>
           <TableHead>重量(kg)</TableHead>
-          <TableHead>成本价</TableHead>
-          <TableHead>零售价</TableHead>
-          <TableHead>批发价</TableHead>
-          <TableHead>最低价</TableHead>
-          <TableHead>库存</TableHead>
-          <TableHead>安全库存</TableHead>
           <TableHead>状态</TableHead>
           <TableHead>操作</TableHead>
         </>
@@ -623,6 +702,13 @@ export default function ProductsPage() {
           </TableCell>
           <TableCell>{product.name}</TableCell>
           <TableCell>
+            {product.brand ? (
+              <Badge variant="outline" className="text-xs">{product.brand}</Badge>
+            ) : (
+              <span className="text-xs text-muted-foreground">-</span>
+            )}
+          </TableCell>
+          <TableCell>
             {product.category === "finished_product" &&
             (product.series_code || product.portion_weight_g) ? (
               <div className="text-xs space-y-0.5">
@@ -652,30 +738,6 @@ export default function ProductsPage() {
           </TableCell>
           <TableCell>{product.unit}</TableCell>
           <TableCell>{product.unit_weight_kg ?? "-"}</TableCell>
-          <TableCell className="text-xs">
-            {product.cost_price ?? "-"}
-          </TableCell>
-          <TableCell className="text-xs">
-            {product.suggested_retail_price ?? "-"}
-          </TableCell>
-          <TableCell className="text-xs">
-            {product.wholesale_price ?? "-"}
-          </TableCell>
-          <TableCell className="text-xs">
-            {product.min_price ?? "-"}
-          </TableCell>
-          <TableCell className="text-xs">
-            {lowStock ? (
-              <Badge variant="destructive" className="text-xs">
-                {product.stock_quantity}
-              </Badge>
-            ) : (
-              product.stock_quantity
-            )}
-          </TableCell>
-          <TableCell className="text-xs">
-            {product.safety_stock}
-          </TableCell>
           <TableCell>
             {product.is_active ? (
               <Badge
@@ -842,14 +904,13 @@ export default function ProductsPage() {
           setFilterLowStock(false);
         }}
       >
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="whole_fish">整鱼规格</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="whole_fish">进口规格</TabsTrigger>
           <TabsTrigger value="finished_product">成品定义</TabsTrigger>
           <TabsTrigger value="byproduct">副产品</TabsTrigger>
-          <TabsTrigger value="bom_material">BOM物料</TabsTrigger>
         </TabsList>
 
-        {["whole_fish", "finished_product", "byproduct", "bom_material"].map(
+        {["whole_fish", "finished_product", "byproduct"].map(
           (cat) => (
             <TabsContent key={cat} value={cat} className="space-y-4">
               <div className="flex items-center gap-2">
@@ -921,7 +982,7 @@ export default function ProductsPage() {
                     {isLoading ? (
                       <TableRow>
                         <TableCell
-                          colSpan={activeTab === "finished_product" ? 14 : 8}
+                          colSpan={8}
                           className="text-center py-8"
                         >
                           加载中...
@@ -930,7 +991,7 @@ export default function ProductsPage() {
                     ) : filteredItems.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={activeTab === "finished_product" ? 14 : 8}
+                          colSpan={8}
                           className="text-center py-8 text-muted-foreground"
                         >
                           暂无数据
@@ -951,44 +1012,35 @@ export default function ProductsPage() {
 
       {/* ==================== 新增/编辑弹窗 ==================== */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-[95vw] xl:max-w-[1100px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingProduct ? "编辑产品" : "新增产品"}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-5 py-4">
+            {/* === 基础信息 === */}
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>产品分类</Label>
-                <Select
-                  value={formCategory}
-                  onValueChange={(v) => setFormCategory(v || "whole_fish")}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择分类">
-                      {categoryLabels[formCategory]}
-                    </SelectValue>
-                  </SelectTrigger>
+                <Select value={formCategory} onValueChange={(v) => setFormCategory(v || "whole_fish")}>
+                  <SelectTrigger><SelectValue placeholder="选择分类">{categoryLabels[formCategory]}</SelectValue></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="whole_fish">整鱼规格</SelectItem>
-                    <SelectItem value="finished_product">
-                      成品定义
-                    </SelectItem>
+                    <SelectItem value="whole_fish">进口规格</SelectItem>
+                    <SelectItem value="finished_product">成品定义</SelectItem>
                     <SelectItem value="byproduct">副产品</SelectItem>
                     <SelectItem value="bom_material">BOM物料</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
+                <Label>产品编码</Label>
+                <Input value={formCode} onChange={(e) => setFormCode(e.target.value)} placeholder="留空自动生成" className="text-muted-foreground" />
+              </div>
+              <div className="space-y-2">
                 <Label>单位</Label>
-                <Select
-                  value={formUnit}
-                  onValueChange={(v) => setFormUnit(v || "kg")}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                <Select value={formUnit} onValueChange={(v) => setFormUnit(v || "kg")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="kg">kg</SelectItem>
                     <SelectItem value="个">个</SelectItem>
@@ -1000,226 +1052,206 @@ export default function ProductsPage() {
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>产品编码</Label>
-                <Input
-                  value={formCode}
-                  onChange={(e) => setFormCode(e.target.value)}
-                  placeholder="留空自动生成"
-                  className="text-muted-foreground"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>产品名称 *</Label>
-                <Input
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  placeholder="如: 三文鱼"
-                />
-              </div>
+            <div className="space-y-2">
+              <Label>产品名称 *</Label>
+              <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="如: 鱼腩200g+中段200g A4002" />
             </div>
+
             {formCategory === "finished_product" ? (
               <>
-                {/* 成品规格专用 */}
-                <div className="grid grid-cols-4 gap-4">
-                  <div className="space-y-2">
-                    <Label>系列代号</Label>
-                    <Input
-                      list="series-code-list"
-                      value={formSeriesCode}
-                      onChange={(e) => setFormSeriesCode(e.target.value)}
-                      placeholder="如: A"
-                    />
-                    <datalist id="series-code-list">
-                      {seriesOptions?.series_codes.map((code: string) => (
-                        <option key={code} value={code} />
-                      ))}
-                    </datalist>
-                  </div>
-                  <div className="space-y-2 col-span-3">
-                    <Label>系列名称</Label>
-                    <Input
-                      list="series-name-list"
-                      value={formSeriesName}
-                      onChange={(e) => setFormSeriesName(e.target.value)}
-                      placeholder="如: 三文鱼纯享"
-                    />
-                    <datalist id="series-name-list">
-                      {seriesOptions?.series_names.map((name: string) => (
-                        <option key={name} value={name} />
-                      ))}
-                    </datalist>
+                {/* === 成品定义：宽卡片布局 === */}
+                {/* 第一行：系列信息 */}
+                <div className="bg-muted/30 rounded-lg p-4 space-y-4">
+                  <h4 className="text-sm font-semibold flex items-center gap-2">📦 系列规格</h4>
+                  <div className="grid grid-cols-4 gap-4">
+                    <div className="space-y-2">
+                      <Label>系列代号</Label>
+                      <Input list="series-code-list" value={formSeriesCode} onChange={(e) => setFormSeriesCode(e.target.value)} placeholder="如: A" />
+                      <datalist id="series-code-list">{seriesOptions?.series_codes.map((code: string) => <option key={code} value={code} />)}</datalist>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>系列名称</Label>
+                      <Input list="series-name-list" value={formSeriesName} onChange={(e) => setFormSeriesName(e.target.value)} placeholder="如: 三文鱼纯享" />
+                      <datalist id="series-name-list">{seriesOptions?.series_names.map((name: string) => <option key={name} value={name} />)}</datalist>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>份内盒数</Label>
+                      <Input type="number" value={formPortionBoxes} onChange={(e) => setFormPortionBoxes(e.target.value)} placeholder="如: 2" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>规格编码</Label>
+                      <Input value={formSpec} onChange={(e) => setFormSpec(e.target.value)} placeholder="如: A4002（留空自动生成）" className="text-muted-foreground" />
+                    </div>
                   </div>
                 </div>
+
+                {/* 第二行：品牌 + 部位 */}
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label>单份重量(g)</Label>
-                    <Input
-                      type="number"
-                      value={formPortionWeight}
-                      onChange={(e) => setFormPortionWeight(e.target.value)}
-                      placeholder="如: 400"
-                    />
+                  {/* 品牌 */}
+                  <div className="bg-muted/30 rounded-lg p-4 space-y-3">
+                    <h4 className="text-sm font-semibold">🏷️ 品牌</h4>
+                    <div className="space-y-2">
+                      <Label>品牌名称</Label>
+                      <Input list="brand-list" value={formBrand} onChange={(e) => setFormBrand(e.target.value)} placeholder="选择或输入新品牌" />
+                      <datalist id="brand-list">
+                        <option value="无品牌" />
+                        <option value="中挪三文鱼" />
+                        <option value="海兴悦三文鱼" />
+                        <option value="北辰海选汇" />
+                      </datalist>
+                    </div>
+                    <p className="text-xs text-muted-foreground">品牌关联公司名称，一个公司可有多个品牌</p>
                   </div>
-                  <div className="space-y-2">
-                    <Label>份内盒数</Label>
-                    <Input
-                      type="number"
-                      value={formPortionBoxes}
-                      onChange={(e) => setFormPortionBoxes(e.target.value)}
-                      placeholder="如: 2"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>规格编码</Label>
-                    <Input
-                      value={formSpec}
-                      onChange={(e) => setFormSpec(e.target.value)}
-                      placeholder="如: A4002（留空自动生成）"
-                      className="text-muted-foreground"
-                    />
+
+                  {/* 鱼的部位配置 — 占两列更宽 */}
+                  <div className="bg-muted/30 rounded-lg p-4 space-y-3 col-span-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-sm font-semibold">🐟 鱼的部位配置</h4>
+                      <span className="text-xs text-muted-foreground">
+                        总重量: {formFishParts.reduce((s, p) => s + (p.weight_g || 0), 0)}g
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {formFishParts.map((part, idx) => (
+                        <div key={idx} className="flex items-center gap-3">
+                          <Select value={part.part_name} onValueChange={(v) => {
+                            const newParts = [...formFishParts];
+                            newParts[idx] = { ...part, part_name: v || "" };
+                            setFormFishParts(newParts);
+                          }}>
+                            <SelectTrigger className="w-[150px] h-10"><SelectValue placeholder="选择部位" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="鱼腩">鱼腩</SelectItem>
+                              <SelectItem value="中段">中段</SelectItem>
+                              <SelectItem value="鱼尾">鱼尾</SelectItem>
+                              <SelectItem value="鱼骨">鱼骨</SelectItem>
+                              <SelectItem value="鱼头">鱼头</SelectItem>
+                              <SelectItem value="鱼皮">鱼皮</SelectItem>
+                              <SelectItem value="纯肉">纯肉</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Input type="number" className="h-10 flex-1" value={part.weight_g || ""} onChange={(e) => {
+                            const newParts = [...formFishParts];
+                            newParts[idx] = { ...part, weight_g: Number(e.target.value) || 0 };
+                            setFormFishParts(newParts);
+                          }} placeholder="每份重量(g)" />
+                          <span className="text-sm text-muted-foreground w-8">g</span>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 shrink-0" onClick={() => setFormFishParts(formFishParts.filter((_, i) => i !== idx))}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      <Button variant="outline" size="sm" className="w-full mt-1" onClick={() => setFormFishParts([...formFishParts, { part_name: "", weight_g: 0 }])}>
+                        <Plus className="h-4 w-4 mr-1" />添加部位
+                      </Button>
+                    </div>
+                    {/* 名称预览 */}
+                    {formFishParts.filter(p => p.part_name && p.weight_g > 0).length > 0 && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-md p-2 text-sm">
+                        <span className="text-muted-foreground">名称预览:</span>{" "}
+                        <span className="font-medium text-blue-800">
+                          {formFishParts.filter((p) => p.part_name && p.weight_g > 0).map((p) => `${p.part_name}${p.weight_g}g`).join("+")}{" "}
+                          {formSpec || (formSeriesCode && formPortionWeight && formPortionBoxes ? `${formSeriesCode}${formPortionWeight}${formPortionBoxes}` : "")}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
+
+                {/* 单盒重量 */}
                 <div className="space-y-2">
                   <Label>单盒重量(kg)</Label>
-                  <Input
-                    type="number"
-                    step="0.001"
-                    value={formWeight}
-                    onChange={(e) => setFormWeight(e.target.value)}
-                    placeholder={
-                      formPortionWeight && formPortionBoxes
-                        ? `自动计算: ${(
-                            parseInt(formPortionWeight) /
-                            parseInt(formPortionBoxes) /
-                            1000
-                          ).toFixed(3)}`
-                        : "自动计算或手动填写"
-                    }
+                  <Input type="number" step="0.001" value={formWeight} onChange={(e) => setFormWeight(e.target.value)}
+                    placeholder={formPortionWeight && formPortionBoxes ? `自动计算: ${(parseInt(formPortionWeight) / parseInt(formPortionBoxes) / 1000).toFixed(3)}` : "自动计算或手动填写"}
                   />
                 </div>
-                {/* 成品价格策略 */}
-                <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
-                  <h4 className="text-sm font-semibold flex items-center gap-2">
-                    <DollarSign className="h-4 w-4" />
-                    价格策略
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>成本价</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={formCostPrice}
-                        readOnly
-                        disabled
-                        className="bg-gray-50 text-muted-foreground"
-                        placeholder="自动计算"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>建议零售价</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={formRetailPrice}
-                        onChange={(e) => setFormRetailPrice(e.target.value)}
-                        placeholder="如: 88.00"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>批发价</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={formWholesalePrice}
-                        onChange={(e) =>
-                          setFormWholesalePrice(e.target.value)
-                        }
-                        placeholder="如: 68.00"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>最低价</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={formMinPrice}
-                        onChange={(e) => setFormMinPrice(e.target.value)}
-                        placeholder="如: 58.00"
-                      />
-                    </div>
+
+                {/* 配套产品配置 */}
+                <div className="bg-muted/30 rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold">🍤 配套产品</h4>
+                    <span className="text-xs text-muted-foreground">每份成品包含的附加产品</span>
+                  </div>
+                  <div className="space-y-2">
+                    {formAccessories.map((acc, idx) => (
+                      <div key={idx} className="flex items-center gap-3">
+                        <Select
+                          value={String(acc.accessory_id)}
+                          onValueChange={(v) => {
+                            const newAcc = [...formAccessories];
+                            const selected = allProducts.find((p: any) => String(p.id) === (v ?? ""));
+                            newAcc[idx] = {
+                              ...acc,
+                              accessory_id: Number(v) || 0,
+                              accessory_name: selected?.name,
+                              unit: selected?.unit || "个",
+                            };
+                            setFormAccessories(newAcc);
+                          }}
+                        >
+                          <SelectTrigger className="flex-1 h-10">
+                            <SelectValue placeholder="选择配套产品" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allProducts
+                              .filter((p: any) => p.category === "bom_material" || p.category === "byproduct")
+                              .map((p: any) => (
+                                <SelectItem key={p.id} value={String(p.id)}>
+                                  {p.name} ({p.code})
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="number"
+                          className="w-24 h-10"
+                          value={acc.quantity || ""}
+                          onChange={(e) => {
+                            const newAcc = [...formAccessories];
+                            newAcc[idx] = { ...acc, quantity: Number(e.target.value) || 0 };
+                            setFormAccessories(newAcc);
+                          }}
+                          placeholder="数量"
+                        />
+                        <span className="text-sm text-muted-foreground w-10">{acc.unit || "个"}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-500 shrink-0"
+                          onClick={() => setFormAccessories(formAccessories.filter((_, i) => i !== idx))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full mt-1"
+                      onClick={() =>
+                        setFormAccessories([...formAccessories, { accessory_id: 0, quantity: 0, unit: "个" }])
+                      }
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      添加配套产品
+                    </Button>
                   </div>
                 </div>
-                {/* 成品库存管理 */}
-                <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
-                  <h4 className="text-sm font-semibold flex items-center gap-2">
-                    <Package className="h-4 w-4" />
-                    库存管理
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>库存数量</Label>
-                      <Input
-                        type="number"
-                        value={formStockQuantity}
-                        onChange={(e) =>
-                          setFormStockQuantity(e.target.value)
-                        }
-                        placeholder="如: 100"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>安全库存线</Label>
-                      <Input
-                        type="number"
-                        value={formSafetyStock}
-                        onChange={(e) => setFormSafetyStock(e.target.value)}
-                        placeholder="如: 20"
-                      />
-                    </div>
-                  </div>
-                </div>
+
                 {/* 包装物配置 */}
-                <PackagingConfigSection
-                  materials={bomMaterials ?? []}
-                  packagings={formPackagings}
-                  onChange={setFormPackagings}
-                />
+                <PackagingConfigSection materials={bomMaterials ?? []} packagings={formPackagings} onChange={setFormPackagings} />
               </>
             ) : (
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>规格</Label>
-                  <Input
-                    value={formSpec}
-                    onChange={(e) => setFormSpec(e.target.value)}
-                    placeholder="如: 6-7kg"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>单位重量(kg)</Label>
-                  <Input
-                    type="number"
-                    step="0.001"
-                    value={formWeight}
-                    onChange={(e) => setFormWeight(e.target.value)}
-                    placeholder="可选"
-                  />
-                </div>
+                <div className="space-y-2"><Label>规格</Label><Input value={formSpec} onChange={(e) => setFormSpec(e.target.value)} placeholder="如: 6-7kg" /></div>
+                <div className="space-y-2"><Label>单位重量(kg)</Label><Input type="number" step="0.001" value={formWeight} onChange={(e) => setFormWeight(e.target.value)} placeholder="可选" /></div>
               </div>
             )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>产品状态</Label>
-                <Select
-                  value={formIsActive ? "active" : "inactive"}
-                  onValueChange={(v) => setFormIsActive(v === "active")}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+                <Select value={formIsActive ? "active" : "inactive"} onValueChange={(v) => setFormIsActive(v === "active")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">启用</SelectItem>
                     <SelectItem value="inactive">停用</SelectItem>
@@ -1229,20 +1261,12 @@ export default function ProductsPage() {
             </div>
             <div className="space-y-2">
               <Label>备注</Label>
-              <Input
-                value={formNotes}
-                onChange={(e) => setFormNotes(e.target.value)}
-                placeholder="其他说明..."
-              />
+              <Input value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder="其他说明..." />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleSubmit} disabled={isSubmitting}>
-              {editingProduct ? "保存修改" : "创建产品"}
-            </Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>
+            <Button onClick={handleSubmit} disabled={isSubmitting}>{editingProduct ? "保存修改" : "创建产品"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1343,78 +1367,45 @@ export default function ProductsPage() {
                   </div>
 
                   {detailProduct.category === "finished_product" && (
-                    <>
-                      <div className="border-t pt-3">
-                        <h4 className="text-sm font-semibold mb-2">
-                          价格信息
-                        </h4>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">
-                              成本价:
-                            </span>{" "}
-                            <span className="ml-1 font-medium">
-                              {detailProduct.cost_price ?? "-"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              建议零售价:
-                            </span>{" "}
-                            <span className="ml-1">
-                              {detailProduct.suggested_retail_price ?? "-"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              批发价:
-                            </span>{" "}
-                            <span className="ml-1">
-                              {detailProduct.wholesale_price ?? "-"}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              最低价:
-                            </span>{" "}
-                            <span className="ml-1">
-                              {detailProduct.min_price ?? "-"}
-                            </span>
-                          </div>
+                    <div className="border-t pt-3">
+                      <h4 className="text-sm font-semibold mb-2">
+                        成品规格
+                      </h4>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">系列代号:</span>{" "}
+                          <span className="ml-1">
+                            {detailProduct.series_code ?? "-"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">系列名称:</span>{" "}
+                          <span className="ml-1">
+                            {detailProduct.series_name ?? "-"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">品牌:</span>{" "}
+                          <span className="ml-1">
+                            {detailProduct.brand ? (
+                              <Badge variant="outline" className="text-xs">{detailProduct.brand}</Badge>
+                            ) : "-"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">单份重量(g):</span>{" "}
+                          <span className="ml-1">
+                            {detailProduct.portion_weight_g ?? "-"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">份内盒数:</span>{" "}
+                          <span className="ml-1">
+                            {detailProduct.portion_boxes ?? "-"}
+                          </span>
                         </div>
                       </div>
-                      <div className="border-t pt-3">
-                        <h4 className="text-sm font-semibold mb-2">
-                          库存信息
-                        </h4>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">
-                              库存数量:
-                            </span>{" "}
-                            <span className="ml-1">
-                              {detailProduct.stock_quantity}
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">
-                              安全库存线:
-                            </span>{" "}
-                            <span className="ml-1">
-                              {detailProduct.safety_stock}
-                            </span>
-                          </div>
-                          {isLowStock(detailProduct) && (
-                            <div className="col-span-2">
-                              <Badge variant="destructive" className="text-xs">
-                                <AlertTriangle className="h-3 w-3 mr-1" />
-                                库存低于安全线
-                              </Badge>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </>
+                    </div>
                   )}
                 </TabsContent>
 
@@ -1515,7 +1506,7 @@ export default function ProductsPage() {
               {detailProduct.category === "finished_product" && (
                 <div className="border-t pt-4 mt-4">
                   <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                    <DollarSign className="h-4 w-4" />
+                    <Package className="h-4 w-4" />
                     成本汇总
                   </h4>
                   <div className="bg-muted p-3 rounded-md space-y-2 text-sm">

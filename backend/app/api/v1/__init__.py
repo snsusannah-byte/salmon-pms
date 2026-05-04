@@ -14,6 +14,10 @@ from app.api.v1.endpoints import (
     settings,
     salespersons,
     notifications,
+    daily_slaughter,
+    warehouse,
+    loss_records,
+    finished_product_sales_v2,
 )
 
 api_router = APIRouter()
@@ -31,3 +35,9 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["数据�
 api_router.include_router(settings.router, prefix="/settings", tags=["系统设置"])
 api_router.include_router(salespersons.router, prefix="/salespersons", tags=["业务员管理"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["通知中心"])
+
+# V3新增路由
+api_router.include_router(daily_slaughter.router, prefix="/daily-slaughter", tags=["daily-slaughter"])
+api_router.include_router(warehouse.router, prefix="/warehouse", tags=["warehouse"])
+api_router.include_router(loss_records.router, prefix="/loss-records", tags=["loss-records"])
+api_router.include_router(finished_product_sales_v2.router, prefix="/finished-product-sales", tags=["finished-product-sales-v2"])

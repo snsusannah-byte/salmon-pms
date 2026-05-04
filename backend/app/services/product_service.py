@@ -23,6 +23,7 @@ class ProductService:
     async def list_products(
         db: AsyncSession,
         category: Optional[ProductCategory] = None,
+        categories: Optional[List[ProductCategory]] = None,
         search: Optional[str] = None,
         is_active: Optional[bool] = None,
         skip: int = 0,
@@ -33,7 +34,10 @@ class ProductService:
         count_query = select(func.count(Product.id))
 
         filters = []
-        if category:
+        if categories:
+            cat_values = [str(cat) for cat in categories]
+            filters.append(Product.category.in_(cat_values))
+        elif category:
             filters.append(Product.category == category)
         if is_active is not None:
             filters.append(Product.is_active == is_active)
@@ -339,5 +343,66 @@ class ProductService:
             return False
 
         await db.delete(packaging)
+        await db.commit()
+        return True
+
+    # ==================== 配套产品管理 ====================
+
+    @staticmethod
+    async def get_accessories(db: AsyncSession, product_id: int) -> List[Any]:
+        """获取成品配套产品清单"""
+        from app.models import ProductAccessory
+        result = await db.execute(
+            select(ProductAccessory).where(ProductAccessory.product_id == product_id)
+        )
+        return result.scalars().all()
+
+    @staticmethod
+    async def create_accessory(db: AsyncSession, product_id: int, data) -> Any:
+        """创建配套产品"""
+        from app.models import ProductAccessory
+        accessory = ProductAccessory(
+            product_id=product_id,
+            accessory_id=data.accessory_id,
+            quantity=data.quantity,
+            unit=data.unit,
+            notes=data.notes,
+        )
+        db.add(accessory)
+        await db.commit()
+        await db.refresh(accessory)
+        return accessory
+
+    @staticmethod
+    async def update_accessory(db: AsyncSession, accessory_id: int, data) -> Optional[Any]:
+        """更新配套产品"""
+        from app.models import ProductAccessory
+        result = await db.execute(
+            select(ProductAccessory).where(ProductAccessory.id == accessory_id)
+        )
+        accessory = result.scalar_one_or_none()
+        if not accessory:
+            return None
+
+        update_data = data.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(accessory, field, value)
+
+        await db.commit()
+        await db.refresh(accessory)
+        return accessory
+
+    @staticmethod
+    async def delete_accessory(db: AsyncSession, accessory_id: int) -> bool:
+        """删除配套产品"""
+        from app.models import ProductAccessory
+        result = await db.execute(
+            select(ProductAccessory).where(ProductAccessory.id == accessory_id)
+        )
+        accessory = result.scalar_one_or_none()
+        if not accessory:
+            return False
+
+        await db.delete(accessory)
         await db.commit()
         return True

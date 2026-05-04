@@ -181,3 +181,105 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 }
+/* Hide spin buttons on number inputs */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* ===== A4 Print Styles ===== */
+@media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  /* Hide navigation, sidebar, etc */
+  nav, aside, .sidebar, header, footer {
+    display: none !important;
+  }
+
+  /* Dialog print styles */
+  [data-radix-dialog-overlay] {
+    position: static !important;
+    background: white !important;
+  }
+
+  [data-radix-dialog-content] {
+    position: static !important;
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 10mm !important;
+    background: white !important;
+    transform: none !important;
+  }
+
+  /* Ensure dialog header is visible but styled for print */
+  [data-radix-dialog-content] > div:first-child {
+    display: none !important; /* Hide dialog close button */
+  }
+
+  /* Print-optimized tables */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 9pt !important;
+  }
+
+  th, td {
+    border: 1px solid #ddd !important;
+    padding: 4px 6px !important;
+    font-size: 9pt !important;
+  }
+
+  th {
+    background-color: #f5f5f5 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  tr {
+    page-break-inside: avoid;
+  }
+
+  /* Cards */
+  .card, [class*="Card"] {
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Color preservation */
+  .text-green-600, .text-red-600, .text-blue-700,
+  .bg-green-50, .bg-red-50, .bg-blue-50 {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Grid layouts */
+  .grid {
+    display: grid !important;
+  }
+
+  /* Buttons hidden in print */
+  button, .btn, [role="button"] {
+    display: none !important;
+  }
+
+  /* Ensure body background is white */
+  body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

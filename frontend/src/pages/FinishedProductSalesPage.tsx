@@ -98,6 +98,8 @@ interface Aftersales {
 interface Sale {
   id: number;
   sale_date: string;
+  slaughter_date: string | null;  // V3新增
+  total_weight_kg: number | null; // V3新增
   customer_id: number;
   customer_name: string | null;
   product_id: number;
@@ -118,6 +120,17 @@ interface Sale {
   is_locked: boolean;
   receipts: Receipt[];
   aftersales: Aftersales[];
+  items?: SaleItem[]; // V3新增
+}
+
+interface SaleItem {
+  id: number;
+  item_type: "main" | "accessory" | "gift";
+  product_id: number;
+  product_name: string;
+  weight_kg: number | null;
+  quantity: number | null;
+  unit_price: number | null;
 }
 
 interface SaleListResponse {
@@ -136,7 +149,7 @@ const FINISHED_PRODUCT_IMPORT_HEADERS = [
   { en: "sale_date", cn: "销售日期" },
   { en: "product_code", cn: "产品编码" },
   { en: "product_name", cn: "产品名称" },
-  { en: "quantity", cn: "数量" },
+  { en: "quantity", cn: "份数" },
   { en: "unit_price", cn: "单价(USD)" },
   { en: "scan_fee", cn: "扫码费" },
   { en: "discount", cn: "折扣" },
@@ -278,9 +291,10 @@ export function FinishedProductSalesPage() {
             <TableRow>
               <TableHead>ID</TableHead>
               <TableHead>日期</TableHead>
+              <TableHead>宰杀日期</TableHead>
               <TableHead>客户</TableHead>
               <TableHead>产品</TableHead>
-              <TableHead>数量</TableHead>
+              <TableHead>份数</TableHead>
               <TableHead>净金额</TableHead>
               <TableHead>已付</TableHead>
               <TableHead>未付</TableHead>
@@ -291,11 +305,11 @@ export function FinishedProductSalesPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">加载中...</TableCell>
+                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">加载中...</TableCell>
               </TableRow>
             ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">暂无数据</TableCell>
+                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">暂无数据</TableCell>
               </TableRow>
             ) : (
               data?.items.map((sale) => {
@@ -308,6 +322,7 @@ export function FinishedProductSalesPage() {
                       #{sale.id}
                     </TableCell>
                     <TableCell>{sale.sale_date}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{sale.slaughter_date || "-"}</TableCell>
                     <TableCell>{sale.customer_name ?? "-"}</TableCell>
                     <TableCell>
                       <div className="text-sm">{sale.product_name ?? "-"}</div>
@@ -572,7 +587,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
             <div><span className="text-muted-foreground">日期:</span> <span className="ml-1">{sale.sale_date}</span></div>
             <div><span className="text-muted-foreground">客户:</span> <span className="ml-1">{sale.customer_name ?? "-"}</span></div>
             <div><span className="text-muted-foreground">产品:</span> <span className="ml-1">{sale.product_name ?? "-"} {sale.product_spec ?? ""}</span></div>
-            <div><span className="text-muted-foreground">数量:</span> <span className="ml-1">{sale.quantity}</span></div>
+            <div><span className="text-muted-foreground">份数:</span> <span className="ml-1">{sale.quantity}</span></div>
             <div><span className="text-muted-foreground">单价:</span> <span className="ml-1">${Number(sale.unit_price).toLocaleString()}</span></div>
             <div><span className="text-muted-foreground">销售员:</span> <span className="ml-1">{sale.salesperson_name ?? "-"}</span></div>
             <div><span className="text-muted-foreground">状态:</span> <span className="ml-1">
@@ -853,6 +868,7 @@ function SaleFormDialog({
   const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 基础字段
   const [saleDate, setSaleDate] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [productId, setProductId] = useState("");
@@ -862,6 +878,11 @@ function SaleFormDialog({
   const [discount, setDiscount] = useState("0");
   const [commission, setCommission] = useState("0");
   const [notes, setNotes] = useState("");
+
+  // V3新增字段
+  const [slaughterDate, setSlaughterDate] = useState("");
+  const [totalWeightKg, setTotalWeightKg] = useState("");
+  const [items, setItems] = useState<{ item_type: "main" | "accessory" | "gift"; product_id: string; weight_kg: string; quantity: string; unit_price: string }[]>([]);
 
   const grossAmount = (Number(quantity) || 0) * (Number(unitPrice) || 0);
   const netAmount = grossAmount - (Number(scanFee) || 0) - (Number(discount) || 0) - (Number(commission) || 0);
@@ -884,9 +905,19 @@ function SaleFormDialog({
       setDiscount(String(initialData.discount ?? 0));
       setCommission(String(initialData.commission ?? 0));
       setNotes(initialData.notes ?? "");
+      setSlaughterDate(initialData.slaughter_date ?? "");
+      setTotalWeightKg(initialData.total_weight_kg ? String(initialData.total_weight_kg) : "");
+      setItems(initialData.items?.map((it) => ({
+        item_type: it.item_type,
+        product_id: String(it.product_id),
+        weight_kg: it.weight_kg ? String(it.weight_kg) : "",
+        quantity: it.quantity ? String(it.quantity) : "",
+        unit_price: it.unit_price ? String(it.unit_price) : "",
+      })) || []);
     } else {
       setSaleDate(""); setCustomerId(""); setProductId(""); setQuantity(""); setUnitPrice("");
       setScanFee("0"); setDiscount("0"); setCommission("0"); setNotes("");
+      setSlaughterDate(""); setTotalWeightKg(""); setItems([]);
     }
   };
 
@@ -898,9 +929,49 @@ function SaleFormDialog({
 
   const { data: productsData } = useQuery({
     queryKey: ["products-for-finished-sale"],
-    queryFn: async () => { const res = await api.get("/v1/products/?category=finished_product&limit=500"); return res.data; },
+    queryFn: async () => { const res = await api.get("/v1/products/?limit=500"); return res.data; },
     enabled: open,
   });
+
+  // 获取可选宰杀日期
+  const { data: slaughterDatesData } = useQuery({
+    queryKey: ["slaughter-dates-for-sale"],
+    queryFn: async () => {
+      const res = await api.get("/v1/finished-product-sales/options/slaughter-dates");
+      return res.data;
+    },
+    enabled: open,
+  });
+
+  const slaughterDates = slaughterDatesData || [];
+  const allProducts = productsData?.items || [];
+
+  // V3: 自动计算总重量（份数 × 每份重量(g) / 1000）
+  React.useEffect(() => {
+    if (productId && quantity) {
+      const product = allProducts.find((p: any) => String(p.id) === productId);
+      if (product?.portion_weight_g) {
+        const weightKg = (Number(quantity) * product.portion_weight_g) / 1000;
+        setTotalWeightKg(String(weightKg.toFixed(3)));
+      }
+    }
+  }, [productId, quantity, allProducts]);
+
+  function addItem(type: "main" | "accessory" | "gift") {
+    setItems([...items, { item_type: type, product_id: "", weight_kg: "", quantity: "", unit_price: "" }]);
+  }
+
+  function updateItem(index: number, field: string, value: string) {
+    const newItems = [...items];
+    (newItems[index] as any)[field] = value;
+    setItems(newItems);
+  }
+
+  function removeItem(index: number) {
+    setItems(items.filter((_, i) => i !== index));
+  }
+
+  const selectedSlaughter = slaughterDates.find((d: any) => d.date === slaughterDate);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -910,7 +981,7 @@ function SaleFormDialog({
     }
     setIsSubmitting(true);
     try {
-      const payload = {
+      const payload: any = {
         sale_date: saleDate,
         customer_id: Number(customerId),
         product_id: Number(productId),
@@ -923,11 +994,33 @@ function SaleFormDialog({
         commission: Number(commission) || 0,
         notes: notes.trim() || undefined,
       };
+
+      // V3字段
+      if (slaughterDate) {
+        payload.slaughter_date = slaughterDate;
+        payload.total_weight_kg = Number(totalWeightKg) || 0;
+      }
+      if (items.length > 0) {
+        payload.items = items
+          .filter((it) => it.product_id)
+          .map((it) => ({
+            item_type: it.item_type,
+            product_id: Number(it.product_id),
+            weight_kg: it.item_type === "main" ? Number(it.weight_kg) || 0 : null,
+            quantity: it.item_type !== "main" ? Number(it.quantity) || 0 : null,
+            unit_price: it.item_type === "main" ? Number(it.unit_price) || 0 : null,
+          }));
+      }
+
       if (initialData) {
         await api.put(`/v1/finished-product-sales/${initialData.id}`, payload);
         toast.success("销售记录更新成功");
       } else {
-        await api.post("/v1/finished-product-sales/", payload);
+        if (slaughterDate || items.length > 0) {
+          await api.post("/v1/finished-product-sales/with-items", payload);
+        } else {
+          await api.post("/v1/finished-product-sales/", payload);
+        }
         toast.success("销售记录创建成功");
       }
       onSuccess();
@@ -941,13 +1034,13 @@ function SaleFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { onOpenChange(false); resetForm(); } }}>
-      <DialogContent className="max-w-[500px] w-[95vw] max-h-[90vh] overflow-y-auto p-6">
+      <DialogContent className="max-w-[700px] w-[95vw] max-h-[90vh] overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{initialData ? "编辑销售记录" : "新增销售记录"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2"><Label>销售日期 *</Label><Input type="date" value={saleDate} onChange={(e) => setSaleDate(e.target.value)} /></div>              
+            <div className="space-y-2"><Label>销售日期 *</Label><Input type="date" value={saleDate} onChange={(e) => setSaleDate(e.target.value)} /></div>
             <div className="space-y-2">
               <Label>客户 *</Label>
               <Select value={customerId} onValueChange={(v) => setCustomerId(v ?? "")}>
@@ -959,15 +1052,89 @@ function SaleFormDialog({
               <Label>成品 *</Label>
               <Select value={productId} onValueChange={(v) => setProductId(v ?? "")}>
                 <SelectTrigger><SelectValue placeholder="选择成品" /></SelectTrigger>
-                <SelectContent>{productsData?.items?.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name} {p.spec ?? ""}</SelectItem>)}</SelectContent>
+                <SelectContent>{allProducts.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name} {p.spec ?? ""}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="space-y-2"><Label>数量(件) *</Label><Input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} /></div>
+            <div className="space-y-2"><Label>份数 *</Label><Input type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} /></div>
             <div className="space-y-2"><Label>单价 *</Label><Input type="number" step="0.0001" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} /></div>
             <div className="space-y-2"><Label>扫码费</Label><Input type="number" value={scanFee} onChange={(e) => setScanFee(e.target.value)} /></div>
             <div className="space-y-2"><Label>折扣</Label><Input type="number" value={discount} onChange={(e) => setDiscount(e.target.value)} /></div>
             <div className="space-y-2"><Label>佣金</Label><Input type="number" value={commission} onChange={(e) => setCommission(e.target.value)} /></div>
           </div>
+
+          {/* V3: 宰杀日期选择 */}
+          <div className="space-y-2">
+            <Label>关联宰杀日期（可选）</Label>
+            <Select value={slaughterDate} onValueChange={(v) => setSlaughterDate(v ?? "")}>
+              <SelectTrigger><SelectValue placeholder="选择已锁定的宰杀日期" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">不关联</SelectItem>
+                {slaughterDates.map((d: any) => (
+                  <SelectItem key={d.date} value={d.date}>
+                    {d.date} (可用{d.available_meat_kg?.toFixed?.(1) ?? d.available_meat_kg}kg, 成本{d.cost_price_per_kg?.toFixed?.(2) ?? d.cost_price_per_kg}元/kg)
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedSlaughter && (
+              <p className="text-xs text-muted-foreground">
+                已选择：{selectedSlaughter.date} · 可用肉 {selectedSlaughter.available_meat_kg?.toFixed?.(1) ?? selectedSlaughter.available_meat_kg}kg · 成本 ¥{selectedSlaughter.cost_price_per_kg?.toFixed?.(2) ?? selectedSlaughter.cost_price_per_kg}/kg
+              </p>
+            )}
+          </div>
+
+          {slaughterDate && (
+            <div className="space-y-2">
+              <Label>销售总重量(kg)</Label>
+              <Input type="number" step="0.001" value={totalWeightKg} onChange={(e) => setTotalWeightKg(e.target.value)} placeholder="输入销售总重量" />
+            </div>
+          )}
+
+          {/* V3: 销售子项 */}
+          <div className="space-y-3 border rounded-md p-3">
+            <p className="text-sm font-medium">销售子项（可选）</p>
+            {items.length === 0 && <p className="text-xs text-muted-foreground">暂无子项，点击下方按钮添加</p>}
+            {items.map((it, idx) => (
+              <div key={idx} className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 items-end">
+                <div className="space-y-1">
+                  <Label className="text-xs">类型</Label>
+                  <Select value={it.item_type} onValueChange={(v: any) => updateItem(idx, "item_type", v)}>
+                    <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="main">正品</SelectItem>
+                      <SelectItem value="accessory">配套</SelectItem>
+                      <SelectItem value="gift">赠品</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">产品</Label>
+                  <Select value={it.product_id} onValueChange={(v) => updateItem(idx, "product_id", v ?? "")}>
+                    <SelectTrigger className="h-8"><SelectValue placeholder="选择" /></SelectTrigger>
+                    <SelectContent>{allProducts.map((p: any) => <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                {it.item_type === "main" ? (
+                  <>
+                    <div className="space-y-1"><Label className="text-xs">重量(kg)</Label><Input className="h-8" type="number" step="0.001" value={it.weight_kg} onChange={(e) => updateItem(idx, "weight_kg", e.target.value)} /></div>
+                    <div className="space-y-1"><Label className="text-xs">单价</Label><Input className="h-8" type="number" step="0.01" value={it.unit_price} onChange={(e) => updateItem(idx, "unit_price", e.target.value)} /></div>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-1"><Label className="text-xs">份数</Label><Input className="h-8" type="number" value={it.quantity} onChange={(e) => updateItem(idx, "quantity", e.target.value)} /></div>
+                    <div />
+                  </>
+                )}
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={() => removeItem(idx)}><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={() => addItem("main")}>+ 正品</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => addItem("accessory")}>+ 配套</Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => addItem("gift")}>+ 赠品</Button>
+            </div>
+          </div>
+
           <div className="bg-muted p-3 rounded-md space-y-1 text-sm">
             <div className="flex justify-between"><span className="text-muted-foreground">毛金额</span><span>${grossAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
             <div className="flex justify-between font-semibold border-t pt-1"><span>净金额</span><span className="text-primary">${Math.max(0, netAmount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
@@ -1065,7 +1232,7 @@ function FinishedProductBatchImportButton() {
         errors.push(`第${row.__line}行：产品编码和产品名称至少填一个`);
       }
       if (!row.quantity || isNaN(Number(row.quantity)) || Number(row.quantity) <= 0) {
-        errors.push(`第${row.__line}行：数量必须是大于0的数字`);
+        errors.push(`第${row.__line}行：份数必须是大于0的数字`);
       }
       if (!row.unit_price || isNaN(Number(row.unit_price))) {
         errors.push(`第${row.__line}行：单价必须是有效数字`);

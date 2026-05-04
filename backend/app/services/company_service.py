@@ -1,10 +1,8 @@
 from fastapi import HTTPException
-
 from typing import List, Optional
-
+from decimal import Decimal
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models import Company, CompanyType
 from app.schemas.company import CompanyCreate, CompanyUpdate
 

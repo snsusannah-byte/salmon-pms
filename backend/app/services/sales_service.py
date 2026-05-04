@@ -18,7 +18,7 @@ class SalesService:
             select(WholeFishSale)
             .options(
                 selectinload(WholeFishSale.receipts),
-                selectinload(WholeFishSale.aftersales_records),
+                selectinload(WholeFishSale.aftersales),
             )
             .where(WholeFishSale.id == sale_id)
         )
@@ -30,9 +30,13 @@ class SalesService:
         batch_id: Optional[int] = None,
         customer_id: Optional[int] = None,
         status: Optional[SalesStatus] = None,
+        search: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> Tuple[List[WholeFishSale], int]:
+        from sqlalchemy import or_
+        from app.models import Company, Batch
+        
         query = select(WholeFishSale)
         count_query = select(func.count(WholeFishSale.id))
 
@@ -43,6 +47,17 @@ class SalesService:
             filters.append(WholeFishSale.customer_id == customer_id)
         if status:
             filters.append(WholeFishSale.status == status)
+
+        if search:
+            search_filter = or_(
+                Company.name.ilike(f"%{search}%"),
+                Batch.batch_name.ilike(f"%{search}%"),
+                Batch.batch_code.ilike(f"%{search}%"),
+                WholeFishSale.sale_no.ilike(f"%{search}%"),
+            )
+            filters.append(search_filter)
+            query = query.join(Company, WholeFishSale.customer_id == Company.id, isouter=True).join(Batch, WholeFishSale.batch_id == Batch.id, isouter=True)
+            count_query = count_query.join(Company, WholeFishSale.customer_id == Company.id, isouter=True).join(Batch, WholeFishSale.batch_id == Batch.id, isouter=True)
 
         if filters:
             query = query.where(and_(*filters))

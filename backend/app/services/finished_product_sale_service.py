@@ -12,6 +12,10 @@ from app.models import (
     FinishedProductAftersales,
     SalesStatus,
     Company,
+    Product,
+    ProductCategory,
+    ProductPackaging,
+    WarehouseStock,
 )
 
 
@@ -70,10 +74,23 @@ class FinishedProductSaleService:
 
     @staticmethod
     async def create_sale(db: AsyncSession, data: dict) -> FinishedProductSale:
+        # V3: 自动计算总重量（份数 × 每份重量(g) / 1000）
+        if data.get("product_id") and data.get("quantity"):
+            result = await db.execute(
+                select(Product.portion_weight_g).where(Product.id == data["product_id"])
+            )
+            portion_weight_g = result.scalar()
+            if portion_weight_g:
+                data["total_weight_kg"] = Decimal(data["quantity"]) * Decimal(portion_weight_g) / Decimal("1000")
+        
         sale = FinishedProductSale(**data)
         db.add(sale)
         await db.commit()
         await db.refresh(sale)
+        
+        # V3: 扣减库存（成品 + 包装物料 + 配套）
+        await FinishedProductSaleService._deduct_stock(db, sale)
+        
         return sale
 
     @staticmethod
@@ -83,19 +100,237 @@ class FinishedProductSaleService:
         if sale.is_locked:
             raise HTTPException(status_code=400, detail="销售记录已锁定，不能修改")
 
+        # V3: 如果更新了产品或份数，需要调整库存
+        need_stock_update = (
+            "product_id" in data or 
+            "quantity" in data or 
+            "total_weight_kg" in data
+        )
+        
+        if need_stock_update:
+            # 先恢复旧库存
+            await FinishedProductSaleService._restore_stock(db, sale)
+        
+        # V3: 如果更新了产品或份数，重新计算总重量
+        product_id = data.get("product_id", sale.product_id)
+        quantity = data.get("quantity", sale.quantity)
+        if "product_id" in data or "quantity" in data:
+            from app.models import Product
+            result = await db.execute(
+                select(Product.portion_weight_g).where(Product.id == product_id)
+            )
+            portion_weight_g = result.scalar()
+            if portion_weight_g:
+                data["total_weight_kg"] = Decimal(quantity) * Decimal(portion_weight_g) / Decimal("1000")
+
         for field, value in data.items():
             if value is not None:
                 setattr(sale, field, value)
         await db.commit()
         await db.refresh(sale)
+        
+        # V3: 扣减新库存
+        if need_stock_update:
+            await FinishedProductSaleService._deduct_stock(db, sale)
+        
         return sale
 
     @staticmethod
     async def delete_sale(db: AsyncSession, sale: FinishedProductSale) -> None:
         if sale.is_locked:
             raise HTTPException(status_code=400, detail="销售记录已锁定，不能删除")
+        
+        # V3: 恢复库存
+        await FinishedProductSaleService._restore_stock(db, sale)
+        
         await db.delete(sale)
         await db.commit()
+
+    # ============== 库存扣减 ==============
+
+    @staticmethod
+    async def _deduct_stock(db: AsyncSession, sale: FinishedProductSale) -> None:
+        """销售时扣减库存：成品 + 包装物料 + 配套产品
+        
+        1. 成品肉：扣减重量(kg) = 份数 × 每份重量(g) / 1000
+        2. 配套产品：根据 product_accessories 配置扣减
+        3. 包装物料：根据 product_packagings 配置扣减
+        """
+        from sqlalchemy.orm import selectinload
+        from app.models.finished_product_v2 import WarehouseStock
+        from app.models import ProductAccessory
+        
+        quantity = Decimal(str(sale.quantity))
+        product_id = sale.product_id
+        sale_date = sale.sale_date
+        
+        # 1. 扣减成品肉库存（按重量kg）
+        if sale.total_weight_kg:
+            await FinishedProductSaleService._deduct_product_stock(
+                db, product_id, sale.total_weight_kg, sale_date
+            )
+        
+        # 2. 扣减配套产品库存
+        result = await db.execute(
+            select(ProductAccessory)
+            .options(selectinload(ProductAccessory.accessory))
+            .where(ProductAccessory.product_id == product_id)
+        )
+        accessories = result.scalars().all()
+        
+        for acc in accessories:
+            total_qty = acc.quantity * quantity
+            await FinishedProductSaleService._deduct_product_stock(
+                db, acc.accessory_id, total_qty, sale_date
+            )
+        
+        # 3. 扣减包装物料库存
+        result = await db.execute(
+            select(ProductPackaging)
+            .options(selectinload(ProductPackaging.material))
+            .where(ProductPackaging.product_id == product_id)
+        )
+        packagings = result.scalars().all()
+        
+        for pkg in packagings:
+            total_qty = pkg.quantity * quantity
+            await FinishedProductSaleService._deduct_product_stock(
+                db, pkg.material_id, total_qty, sale_date
+            )
+        
+        await db.commit()
+
+    @staticmethod
+    async def _deduct_product_stock(
+        db: AsyncSession, 
+        product_id: int, 
+        quantity: Decimal,
+        sale_date: date
+    ) -> None:
+        """扣减单个产品的库存"""
+        from app.models.finished_product_v2 import WarehouseStock
+        
+        result = await db.execute(
+            select(WarehouseStock).where(WarehouseStock.product_id == product_id)
+        )
+        stock = result.scalar_one_or_none()
+        
+        if stock:
+            # 扣减库存
+            stock.current_quantity -= quantity
+            stock.available_quantity = stock.current_quantity - stock.reserved_quantity
+            stock.last_out_date = sale_date
+            
+            # 检查预警
+            if stock.warning_threshold > 0 and stock.available_quantity < stock.warning_threshold:
+                stock.is_below_warning = True
+            else:
+                stock.is_below_warning = False
+            
+            db.add(stock)
+        else:
+            # 如果没有库存记录，创建一个（允许负库存）
+            new_stock = WarehouseStock(
+                product_id=product_id,
+                current_quantity=-quantity,
+                available_quantity=-quantity,
+                reserved_quantity=Decimal("0"),
+                last_out_date=sale_date,
+            )
+            db.add(new_stock)
+
+    @staticmethod
+    async def _restore_stock(db: AsyncSession, sale: FinishedProductSale) -> None:
+        """删除销售时恢复库存"""
+        from app.models.finished_product_v2 import WarehouseStock
+        from sqlalchemy.orm import selectinload
+        from app.models import ProductAccessory
+        
+        quantity = Decimal(str(sale.quantity))
+        product_id = sale.product_id
+        
+        # 1. 恢复成品肉库存
+        if sale.total_weight_kg:
+            await FinishedProductSaleService._restore_product_stock(
+                db, product_id, sale.total_weight_kg
+            )
+        
+        # 2. 恢复配套产品库存
+        result = await db.execute(
+            select(ProductAccessory)
+            .options(selectinload(ProductAccessory.accessory))
+            .where(ProductAccessory.product_id == product_id)
+        )
+        accessories = result.scalars().all()
+        
+        for acc in accessories:
+            total_qty = acc.quantity * quantity
+            await FinishedProductSaleService._restore_product_stock(
+                db, acc.accessory_id, total_qty
+            )
+        
+        # 3. 恢复包装物料库存
+        result = await db.execute(
+            select(ProductPackaging)
+            .options(selectinload(ProductPackaging.material))
+            .where(ProductPackaging.product_id == product_id)
+        )
+        packagings = result.scalars().all()
+        
+        for pkg in packagings:
+            total_qty = pkg.quantity * quantity
+            await FinishedProductSaleService._restore_product_stock(
+                db, pkg.material_id, total_qty
+            )
+        
+        await db.commit()
+
+    @staticmethod
+    async def _restore_product_stock(db: AsyncSession, product_id: int, quantity: Decimal) -> None:
+        """恢复单个产品的库存"""
+        from app.models.finished_product_v2 import WarehouseStock
+        
+        result = await db.execute(
+            select(WarehouseStock).where(WarehouseStock.product_id == product_id)
+        )
+        stock = result.scalar_one_or_none()
+        
+        if stock:
+            stock.current_quantity += quantity
+            stock.available_quantity = stock.current_quantity - stock.reserved_quantity
+            
+            if stock.warning_threshold > 0 and stock.available_quantity >= stock.warning_threshold:
+                stock.is_below_warning = False
+            
+            db.add(stock)
+
+    @staticmethod
+    async def _update_stock_on_sale_change(
+        db: AsyncSession, 
+        old_sale: FinishedProductSale, 
+        new_data: dict
+    ) -> None:
+        """更新销售时调整库存（先恢复旧库存，再扣减新库存）"""
+        # 恢复旧库存
+        await FinishedProductSaleService._restore_stock(db, old_sale)
+        
+        # 更新 old_sale 的字段以便扣减新库存
+        for field, value in new_data.items():
+            if value is not None and field != "id":
+                setattr(old_sale, field, value)
+        
+        # 重新计算总重量
+        if new_data.get("quantity") and new_data.get("product_id"):
+            result = await db.execute(
+                select(Product.portion_weight_g)
+                .where(Product.id == new_data["product_id"])
+            )
+            portion_weight_g = result.scalar()
+            if portion_weight_g:
+                old_sale.total_weight_kg = Decimal(new_data["quantity"]) * Decimal(portion_weight_g) / Decimal("1000")
+        
+        # 扣减新库存
+        await FinishedProductSaleService._deduct_stock(db, old_sale)
 
     # ============== 收款记录 ==============
 
@@ -250,6 +485,7 @@ class FinishedProductSaleService:
                 func.sum(FinishedProductSale.gross_amount),
                 func.sum(FinishedProductSale.net_amount),
                 func.sum(FinishedProductSale.paid_amount),
+                func.sum(FinishedProductSale.total_weight_kg),  # V3: 新增总重量
                 func.sum(
                     case(
                         (FinishedProductSale.status == SalesStatus.PENDING, 1), else_=0
@@ -276,6 +512,7 @@ class FinishedProductSaleService:
             total_gross,
             total_net,
             total_paid,
+            total_weight,
             pending,
             partial,
             fully,
@@ -288,6 +525,7 @@ class FinishedProductSaleService:
             "total_net_amount": total_net or Decimal("0"),
             "total_paid": total_paid or Decimal("0"),
             "total_unpaid": (total_net or Decimal("0")) - (total_paid or Decimal("0")),
+            "total_weight_kg": total_weight or Decimal("0"),  # V3: 新增
             "pending_count": pending or 0,
             "partial_count": partial or 0,
             "fully_paid_count": fully or 0,

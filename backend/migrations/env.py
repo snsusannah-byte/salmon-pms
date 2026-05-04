@@ -1,9 +1,8 @@
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
+from sqlalchemy import pool, create_engine
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
@@ -50,23 +49,15 @@ def do_run_migrations(connection: Connection) -> None:
     with context.begin_transaction():
         context.run_migrations()
 
-async def run_async_migrations() -> None:
-    configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = get_url()
-    
-    connectable = async_engine_from_config(
-        configuration,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-
-    await connectable.dispose()
-
 def run_migrations_online() -> None:
-    asyncio.run(run_async_migrations())
+    """同步方式运行迁移（修复async驱动问题）"""
+    url = get_url()
+    connectable = create_engine(url, poolclass=pool.NullPool)
+
+    with connectable.connect() as connection:
+        do_run_migrations(connection)
+
+    connectable.dispose()
 
 if context.is_offline_mode():
     run_migrations_offline()

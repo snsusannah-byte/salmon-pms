@@ -85,7 +85,7 @@ export function CompaniesPage() {
       const params = new URLSearchParams();
       if (search) params.append("search", search);
       if (type && type !== "all") params.append("type", type);
-      params.append("exclude_type", "customer");
+      params.append("exclude_type", "customer,supplier");
       params.append("skip", String((page - 1) * PAGE_SIZE));
       params.append("limit", String(PAGE_SIZE));
       const res = await api.get(`/v1/companies/?${params.toString()}`);

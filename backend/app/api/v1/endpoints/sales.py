@@ -1,7 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
+# from decimal import Decimal
+from datetime import date, datetime
 
 from app.core.database import get_db
 from app.models import SalesStatus, WholeFishSale, SalesReceipt, AftersalesRecord, Company, Batch, User
@@ -47,14 +50,17 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
         SalesReceiptResponse.model_validate(r) for r in (sale.receipts or [])
     ]
     aftersales = [
-        AftersalesRecordResponse.model_validate(a) for a in (sale.aftersales_records or [])
+        AftersalesRecordResponse.model_validate(a) for a in (sale.aftersales or [])
     ]
 
     return WholeFishSaleResponse(
         id=sale.id,
+        sale_no=sale.sale_no,
         batch_id=sale.batch_id,
         sale_date=sale.sale_date,
         customer_id=sale.customer_id,
+        spec=sale.spec,
+        box_count=sale.box_count,
         weight_kg=sale.weight_kg,
         unit_price=sale.unit_price,
         gross_amount=sale.gross_amount,
@@ -87,18 +93,40 @@ async def list_whole_fish_sales(
     batch_id: Optional[int] = Query(None, description="批次ID"),
     customer_id: Optional[int] = Query(None, description="客户ID"),
     status: Optional[SalesStatus] = Query(None, description="收款状态"),
+    search: Optional[str] = Query(None, description="搜索客户名称、批次名称或销售单号"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     """整鱼销售列表"""
     items, total = await SalesService.list_sales(
-        db=db, batch_id=batch_id, customer_id=customer_id, status=status, skip=skip, limit=limit
+        db=db, batch_id=batch_id, customer_id=customer_id, status=status, search=search, skip=skip, limit=limit
     )
     result_items = []
     for sale in items:
         result_items.append(await _build_sale_response(db, sale))
     return WholeFishSaleListResponse(total=total, items=result_items, skip=skip, limit=limit)
+
+
+async def _generate_sale_no(db: AsyncSession, sale_date: str) -> str:
+    """生成销售单号: XSYYYYMMDD-NNN"""
+    from sqlalchemy import func
+    from datetime import date
+    d = date.fromisoformat(sale_date)
+    prefix = f"XS{d.strftime('%Y%m%d')}"
+    
+    # 查询当天最大序号
+    result = await db.execute(
+        select(func.max(WholeFishSale.sale_no)).where(WholeFishSale.sale_no.like(f"{prefix}-%"))
+    )
+    max_no = result.scalar() or f"{prefix}-000"
+    
+    try:
+        seq = int(max_no.split("-")[-1]) + 1
+    except (ValueError, IndexError):
+        seq = 1
+    
+    return f"{prefix}-{seq:03d}"
 
 
 @router.post("/whole-fish", response_model=WholeFishSaleResponse, status_code=status.HTTP_201_CREATED)
@@ -107,7 +135,9 @@ async def create_whole_fish_sale(
     db: AsyncSession = Depends(get_db),
 ):
     """创建整鱼销售"""
-    sale = await SalesService.create_sale(db, data.model_dump())
+    payload = data.model_dump()
+    payload["sale_no"] = await _generate_sale_no(db, str(data.sale_date))
+    sale = await SalesService.create_sale(db, payload)
     return await _build_sale_response(db, sale)
 
 
@@ -149,6 +179,31 @@ async def delete_whole_fish_sale(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
     await SalesService.delete_sale(db, sale)
     return None
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: List[int]
+
+
+@router.post("/whole-fish/batch-delete")
+async def batch_delete_whole_fish_sales(
+    data: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量删除整鱼销售"""
+    deleted = 0
+    skipped = 0
+    for sale_id in data.ids:
+        sale = await SalesService.get_sale_by_id(db, sale_id)
+        if not sale:
+            skipped += 1
+            continue
+        if sale.is_locked:
+            skipped += 1
+            continue
+        await SalesService.delete_sale(db, sale)
+        deleted += 1
+    return {"deleted": deleted, "skipped": skipped}
 
 
 # ==================== 收款记录 ====================
@@ -255,18 +310,22 @@ async def get_sales_summary(
 
 @router.post("/batch-import", status_code=status.HTTP_201_CREATED)
 async def batch_import_sales(
-    records: List[dict],
+    data: dict = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
     """批量导入整鱼销售记录
     
-    每行数据需要包含: customer_name, sale_date, weight_kg, unit_price
-    自动查找或创建客户，自动计算金额
-    返回: {created: 新增数, errors: 错误列表, items: 销售列表}
+    支持格式: {rows: [...]} 或直接 [...]
     """
+    # 强制重新导入避免缓存问题
+    try:
+        from decimal import Decimal
+    except ImportError:
+        pass
+    records = data.get("rows", []) if isinstance(data, dict) else data
     from app.services.company_service import CompanyService
     from app.services.batch_service import BatchService
-    from decimal import Decimal
+    # from decimal import Decimal
     from datetime import date, datetime
     
     created_count = 0
@@ -275,9 +334,35 @@ async def batch_import_sales(
     
     for idx, record in enumerate(records):
         try:
+            # 必填字段校验
+            sale_date_str = record.get("sale_date", "").strip()
+            if not sale_date_str:
+                errors.append({"row": idx + 1, "error": "日期不能为空"})
+                continue
+            
             customer_name = record.get("customer_name", "").strip()
             if not customer_name:
-                errors.append({"row": idx + 1, "error": "客户名称不能为空"})
+                errors.append({"row": idx + 1, "error": "客户不能为空"})
+                continue
+            
+            batch_name = record.get("batch_name", "").strip()
+            if not batch_name:
+                errors.append({"row": idx + 1, "error": "批次名称不能为空"})
+                continue
+            
+            box_count_str = str(record.get("box_count", "")).strip()
+            if not box_count_str or not box_count_str.replace(".", "").isdigit():
+                errors.append({"row": idx + 1, "error": "箱数必须是大于0的数字"})
+                continue
+            
+            weight_kg_str = str(record.get("weight_kg", "")).strip()
+            if not weight_kg_str or not weight_kg_str.replace(".", "").isdigit():
+                errors.append({"row": idx + 1, "error": "重量必须是大于0的数字"})
+                continue
+            
+            unit_price_str = str(record.get("unit_price", "")).strip()
+            if not unit_price_str or not unit_price_str.replace(".", "").isdigit():
+                errors.append({"row": idx + 1, "error": "单价必须是有效数字"})
                 continue
             
             # 查找或创建客户
@@ -290,56 +375,76 @@ async def batch_import_sales(
                 customer_category=record.get("customer_category"),
             )
             
-            # 解析批次（按 batch_code 查找）
+            # 解析批次（按 batch_name 查找）
             batch_id = None
-            batch_code = record.get("batch_code", "").strip()
-            if batch_code:
-                batch = await BatchService.get_by_code(db, batch_code)
-                if batch:
-                    batch_id = batch.id
+            from sqlalchemy import select as sa_select
+            batch_result = await db.execute(
+                sa_select(Batch).where(Batch.batch_name == batch_name)
+            )
+            batch = batch_result.scalar_one_or_none()
+            if not batch:
+                batch_result = await db.execute(
+                    sa_select(Batch).where(Batch.batch_code == batch_name)
+                )
+                batch = batch_result.scalar_one_or_none()
+            if batch:
+                batch_id = batch.id
+            else:
+                errors.append({"row": idx + 1, "error": f"未找到批次: {batch_name}"})
+                continue
             
             # 解析销售日期
-            sale_date_str = record.get("sale_date", "").strip()
             sale_date = date.today()
-            if sale_date_str:
+            try:
+                sale_date = datetime.strptime(sale_date_str, "%Y-%m-%d").date()
+            except ValueError:
                 try:
-                    sale_date = datetime.strptime(sale_date_str, "%Y-%m-%d").date()
+                    sale_date = datetime.strptime(sale_date_str, "%Y/%m/%d").date()
                 except ValueError:
                     try:
-                        sale_date = datetime.strptime(sale_date_str, "%Y/%m/%d").date()
+                        sale_date = datetime.strptime(sale_date_str, "%m/%d/%Y").date()
                     except ValueError:
-                        pass
+                        errors.append({"row": idx + 1, "error": f"日期格式无效: {sale_date_str}"})
+                        continue
             
             # 解析重量和单价
-            weight_kg = Decimal(str(record.get("weight_kg", 0)))
-            unit_price = Decimal(str(record.get("unit_price", 0)))
-            scan_fee = Decimal(str(record.get("scan_fee", 0)))
+            weight_kg = float(record.get("weight_kg", 0))
+            unit_price = float(record.get("unit_price", 0))
+            box_count = int(float(record.get("box_count", 0)))
             
             # 计算金额
-            gross_amount = (weight_kg * unit_price).quantize(Decimal("0.01"))
-            net_amount = gross_amount - scan_fee
+            gross_amount = round(weight_kg * unit_price, 2)
+            net_amount = gross_amount
+            
+            # 生成销售单号（如果不存在）
+            sale_no = record.get("sale_no", "").strip()
+            if not sale_no:
+                sale_no = await _generate_sale_no(db, str(sale_date))
             
             # 创建销售记录
             sale_data = {
+                "sale_no": sale_no,
                 "customer_id": customer.id,
                 "batch_id": batch_id,
                 "sale_date": sale_date,
+                "spec": record.get("spec", "").strip() or None,
+                "box_count": box_count,
                 "weight_kg": weight_kg,
                 "unit_price": unit_price,
                 "gross_amount": gross_amount,
-                "scan_fee": scan_fee,
                 "net_amount": net_amount,
-                "paid_amount": Decimal("0"),
+                "paid_amount": 0,
                 "status": "pending",
                 "notes": record.get("notes", ""),
             }
-            
+
             sale = await SalesService.create_sale(db, sale_data)
             created_count += 1
             result_items.append(await _build_sale_response(db, sale))
             
         except Exception as e:
-            errors.append({"row": idx + 1, "error": str(e)})
+            import traceback
+            errors.append({"row": idx + 1, "error": f"{str(e)} | {traceback.format_exc()[:200]}"})
     
     return {
         "created": created_count,

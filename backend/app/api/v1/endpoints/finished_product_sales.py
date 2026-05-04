@@ -413,7 +413,7 @@ async def batch_import_finished_product_sales(
             commission = Decimal(str(record.get("commission", 0)))
 
             if quantity <= 0:
-                errors.append({"row": idx + 1, "error": "数量必须大于0"})
+                errors.append({"row": idx + 1, "error": "份数必须大于0"})
                 continue
             if unit_price <= 0:
                 errors.append({"row": idx + 1, "error": "单价必须大于0"})

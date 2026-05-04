@@ -14,8 +14,9 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import * as XLSX from "xlsx";
 
-type ImportType = "sales" | "companies" | "invoices" | "finance";
+type ImportType = "sales" | "companies" | "invoices" | "finance" | "transactions";
 
 interface ImportConfig {
   label: string;
@@ -28,16 +29,14 @@ const IMPORT_CONFIG: Record<ImportType, ImportConfig> = {
   sales: {
     label: "销售记录",
     templateHeaders: [
-      { en: "customer_name", cn: "客户名称" },
-      { en: "contact_person", cn: "联系人" },
-      { en: "phone", cn: "电话" },
-      { en: "address", cn: "地址" },
-      { en: "customer_category", cn: "客户分类" },
-      { en: "sale_date", cn: "销售日期" },
-      { en: "batch_code", cn: "批次编号" },
+      { en: "sale_no", cn: "销售单号" },
+      { en: "sale_date", cn: "日期" },
+      { en: "customer_name", cn: "客户" },
+      { en: "batch_name", cn: "批次名称" },
+      { en: "spec", cn: "规格" },
+      { en: "box_count", cn: "箱数" },
       { en: "weight_kg", cn: "重量(kg)" },
       { en: "unit_price", cn: "单价(USD)" },
-      { en: "scan_fee", cn: "扫描费" },
       { en: "salesperson_name", cn: "业务员" },
       { en: "notes", cn: "备注" },
     ],
@@ -100,6 +99,20 @@ const IMPORT_CONFIG: Record<ImportType, ImportConfig> = {
     apiEndpoint: "/v1/finance/batch-import",
     invalidateKeys: ["finance"],
   },
+  transactions: {
+    label: "交易流水",
+    templateHeaders: [
+      { en: "transaction_date", cn: "交易日期" },
+      { en: "type", cn: "类型(收入/支出)" },
+      { en: "category", cn: "分类" },
+      { en: "amount", cn: "金额" },
+      { en: "counterparty_name", cn: "对方名称" },
+      { en: "reference_no", cn: "参考号" },
+      { en: "description", cn: "描述" },
+    ],
+    apiEndpoint: "/v1/finance/transactions/batch-import",
+    invalidateKeys: ["transactions", "finance-summary"],
+  },
 };
 
 const PREVIEW_COUNT = 5;
@@ -117,16 +130,12 @@ export function BatchImportButton({ type }: { type: ImportType }) {
   const config = IMPORT_CONFIG[type];
 
   const downloadTemplate = () => {
-    const headers = config.templateHeaders.map((h) => h.cn).join(",");
-    const sample = config.templateHeaders.map(() => "").join(",");
-    const csvContent = `data:text/csv;charset=utf-8,\uFEFF${headers}\n${sample}`;
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `${config.label}导入模板.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const headers = config.templateHeaders.map((h) => h.cn);
+    const sample = config.templateHeaders.map(() => "");
+    const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template");
+    XLSX.writeFile(wb, `${config.label}导入模板.xlsx`);
     toast.success("模板已下载");
   };
 
@@ -173,12 +182,56 @@ export function BatchImportButton({ type }: { type: ImportType }) {
     };
   };
 
+  const parseXLSX = (buffer: ArrayBuffer) => {
+    const wb = XLSX.read(buffer, { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+
+    if (data.length < 2) {
+      throw new Error("文件内容为空，至少需要表头+一行数据");
+    }
+
+    const rawHeaders = data[0].map((h: any) => String(h).trim());
+    const headerMap: Record<string, string> = {};
+    const displayHeaders: string[] = [];
+
+    rawHeaders.forEach((h) => {
+      const found = config.templateHeaders.find((th) => th.cn === h || th.en === h);
+      if (found) {
+        headerMap[h] = found.en;
+        displayHeaders.push(found.cn);
+      } else {
+        headerMap[h] = h;
+        displayHeaders.push(h);
+      }
+    });
+
+    const rows = data
+      .slice(1)
+      .map((line, idx) => {
+        const row: Record<string, any> = {};
+        rawHeaders.forEach((h, i) => {
+          const key = headerMap[h] || h;
+          row[key] = line[i] !== undefined ? String(line[i]) : "";
+        });
+        row.__line = idx + 2;
+        return row;
+      })
+      .filter((r) => Object.values(r).some((v) => String(v).trim() !== "" && v !== r.__line));
+
+    return {
+      headers: displayHeaders,
+      rawHeaders: rawHeaders.map((h) => headerMap[h] || h),
+      rows,
+    };
+  };
+
   const validateRows = (rows: any[]) => {
     const errors: string[] = [];
 
     rows.forEach((row) => {
       if (type === "sales" && !row.customer_name) {
-        errors.push(`第${row.__line}行：客户名称不能为空`);
+        errors.push(`第${row.__line}行：客户不能为空`);
       }
       if (type === "companies" && !row.name) {
         errors.push(`第${row.__line}行：名称不能为空`);
@@ -201,8 +254,8 @@ export function BatchImportButton({ type }: { type: ImportType }) {
     setImportFile(file);
     setIsUploading(true);
     try {
-      const text = await file.text();
-      const { headers, rawHeaders, rows } = parseCSV(text);
+      const buffer = await file.arrayBuffer();
+      const { headers, rawHeaders, rows } = parseXLSX(buffer);
 
       if (rows.length === 0) {
         toast.error("未解析到有效数据行");
@@ -300,21 +353,21 @@ export function BatchImportButton({ type }: { type: ImportType }) {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv"
+                accept=".xlsx"
                 className="hidden"
                 onChange={handleFileChange}
               />
               <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600 mb-2">
-                {importFile ? importFile.name : "点击或拖拽 CSV 文件到此处"}
+                {importFile ? importFile.name : "点击或拖拽 XLSX 文件到此处"}
               </p>
-              <p className="text-sm text-gray-400">支持 .csv 格式（UTF-8 编码）</p>
+              <p className="text-sm text-gray-400">支持 .xlsx 格式</p>
             </div>
 
             {/* 格式说明 + 模板下载 */}
             <div className="text-sm text-gray-600 space-y-2">
               <div className="flex items-center justify-between">
-                <p className="font-medium">CSV 格式要求（第一行标题，数据从第二行开始）：</p>
+                <p className="font-medium">XLSX 格式要求（第一行标题，数据从第二行开始）：</p>
                 <Button variant="ghost" size="sm" onClick={downloadTemplate}>
                   <Download className="h-4 w-4 mr-2" />
                   下载模板

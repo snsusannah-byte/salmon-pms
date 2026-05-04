@@ -9,6 +9,8 @@ from app.schemas.finance import (
     ClearanceCostCreate, ClearanceCostUpdate, ClearanceCostResponse,
     TransactionRecordCreate, TransactionRecordUpdate, TransactionRecordResponse,
     FinanceSummary,
+    ImportFeeCreate, ImportFeeResponse,
+    BatchPurchaseTotalResponse,
 )
 from app.services.finance_service import FinanceService
 
@@ -20,12 +22,13 @@ router = APIRouter()
 @router.get("/exchange", response_model=List[ExchangeRecordResponse])
 async def list_exchange_records(
     invoice_id: Optional[int] = Query(None, description="发票ID"),
+    batch_id: Optional[int] = Query(None, description="批次ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    """购汇记录列表"""
-    items, total = await FinanceService.list_exchange_records(db, invoice_id=invoice_id, skip=skip, limit=limit)
+    """购汇记录列表（支持按发票或批次筛选）"""
+    items, total = await FinanceService.list_exchange_records(db, invoice_id=invoice_id, batch_id=batch_id, skip=skip, limit=limit)
     return [ExchangeRecordResponse.model_validate(r) for r in items]
 
 
@@ -72,7 +75,56 @@ async def delete_exchange_record(
     return None
 
 
-# ==================== 进口税费 ====================
+# ==================== 统一进口费用 ====================
+
+@router.get("/import-fees")
+async def list_import_fees(
+    invoice_id: Optional[int] = Query(None, description="发票ID"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """统一进口费用列表（合并税费+清关）"""
+    items, total = await FinanceService.list_import_fees(db, invoice_id=invoice_id, skip=skip, limit=limit)
+    return {
+        "items": items,
+        "total": total,
+    }
+
+
+@router.post("/import-fees", status_code=status.HTTP_201_CREATED)
+async def create_import_fee(
+    data: ImportFeeCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """创建统一进口费用（同时写入税费+清关表）"""
+    result = await FinanceService.create_import_fee(db, data.model_dump())
+    return {"success": True, "data": result}
+
+
+@router.delete("/import-fees/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_import_fee(
+    invoice_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除统一进口费用（同时删除税费+清关记录）"""
+    await FinanceService.delete_import_fee(db, invoice_id)
+    return None
+
+
+# ==================== 批次采购总额 ====================
+
+@router.get("/batch-purchase-total")
+async def get_batch_purchase_total(
+    batch_id: int = Query(..., description="批次ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取批次采购总额（汇总该批次下所有发票的USD金额）"""
+    result = await FinanceService.get_batch_purchase_total(db, batch_id)
+    return {"success": True, "data": result}
+
+
+# ==================== 进口税费 (保留旧接口兼容) ====================
 
 @router.get("/taxes", response_model=List[ImportTaxResponse])
 async def list_import_taxes(
@@ -129,7 +181,7 @@ async def delete_import_tax(
     return None
 
 
-# ==================== 清关运费 ====================
+# ==================== 清关运费 (保留旧接口兼容) ====================
 
 @router.get("/clearance", response_model=List[ClearanceCostResponse])
 async def list_clearance_costs(
@@ -330,6 +382,68 @@ async def batch_import_finance(
                 
             else:
                 errors.append({"row": idx + 1, "error": f"未知的记录类型: {record_type}"})
+                
+        except Exception as e:
+            errors.append({"row": idx + 1, "error": str(e)})
+    
+    return {
+        "created": created_count,
+        "errors": errors,
+    }
+
+
+@router.post("/transactions/batch-import", status_code=status.HTTP_201_CREATED)
+async def batch_import_transactions(
+    records: List[dict],
+    db: AsyncSession = Depends(get_db),
+):
+    """批量导入交易流水记录
+    
+    支持导入: 交易流水
+    返回: {created: 新增数, errors: 错误列表}
+    """
+    from decimal import Decimal
+    from datetime import datetime
+    
+    created_count = 0
+    errors = []
+    
+    for idx, record in enumerate(records):
+        try:
+            transaction_date = record.get("transaction_date", "").strip()
+            if not transaction_date:
+                errors.append({"row": idx + 1, "error": "交易日期不能为空"})
+                continue
+            
+            type_str = record.get("type", "").strip().lower()
+            if type_str not in ["income", "expense", "transfer", "exchange", "收入", "支出", "转账", "购汇"]:
+                errors.append({"row": idx + 1, "error": f"未知的交易类型: {type_str}"})
+                continue
+            
+            # Normalize type
+            type_map = {
+                "收入": "income", "支出": "expense", "转账": "transfer", "购汇": "exchange",
+            }
+            normalized_type = type_map.get(type_str, type_str)
+            
+            amount = Decimal(str(record.get("amount", 0)))
+            if amount <= 0:
+                errors.append({"row": idx + 1, "error": "金额必须大于0"})
+                continue
+            
+            data = {
+                "transaction_date": datetime.strptime(transaction_date, "%Y-%m-%d").date(),
+                "type": normalized_type,
+                "category": record.get("category", "other").strip(),
+                "amount": amount,
+                "currency": "CNY",
+                "counterparty_name": record.get("counterparty_name", "").strip() or None,
+                "reference_no": record.get("reference_no", "").strip() or None,
+                "description": record.get("description", "").strip() or None,
+            }
+            
+            await FinanceService.create_transaction(db, data)
+            created_count += 1
                 
         except Exception as e:
             errors.append({"row": idx + 1, "error": str(e)})

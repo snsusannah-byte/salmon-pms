@@ -256,10 +256,13 @@ class ImportInvoice(Base, TimestampMixin):
 
 class ProductCategory(str, Enum):
     """产品分类"""
-    WHOLE_FISH = "whole_fish"           # 整鱼规格
-    FINISHED_PRODUCT = "finished_product"  # 成品定义
-    BYPRODUCT = "byproduct"              # 副产品
-    BOM_MATERIAL = "bom_material"      # BOM物料/包材
+    WHOLE_FISH = "WHOLE_FISH"           # 进口规格（整鱼）
+    FILLET = "FILLET"                   # 进口规格（鱼柳）
+    FINISHED_PRODUCT = "FINISHED_PRODUCT"  # 成品定义
+    BYPRODUCT = "BYPRODUCT"              # 副产品
+    PACKAGING = "PACKAGING"             # 包装物料
+    ACCESSORY = "ACCESSORY"             # 配套
+    BOM_MATERIAL = "BOM_MATERIAL"      # BOM物料/包材（兼容旧数据）
 
 
 class Product(Base, TimestampMixin):
@@ -281,8 +284,14 @@ class Product(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text)
     
-    # 成品价格策略（仅成品使用）
+    # V3: 品牌（关联公司名称）
+    brand: Mapped[Optional[str]] = mapped_column(String(100))  # 品牌名称：无品牌/中挪三文鱼/海兴悦三文鱼/北辰海选汇
     cost_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 成本价（自动计算：BOM成本+包装物成本）
+
+    # V3: 物料管理专用字段（仅 bom_material 使用）
+    supplier_id: Mapped[Optional[int]] = mapped_column(Integer)  # 供应商ID
+    lead_time_days: Mapped[Optional[int]] = mapped_column(Integer)  # 供货周期(天)
+    last_purchase_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 4))  # 最近采购价
     suggested_retail_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 建议零售价
     wholesale_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 批发价
     min_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 最低价
@@ -330,6 +339,21 @@ class ProductPackaging(Base, TimestampMixin):
 
     product: Mapped["Product"] = relationship("Product", foreign_keys=[product_id], lazy="raise")
     material: Mapped["Product"] = relationship("Product", foreign_keys=[material_id], lazy="raise")
+
+
+class ProductAccessory(Base, TimestampMixin):
+    """成品配套产品（拼盘/附加产品）如：去尾甜虾、配菜"""
+    __tablename__ = "product_accessories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    accessory_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)  # 配套产品ID
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)  # 每份用量
+    unit: Mapped[str] = mapped_column(String(20), default="个")
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    product: Mapped["Product"] = relationship("Product", foreign_keys=[product_id], lazy="raise")
+    accessory: Mapped["Product"] = relationship("Product", foreign_keys=[accessory_id], lazy="raise")
 
 
 class InvoiceProduct(Base, TimestampMixin):
@@ -399,17 +423,18 @@ class BatchInvoice(Base, TimestampMixin):
 # ==================== 财务层 ====================
 
 class ExchangeRecord(Base, TimestampMixin):
-    """购汇记录（1张发票支持N条）"""
+    """购汇记录（1张发票支持N条，新增批次关联）"""
     __tablename__ = "exchange_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    invoice_id: Mapped[int] = mapped_column(ForeignKey("import_invoices.id"), nullable=False)
+    invoice_id: Mapped[Optional[int]] = mapped_column(ForeignKey("import_invoices.id"), nullable=True)
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"), nullable=True)
     exchange_date: Mapped[Date] = mapped_column(Date, nullable=False)
     amount_usd: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     exchange_rate: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
     amount_cny: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     fee_cny: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
-    bank_account_id: Mapped[int] = mapped_column(ForeignKey("bank_accounts.id"))
+    bank_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bank_accounts.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="completed")
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
@@ -452,9 +477,12 @@ class WholeFishSale(Base, TimestampMixin):
     __tablename__ = "whole_fish_sales"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sale_no: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"), nullable=False)
     sale_date: Mapped[Date] = mapped_column(Date, nullable=False)
     customer_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    spec: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    box_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     gross_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
@@ -470,6 +498,9 @@ class WholeFishSale(Base, TimestampMixin):
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
+    receipts: Mapped[List["SalesReceipt"]] = relationship("SalesReceipt", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
+    aftersales: Mapped[List["AftersalesRecord"]] = relationship("AftersalesRecord", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
+
 
 class FinishedProductSale(Base, TimestampMixin):
     """成品销售"""
@@ -479,7 +510,7 @@ class FinishedProductSale(Base, TimestampMixin):
     sale_date: Mapped[Date] = mapped_column(Date, nullable=False)
     customer_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)  # 件数
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)  # 份数
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     gross_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     scan_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
@@ -491,6 +522,8 @@ class FinishedProductSale(Base, TimestampMixin):
     salesperson_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[Optional[str]] = mapped_column(Text)
+    # V3: 新增总重量（份数 × 每份重量(g) / 1000）
+    total_weight_kg: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3), default=Decimal("0"))
 
     receipts: Mapped[List["FinishedProductReceipt"]] = relationship(
         "FinishedProductReceipt",
@@ -547,6 +580,8 @@ class SalesReceipt(Base, TimestampMixin):
     reference_no: Mapped[Optional[str]] = mapped_column(String(100))
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
+    sale: Mapped["WholeFishSale"] = relationship("WholeFishSale", back_populates="receipts")
+
 
 class AftersalesRecord(Base, TimestampMixin):
     """售后记录"""
@@ -560,6 +595,8 @@ class AftersalesRecord(Base, TimestampMixin):
     reason: Mapped[Optional[str]] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="pending")
     notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    sale: Mapped["WholeFishSale"] = relationship("WholeFishSale", back_populates="aftersales")
 
 
 # ==================== 统一交易流水 ====================
@@ -670,3 +707,27 @@ class SystemConfig(Base, TimestampMixin):
     config_type: Mapped[str] = mapped_column(String(20), default="string")  # string, int, float, bool, json
     description: Mapped[Optional[str]] = mapped_column(Text)
     is_editable: Mapped[bool] = mapped_column(Boolean, default=True)
+
+"""
+成品销售模块V2 - 模型导出扩展
+在现有 models/__init__.py 中追加导入以下内容
+"""
+
+# ==================== 新增导入（追加到现有 __init__.py 末尾）====================
+
+from app.models.finished_product_v2 import (
+    # 枚举
+    SlaughterType,
+    LossType,
+    SaleItemType,
+    # 模型
+    DailySlaughterRecord,
+    WarehousePurchaseOrder,
+    WarehouseStock,
+    FinishedProductSaleItem,
+    LossRecord,
+    FinishedProductCommission,
+)
+
+# 这样现有代码可以通过 from app.models import DailySlaughterRecord 等方式使用新模型
+

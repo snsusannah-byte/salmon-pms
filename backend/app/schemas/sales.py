@@ -73,9 +73,12 @@ class AftersalesRecordResponse(AftersalesRecordBase):
 
 class WholeFishSaleBase(BaseModel):
     """整鱼销售基础"""
+    sale_no: Optional[str] = Field(None, max_length=20, description="销售单号")
     batch_id: int = Field(..., description="批次ID")
     sale_date: date = Field(..., description="销售日期")
     customer_id: int = Field(..., description="客户ID")
+    spec: Optional[str] = Field(None, max_length=50, description="规格")
+    box_count: Optional[int] = Field(None, ge=0, description="箱数")
     weight_kg: Decimal = Field(..., gt=0, description="重量(kg)")
     unit_price: Decimal = Field(..., gt=0, description="单价")
     gross_amount: Decimal = Field(..., gt=0, description="毛金额")
@@ -99,6 +102,8 @@ class WholeFishSaleUpdate(BaseModel):
     batch_id: Optional[int] = None
     sale_date: Optional[date] = None
     customer_id: Optional[int] = None
+    spec: Optional[str] = Field(None, max_length=50)
+    box_count: Optional[int] = Field(None, ge=0)
     weight_kg: Optional[Decimal] = Field(None, gt=0)
     unit_price: Optional[Decimal] = Field(None, gt=0)
     gross_amount: Optional[Decimal] = Field(None, gt=0)
