@@ -35,6 +35,7 @@ import {
   ArrowUpRight,
   Printer,
   Languages,
+  FileText,
 } from "lucide-react";
 
 // ==================== 工具函数 ====================
