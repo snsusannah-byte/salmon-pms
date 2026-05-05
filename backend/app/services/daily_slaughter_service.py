@@ -199,17 +199,47 @@ class DailySlaughterService:
 
     @staticmethod
     async def _deduct_warehouse_stock(db: AsyncSession, record: DailySlaughterRecord):
-        """宰杀登记时自动扣减整鱼/鱼柳库存"""
-        # 查找整鱼或鱼柳产品（假设有对应关系）
-        # 简化：根据slaughter_type查找对应产品类别的库存
-        category_map = {
-            SlaughterType.WHOLE_FISH.value: ProductCategory.WHOLE_FISH.value,
-            SlaughterType.FILLET.value: ProductCategory.FINISHED_PRODUCT.value,  # 鱼柳作为成品分类
-        }
-        
-        # 这里简化处理：实际业务中需要更精确的产品映射
-        # 扣减逻辑在warehouse_service中处理
-        pass
+        """宰杀登记时自动扣减整鱼/鱼柳库存，并将产出入库到成品仓库"""
+        from app.services.warehouse_service import WarehouseService
+        from app.models import Product
+        from sqlalchemy import select
+
+        # 1. 扣减原料库存（整鱼仓库）
+        category_filter = (
+            ProductCategory.WHOLE_FISH.value
+            if record.slaughter_type == SlaughterType.WHOLE_FISH.value
+            else ProductCategory.FILLET.value
+        )
+        result = await db.execute(
+            select(Product).where(Product.category == category_filter).limit(1)
+        )
+        raw_product = result.scalar_one_or_none()
+
+        if raw_product:
+            try:
+                await WarehouseService.stock_out(
+                    db,
+                    product_id=raw_product.id,
+                    quantity=record.total_weight_kg,
+                    reason=f"屠宰消耗 {record.slaughter_date}",
+                )
+            except ValueError:
+                pass
+
+        # 2. 成品肉入库（成品仓库）
+        result = await db.execute(
+            select(Product).where(Product.category == ProductCategory.FINISHED_PRODUCT.value).limit(1)
+        )
+        finished_product = result.scalar_one_or_none()
+
+        if finished_product and record.meat_weight_kg > 0:
+            await WarehouseService.stock_in(
+                db,
+                product_id=finished_product.id,
+                quantity=record.meat_weight_kg,
+                unit_price=record.cost_price_per_kg or Decimal("0"),
+                reason=f"屠宰产出 {record.slaughter_date}",
+            )
 
     @staticmethod
     async def update_record(

@@ -19,6 +19,8 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { SalespersonPage } from "@/pages/SalespersonPage";
 import { CommissionPage } from "@/pages/CommissionPage";
 import { SuppliersPage } from "@/pages/SuppliersPage";
+import { DailySlaughterPage } from "@/pages/DailySlaughterPage";
+import { LossRecordsPage } from "@/pages/LossRecordsPage";
 import NotificationsPage from "@/pages/NotificationsPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
@@ -50,6 +52,8 @@ const router = createBrowserRouter([
       { path: "suppliers", element: <SuppliersPage /> },
       { path: "salespersons", element: <SalespersonPage /> },
       { path: "commissions", element: <CommissionPage /> },
+      { path: "daily-slaughter", element: <DailySlaughterPage /> },
+      { path: "loss-records", element: <LossRecordsPage /> },
       { path: "notifications", element: <NotificationsPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

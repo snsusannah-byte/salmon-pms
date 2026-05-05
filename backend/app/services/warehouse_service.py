@@ -255,6 +255,7 @@ class WarehouseService:
         product_id: int,
         quantity: Decimal,
         unit_price: Optional[Decimal] = None,
+        reason: str = "manual",
     ) -> WarehouseStock:
         """直接入库（无采购单）"""
         stock = await WarehouseService.get_or_create_stock(db, product_id)
