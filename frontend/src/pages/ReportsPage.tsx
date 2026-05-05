@@ -451,7 +451,7 @@ function InvoiceReportsTab() {
                     </TableCell>
                     <TableCell className="text-center">
                       <Dialog>
-                        <DialogTrigger asChild>
+                        <DialogTrigger>
                           <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setDetailId(item.invoice_id)}>
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
@@ -613,7 +613,7 @@ function ReceivableStatementsTab() {
                     </TableCell>
                     <TableCell className="text-center">
                       <Dialog>
-                        <DialogTrigger asChild>
+                        <DialogTrigger>
                           <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setDetailCustomer(item)}>
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
@@ -776,7 +776,7 @@ function PayableStatementsTab() {
                     </TableCell>
                     <TableCell className="text-center">
                       <Dialog>
-                        <DialogTrigger asChild>
+                        <DialogTrigger>
                           <Button variant="ghost" size="sm" className="h-7 px-2">
                             <Eye className="h-3.5 w-3.5" />
                           </Button>

@@ -18,6 +18,7 @@ from app.api.v1.endpoints import (
     warehouse,
     loss_records,
     finished_product_sales_v2,
+    materials,
 )
 
 api_router = APIRouter()
@@ -41,3 +42,4 @@ api_router.include_router(daily_slaughter.router, prefix="/daily-slaughter", tag
 api_router.include_router(warehouse.router, prefix="/warehouse", tags=["warehouse"])
 api_router.include_router(loss_records.router, prefix="/loss-records", tags=["loss-records"])
 api_router.include_router(finished_product_sales_v2.router, prefix="/finished-product-sales", tags=["finished-product-sales-v2"])
+api_router.include_router(materials.router, prefix="/materials", tags=["物料管理"])

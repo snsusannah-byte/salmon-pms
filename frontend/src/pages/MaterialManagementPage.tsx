@@ -93,7 +93,7 @@ export function MaterialManagementPage() {
   const { data: materialsData, isLoading: mLoading } = useQuery({
     queryKey: ["materials"],
     queryFn: async () => {
-      const res = await api.get("/v1/products/?category=bom_material&limit=500");
+      const res = await api.get("/v1/materials/?limit=500");
       return res.data.items as Material[];
     },
   });
