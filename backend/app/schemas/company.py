@@ -10,7 +10,9 @@ from app.models import CompanyType, CustomerCategory
 class CompanyBase(BaseModel):
     """主体基础信息"""
     name: str = Field(..., max_length=200, description="主体名称")
-    chinese_name: Optional[str] = Field(None, max_length=200, description="中文名称")
+    chinese_name: Optional[str] = Field(None, max_length=200, description="中文名称（备用）")
+    company_full_name: Optional[str] = Field(None, max_length=200, description="公司全称")
+    brands: Optional[str] = Field(None, max_length=500, description="旗下品牌（逗号分隔）")
     type: CompanyType = Field(..., description="主体类型")
     code: Optional[str] = Field(None, max_length=50, description="EU注册号（加工厂对外的短号）")
     cooperation_date: Optional[str] = Field(None, description="合作日期")
@@ -61,6 +63,8 @@ class CompanyUpdate(BaseModel):
     """更新主体请求"""
     name: Optional[str] = Field(None, max_length=200)
     chinese_name: Optional[str] = Field(None, max_length=200)
+    company_full_name: Optional[str] = Field(None, max_length=200)
+    brands: Optional[str] = Field(None, max_length=500)
     type: Optional[CompanyType] = None
     code: Optional[str] = Field(None, max_length=50)
     cooperation_date: Optional[str] = None

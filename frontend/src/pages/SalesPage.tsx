@@ -1,5 +1,5 @@
 
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -31,6 +31,16 @@ const statusMap: Record<string, { label: string; color: string }> = {
   after_sales: { label: "售后中", color: "bg-purple-100 text-purple-800" },
 };
 
+interface WholeFishSaleItem {
+  id?: number;
+  sale_id?: number;
+  spec: string;
+  box_count: number;
+  weight_kg: string;
+  unit_price: string;
+  amount: string;
+}
+
 interface Sale {
   id: number;
   sale_no: string | null;
@@ -59,6 +69,7 @@ interface Sale {
   is_locked: boolean;
   receipts: Receipt[];
   aftersales: Aftersales[];
+  items?: WholeFishSaleItem[];
 }
 
 interface Receipt {
@@ -67,8 +78,10 @@ interface Receipt {
   receipt_date: string;
   amount: string;
   payment_method: string;
+  bank_account_id?: number | null;
   reference_no: string | null;
   notes: string | null;
+  transaction_id?: number | null;
 }
 
 interface Aftersales {
@@ -214,6 +227,19 @@ export function SalesPage() {
     }
   };
 
+  const [adjBankAccountId, setAdjBankAccountId] = useState("");
+  const [adjReceiptDate, setAdjReceiptDate] = useState("");
+
+  // 银行账户列表
+  const { data: bankAccountsData } = useQuery({
+    queryKey: ["bank-accounts"],
+    queryFn: async () => {
+      const res = await api.get("/v1/finance/bank-accounts");
+      return res.data;
+    },
+  });
+  const bankAccounts = bankAccountsData || [];
+
   const handleOpenAdjust = (sale: Sale) => {
     setAdjustSale(sale);
     setAdjRounding(String(sale.rounding_adjustment ?? 0));
@@ -221,6 +247,8 @@ export function SalesPage() {
     setAdjAfterSalesIssue(sale.notes ?? "");
     setAdjDiscount(String(sale.discount ?? 0));
     setAdjCommission(String(sale.commission ?? 0));
+    setAdjBankAccountId("");
+    setAdjReceiptDate(new Date().toISOString().split("T")[0]);
     // 默认收款 = 应收金额（毛金额 - 折扣 - 售后调整）
     const gross = Number(sale.gross_amount || 0);
     const discount = Number(sale.discount || 0);
@@ -244,21 +272,47 @@ export function SalesPage() {
     onError: (err: any) => toast.error(err.response?.data?.detail || "调整失败"),
   });
 
-  const handleSaveAdjust = () => {
+  const handleSaveAdjust = async () => {
     if (!adjustSale) return;
     const gross = Number(adjustSale.gross_amount);
-    const net = Math.max(0, gross - Number(adjRounding || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0));
-    adjustMutation.mutate({
-      id: adjustSale.id,
-      body: {
+    const net = Math.max(0, gross
+      - Number(adjustSale.scan_fee || 0)
+      - Number(adjRounding || 0)
+      - Number(adjAfterSales || 0)
+      - Number(adjDiscount || 0)
+      - Number(adjustSale.commission || 0)
+    );
+    const paidAmount = Number(adjPaidAmount || 0);
+
+    try {
+      // 先保存调整项
+      await api.put(`/v1/sales/whole-fish/${adjustSale.id}`, {
         rounding_adjustment: Number(adjRounding || 0),
         after_sales_adjustment: Number(adjAfterSales || 0),
         discount: Number(adjDiscount || 0),
         net_amount: net,
-        paid_amount: Number(adjPaidAmount || 0),
         notes: adjAfterSalesIssue.trim() || undefined,
-      },
-    });
+      });
+
+      // 如果本次收款金额 > 0，创建收款记录
+      if (paidAmount > 0) {
+        await api.post(`/v1/sales/whole-fish/${adjustSale.id}/receipts`, {
+          receipt_date: adjReceiptDate || new Date().toISOString().split("T")[0],
+          amount: paidAmount,
+          payment_method: "bank_transfer",
+          bank_account_id: adjBankAccountId ? Number(adjBankAccountId) : null,
+          reference_no: null,
+          notes: "销售调整收款",
+        });
+      }
+
+      toast.success("调整已保存");
+      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      setAdjustDialogOpen(false);
+      setAdjustSale(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "调整失败");
+    }
   };
 
   return (
@@ -374,6 +428,25 @@ export function SalesPage() {
                     <span className="text-sm text-muted-foreground whitespace-nowrap">
                       应收: ${adjustSale ? Math.max(0, Number(adjustSale.gross_amount) - Number(adjDiscount || 0) - Number(adjAfterSales || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}
                     </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">收款银行</Label>
+                      <Select value={adjBankAccountId} onValueChange={(v) => setAdjBankAccountId(v ?? "")}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="选择银行" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {bankAccounts.map((b: any) => (
+                            <SelectItem key={b.id} value={String(b.id)} className="text-xs">{b.bank_name} {b.account_number?.slice(-4)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">收款日期</Label>
+                      <Input type="date" value={adjReceiptDate} onChange={(e) => setAdjReceiptDate(e.target.value)} className="h-8 text-xs" />
+                    </div>
                   </div>
                   {Number(adjRounding) > 0 && (
                     <div className="text-xs text-orange-600">
@@ -621,7 +694,16 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
       setBatchId(String(initialData.batch_id));
       setCustomerId(String(initialData.customer_id));
       setSalespersonId(initialData.salesperson_id ? String(initialData.salesperson_id) : "");
-      setSpecItems([{ spec: initialData.spec ?? "", box_count: initialData.box_count ? String(initialData.box_count) : "", weight_kg: String(initialData.weight_kg), unit_price: String(initialData.unit_price) }]);
+      if (initialData.items && initialData.items.length > 0) {
+        setSpecItems(initialData.items.map(it => ({
+          spec: it.spec ?? "",
+          box_count: it.box_count ? String(it.box_count) : "",
+          weight_kg: String(it.weight_kg),
+          unit_price: String(it.unit_price),
+        })));
+      } else {
+        setSpecItems([{ spec: initialData.spec ?? "", box_count: initialData.box_count ? String(initialData.box_count) : "", weight_kg: String(initialData.weight_kg), unit_price: String(initialData.unit_price) }]);
+      }
       setNotes(initialData.notes ?? "");
     } else {
       setSaleDate(new Date().toISOString().split("T")[0]);
@@ -667,19 +749,32 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
       const firstItem = validItems[0];
       const totalWeight = validItems.reduce((s, it) => s + (Number(it.weight_kg) || 0), 0);
       const totalGross = validItems.reduce((s, it) => s + (Number(it.weight_kg) || 0) * (Number(it.unit_price) || 0), 0);
-      const payload = {
+      const totalBoxCount = validItems.reduce((s, it) => s + (Number(it.box_count) || 0), 0);
+
+      // 构建 items 数组
+      const itemsPayload = validItems.map((it, idx) => ({
+        spec: it.spec || "",
+        box_count: Number(it.box_count) || 0,
+        weight_kg: Number(it.weight_kg),
+        unit_price: Number(it.unit_price),
+        sort_order: idx,
+      }));
+
+      const payload: any = {
         sale_date: saleDate,
         batch_id: Number(batchId),
         customer_id: Number(customerId),
         salesperson_id: salespersonId ? Number(salespersonId) : undefined,
         spec: firstItem.spec || undefined,
-        box_count: Number(firstItem.box_count) || undefined,
+        box_count: totalBoxCount || undefined,
         weight_kg: Number(totalWeight),
         unit_price: totalWeight > 0 ? totalGross / totalWeight : 0,
         gross_amount: totalGross,
         net_amount: totalGross,
         notes: notes.trim() || undefined,
+        items: itemsPayload,
       };
+
       if (initialData) {
         await api.put(`/v1/sales/whole-fish/${initialData.id}`, payload);
         toast.success("销售记录更新成功");
@@ -698,7 +793,7 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { onOpenChange(false); resetForm(); } }}>
-      <DialogContent className="!w-[520px] !max-w-[520px] max-h-[90vh] overflow-y-auto p-6">
+      <DialogContent className="!w-[480px] !max-w-[95vw] max-h-[90vh] overflow-y-auto p-5">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
             {initialData ? "编辑销售记录" : "新增销售记录"}
@@ -719,8 +814,12 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
             <div className="space-y-2">
               <Label>批号 <span className="text-red-500">*</span></Label>
               <Select value={batchId} onValueChange={(v) => setBatchId(v ?? "")}>
-                <SelectTrigger className="h-10"><SelectValue placeholder="选择批号" /></SelectTrigger>
-                <SelectContent>{batchesData?.items?.map((b: any) => <SelectItem key={b.id} value={String(b.id)}>{b.batch_code}</SelectItem>)}</SelectContent>
+                <SelectTrigger className="h-10">
+                  <SelectValue placeholder="选择批号">
+                    {batchesData?.items?.find((b: any) => String(b.id) === batchId)?.batch_name ?? <span className="text-muted-foreground">选择批号</span>}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>{batchesData?.items?.map((b: any) => <SelectItem key={b.id} value={String(b.id)}>{b.batch_name} <span className="text-muted-foreground text-xs">({b.batch_code})</span></SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>
@@ -729,10 +828,12 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
           <div className="grid grid-cols-2 gap-5">
             <div className="space-y-2">
               <Label>客户 <span className="text-red-500">*</span></Label>
-              <Select value={customerId} onValueChange={(v) => setCustomerId(v ?? "")}>
-                <SelectTrigger className="h-10"><SelectValue placeholder="选择客户" /></SelectTrigger>
-                <SelectContent>{customersData?.items?.map((c: any) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
+              <CustomerSearchSelect
+                customers={customersData?.items || []}
+                value={customerId}
+                onChange={setCustomerId}
+                placeholder="选择客户"
+              />
             </div>
             <div className="space-y-2">
               <Label>业务员</Label>
@@ -743,40 +844,44 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
             </div>
           </div>
 
-          {/* 规格明细 */}
+          {/* 产品明细 */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label>规格明细</Label>
-              <Button type="button" variant="outline" size="sm" onClick={addSpecItem}><Plus className="h-4 w-4 mr-1" />添加规格</Button>
+              <Label>产品明细</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addSpecItem}><Plus className="h-4 w-4 mr-1" />添加产品</Button>
             </div>
             <div className="space-y-2">
               {specItems.map((item, idx) => {
                 const amount = (Number(item.weight_kg) || 0) * (Number(item.unit_price) || 0);
+                const selectedProduct = importSpecs.find((p: any) => (p.spec || p.name) === item.spec);
                 return (
-                  <div key={idx} className="grid grid-cols-[1fr_80px_100px_100px_80px_40px] gap-2 items-center">
+                  <div key={idx} className="grid grid-cols-[70px_1fr_50px_65px_65px_60px_26px] gap-2 items-center">
+                    <div className="text-xs font-medium truncate min-w-0" title={selectedProduct?.name}>
+                      {selectedProduct?.name || <span className="text-muted-foreground">产品</span>}
+                    </div>
                     <Select value={item.spec} onValueChange={(v) => updateSpecItem(idx, "spec", v ?? "")}>
-                      <SelectTrigger className="h-9"><SelectValue placeholder="选择规格" /></SelectTrigger>
+                      <SelectTrigger className="h-8 text-xs px-2"><SelectValue placeholder="规格" /></SelectTrigger>
                       <SelectContent>
                         {importSpecs.map((p: any) => (
-                          <SelectItem key={p.id} value={p.spec || p.name}>{p.spec || p.name} ({p.code})</SelectItem>
+                          <SelectItem key={p.id} value={p.spec || p.name} className="text-xs">{p.spec || p.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <Input inputMode="decimal" value={item.box_count} onChange={(e) => updateSpecItem(idx, "box_count", e.target.value)} className="h-9 text-center" placeholder="箱数" />
-                    <Input inputMode="decimal" value={item.weight_kg} onChange={(e) => updateSpecItem(idx, "weight_kg", e.target.value)} className="h-9 text-center" placeholder="重量" />
-                    <Input inputMode="decimal" value={item.unit_price} onChange={(e) => updateSpecItem(idx, "unit_price", e.target.value)} className="h-9 text-center" placeholder="单价" />
-                    <div className="text-right font-medium text-sm">¥{amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => removeSpecItem(idx)} disabled={specItems.length <= 1}>
-                      <X className="h-4 w-4" />
+                    <Input inputMode="decimal" value={item.box_count} onChange={(e) => updateSpecItem(idx, "box_count", e.target.value)} className="h-8 text-center text-xs px-1" placeholder="箱" />
+                    <Input inputMode="decimal" value={item.weight_kg} onChange={(e) => updateSpecItem(idx, "weight_kg", e.target.value)} className="h-8 text-center text-xs px-1" placeholder="kg" />
+                    <Input inputMode="decimal" value={item.unit_price} onChange={(e) => updateSpecItem(idx, "unit_price", e.target.value)} className="h-8 text-center text-xs px-1" placeholder="单价" />
+                    <div className="text-right text-xs font-medium tabular-nums">¥{amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-500 shrink-0" onClick={() => removeSpecItem(idx)} disabled={specItems.length <= 1}>
+                      <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 );
               })}
             </div>
-            <div className="flex justify-end items-center gap-4 text-sm pt-1 border-t">
+            <div className="flex justify-end items-center gap-3 text-xs pt-1 border-t">
               <span className="text-muted-foreground">总箱数: <span className="font-medium text-foreground">{specItems.reduce((s, it) => s + (Number(it.box_count) || 0), 0)}</span></span>
-              <span className="text-muted-foreground">总重量: <span className="font-medium text-foreground">{specItems.reduce((s, it) => s + (Number(it.weight_kg) || 0), 0).toFixed(3)} kg</span></span>
-              <span className="text-muted-foreground">销售金额: <span className="font-bold text-green-600">¥{totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+              <span className="text-muted-foreground">总重量: <span className="font-medium text-foreground">{specItems.reduce((s, it) => s + (Number(it.weight_kg) || 0), 0).toFixed(2)} kg</span></span>
+              <span className="text-muted-foreground">总金额: <span className="font-bold text-green-600">¥{totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
             </div>
           </div>
 
@@ -796,6 +901,80 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
   );
 }
 
+// ==================== 可搜索客户选择组件 ====================
+
+function CustomerSearchSelect({ customers, value, onChange, placeholder }: { customers: any[]; value: string; onChange: (v: string) => void; placeholder: string }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  const selected = customers.find((c: any) => String(c.id) === value);
+  const filtered = search.trim()
+    ? customers.filter((c: any) => c.name?.toLowerCase().includes(search.trim().toLowerCase()))
+    : customers;
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={cn(
+          "w-full flex items-center justify-between h-10 px-3 py-2 border rounded-md text-sm bg-background",
+          "hover:border-ring focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+          !selected && "text-muted-foreground"
+        )}
+      >
+        <span className="truncate">{selected?.name || placeholder}</span>
+        <svg className={cn("h-4 w-4 shrink-0 transition-transform", open && "rotate-180")} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      {open && (
+        <div className="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md overflow-hidden">
+          <div className="p-2 border-b">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索客户..."
+                className="pl-7 h-8 text-sm"
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="max-h-[200px] overflow-y-auto">
+            {filtered.length === 0 ? (
+              <div className="p-3 text-sm text-muted-foreground text-center">未找到客户</div>
+            ) : (
+              filtered.map((c: any) => (
+                <div
+                  key={c.id}
+                  onClick={() => { onChange(String(c.id)); setOpen(false); setSearch(""); }}
+                  className={cn(
+                    "px-3 py-2 text-sm cursor-pointer hover:bg-accent",
+                    String(c.id) === value && "bg-accent font-medium"
+                  )}
+                >
+                  {c.name}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ==================== 详情弹窗组件 ====================
 
 function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }) {
@@ -806,6 +985,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
   const [receiptDate, setReceiptDate] = useState("");
   const [receiptAmount, setReceiptAmount] = useState("");
   const [receiptMethod, setReceiptMethod] = useState("bank_transfer");
+  const [receiptBankAccountId, setReceiptBankAccountId] = useState("");
   const [receiptRef, setReceiptRef] = useState("");
   const [receiptNotes, setReceiptNotes] = useState("");
 
@@ -817,13 +997,49 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
   const [aftersalesStatus, setAftersalesStatus] = useState("pending");
   const [aftersalesNotes, setAftersalesNotes] = useState("");
 
+  // 银行账户列表
+  const { data: bankAccountsData } = useQuery({
+    queryKey: ["bank-accounts"],
+    queryFn: async () => {
+      const res = await api.get("/v1/finance/bank-accounts");
+      return res.data;
+    },
+  });
+  const bankAccounts = bankAccountsData || [];
+
   const createReceiptMutation = useMutation({
-    mutationFn: async (payload: any) => { const res = await api.post(`/v1/sales/whole-fish/${sale.id}/receipts`, payload); return res.data; },
-    onSuccess: () => { toast.success("收款记录添加成功"); queryClient.invalidateQueries({ queryKey: ["sales"] }); setReceiptFormOpen(false); resetReceiptForm(); },
+    mutationFn: async (payload: any) => {
+      const res = await api.post(`/v1/sales/whole-fish/${sale.id}/receipts`, payload);
+      return res.data;
+    },
+    onSuccess: () => {
+      toast.success("收款记录添加成功");
+      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      setReceiptFormOpen(false);
+      resetReceiptForm();
+    },
     onError: (err: any) => toast.error(err.response?.data?.detail || "添加失败"),
   });
 
-  const resetReceiptForm = () => { setReceiptDate(""); setReceiptAmount(""); setReceiptMethod("bank_transfer"); setReceiptRef(""); setReceiptNotes(""); };
+  const deleteReceiptMutation = useMutation({
+    mutationFn: async (receiptId: number) => {
+      await api.delete(`/v1/sales/whole-fish/${sale.id}/receipts/${receiptId}`);
+    },
+    onSuccess: () => {
+      toast.success("收款记录已删除");
+      queryClient.invalidateQueries({ queryKey: ["sales"] });
+    },
+    onError: (err: any) => toast.error(err.response?.data?.detail || "删除失败"),
+  });
+
+  const resetReceiptForm = () => {
+    setReceiptDate("");
+    setReceiptAmount("");
+    setReceiptMethod("bank_transfer");
+    setReceiptBankAccountId("");
+    setReceiptRef("");
+    setReceiptNotes("");
+  };
 
   const unpaid = Number(sale.net_amount) - Number(sale.paid_amount);
 
@@ -842,11 +1058,44 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
             <div><span className="text-muted-foreground">批次:</span> <span className="ml-1">{sale.batch_code ?? sale.batch_name ?? "-"}</span></div>
             <div><span className="text-muted-foreground">日期:</span> <span className="ml-1">{sale.sale_date}</span></div>
             <div><span className="text-muted-foreground">客户:</span> <span className="ml-1">{sale.customer_name ?? "-"}</span></div>
-            <div><span className="text-muted-foreground">规格:</span> <span className="ml-1">{sale.spec ?? "-"}</span></div>
-            <div><span className="text-muted-foreground">箱数:</span> <span className="ml-1">{sale.box_count ?? "-"}</span></div>
-            <div><span className="text-muted-foreground">重量:</span> <span className="ml-1">{Number(sale.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span></div>
-            <div><span className="text-muted-foreground">单价:</span> <span className="ml-1">{Number(sale.unit_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
           </div>
+
+          {/* 规格明细 */}
+          {sale.items && sale.items.length > 0 && (
+            <div className="border rounded-md overflow-hidden">
+              <div className="bg-muted/50 px-3 py-2 text-xs font-medium">规格明细</div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">规格</TableHead>
+                    <TableHead className="text-xs text-right">箱数</TableHead>
+                    <TableHead className="text-xs text-right">重量(kg)</TableHead>
+                    <TableHead className="text-xs text-right">单价</TableHead>
+                    <TableHead className="text-xs text-right">金额</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sale.items.map((item) => (
+                    <TableRow key={item.id ?? `${item.spec}-${item.weight_kg}`}>
+                      <TableCell className="text-sm">{item.spec ?? "-"}</TableCell>
+                      <TableCell className="text-sm text-right">{item.box_count ?? "-"}</TableCell>
+                      <TableCell className="text-sm text-right">{Number(item.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-sm text-right">{Number(item.unit_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-sm text-right">${Number(item.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="bg-muted/50 font-medium text-sm">
+                    <TableCell colSpan={2} className="text-right">合计:</TableCell>
+                    <TableCell className="text-right">{sale.items.reduce((s, it) => s + Number(it.weight_kg || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
+                    <TableCell />
+                    <TableCell className="text-right">${sale.items.reduce((s, it) => s + Number(it.amount || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* 汇总金额 */}
           <div className="bg-muted p-3 rounded-md space-y-2 text-sm">
             <div className="flex justify-between"><span>毛金额</span><span>${Number(sale.gross_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
             {Number(sale.rounding_adjustment) > 0 && <div className="flex justify-between text-red-500"><span>抹零调整</span><span>-${Number(sale.rounding_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
@@ -868,10 +1117,39 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
               {!receiptFormOpen && <Button size="sm" onClick={() => setReceiptFormOpen(true)}><Plus className="h-3 w-3 mr-1" />添加收款</Button>}
             </div>
             {receiptFormOpen && (
-              <form onSubmit={(e) => { e.preventDefault(); if (!receiptDate || !receiptAmount) { toast.error("请填写日期和金额"); return; } createReceiptMutation.mutate({ receipt_date: receiptDate, amount: Number(receiptAmount), payment_method: receiptMethod, reference_no: receiptRef.trim() || null, notes: receiptNotes.trim() || null }); }} className="space-y-3">
+              <form onSubmit={(e) => { e.preventDefault(); if (!receiptDate || !receiptAmount) { toast.error("请填写日期和金额"); return; } createReceiptMutation.mutate({ receipt_date: receiptDate, amount: Number(receiptAmount), payment_method: receiptMethod, bank_account_id: receiptBankAccountId ? Number(receiptBankAccountId) : null, reference_no: receiptRef.trim() || null, notes: receiptNotes.trim() || null }); }} className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1"><Label className="text-xs">收款日期 *</Label><Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} /></div>
                   <div className="space-y-1"><Label className="text-xs">金额 *</Label><Input type="number" step="0.01" value={receiptAmount} onChange={(e) => setReceiptAmount(e.target.value)} /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">收款方式</Label>
+                    <Select value={receiptMethod} onValueChange={(v) => setReceiptMethod(v)}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="bank_transfer">银行转账</SelectItem>
+                        <SelectItem value="cash">现金</SelectItem>
+                        <SelectItem value="check">支票</SelectItem>
+                        <SelectItem value="scan">扫码</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">收款银行</Label>
+                    <Select value={receiptBankAccountId} onValueChange={(v) => setReceiptBankAccountId(v)}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择银行" /></SelectTrigger>
+                      <SelectContent>
+                        {bankAccounts.map((b: any) => (
+                          <SelectItem key={b.id} value={String(b.id)} className="text-xs">{b.bank_name} {b.account_number?.slice(-4)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">参考号</Label>
+                  <Input value={receiptRef} onChange={(e) => setReceiptRef(e.target.value)} placeholder="转账单号等" className="h-8 text-xs" />
                 </div>
                 <div className="flex gap-2 justify-end">
                   <Button type="button" variant="ghost" size="sm" onClick={() => { setReceiptFormOpen(false); resetReceiptForm(); }}>取消</Button>
@@ -882,10 +1160,43 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
           </div>
           {sale.receipts && sale.receipts.length > 0 ? (
             <Table>
-              <TableHeader><TableRow><TableHead className="text-xs">日期</TableHead><TableHead className="text-xs">方式</TableHead><TableHead className="text-xs text-right">金额</TableHead><TableHead className="text-xs">备注</TableHead></TableRow></TableHeader>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">日期</TableHead>
+                  <TableHead className="text-xs">方式</TableHead>
+                  <TableHead className="text-xs">银行</TableHead>
+                  <TableHead className="text-xs text-right">金额</TableHead>
+                  <TableHead className="text-xs">备注</TableHead>
+                  <TableHead className="text-xs w-[60px]">操作</TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>
                 {sale.receipts.map((r) => (
-                  <TableRow key={r.id}><TableCell className="text-sm">{r.receipt_date}</TableCell><TableCell className="text-sm">{r.payment_method}</TableCell><TableCell className="text-sm text-right">${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell><TableCell className="text-sm">{r.notes ?? "-"}</TableCell></TableRow>
+                  <TableRow key={r.id}>
+                    <TableCell className="text-sm">{r.receipt_date}</TableCell>
+                    <TableCell className="text-sm">{r.payment_method}</TableCell>
+                    <TableCell className="text-sm">{(() => {
+                      const b = bankAccounts.find((ba: any) => ba.id === r.bank_account_id);
+                      return b ? `${b.bank_name} ${b.account_number?.slice(-4)}` : "-";
+                    })()}</TableCell>
+                    <TableCell className="text-sm text-right">${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                    <TableCell className="text-sm">{r.notes ?? "-"}</TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-red-500"
+                        onClick={() => {
+                          if (confirm("确定删除这条收款记录吗？")) {
+                            deleteReceiptMutation.mutate(r.id);
+                          }
+                        }}
+                        disabled={deleteReceiptMutation.isPending}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
                 ))}
               </TableBody>
             </Table>

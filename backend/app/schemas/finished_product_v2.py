@@ -282,3 +282,24 @@ class FinishedProductSaleItemResponse(FinishedProductSaleItemBase):
     product_spec: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+# ==================== FinishedProductSale with Items Create Schema ====================
+
+class FinishedProductSaleWithItemsCreate(BaseModel):
+    """创建成品销售（带子项）的请求体"""
+    sale_date: date
+    customer_id: int
+    product_id: int
+    quantity: int
+    unit_price: Decimal
+    gross_amount: Decimal
+    net_amount: Decimal
+    slaughter_date: Optional[date] = None
+    total_weight_kg: Optional[Decimal] = None
+    scan_fee: Optional[Decimal] = Decimal("0")
+    discount: Optional[Decimal] = Decimal("0")
+    commission: Optional[Decimal] = Decimal("0")
+    salesperson_id: Optional[int] = None
+    notes: Optional[str] = None
+    items: Optional[List[dict]] = None

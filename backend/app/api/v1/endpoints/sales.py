@@ -13,6 +13,7 @@ from app.schemas.sales import (
     WholeFishSaleUpdate,
     WholeFishSaleResponse,
     WholeFishSaleListResponse,
+    WholeFishSaleItemResponse,
     SalesReceiptCreate,
     SalesReceiptUpdate,
     SalesReceiptResponse,
@@ -52,6 +53,9 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
     aftersales = [
         AftersalesRecordResponse.model_validate(a) for a in (sale.aftersales or [])
     ]
+    items = [
+        WholeFishSaleItemResponse.model_validate(i) for i in (sale.items or [])
+    ]
 
     return WholeFishSaleResponse(
         id=sale.id,
@@ -81,6 +85,7 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
         batch_name=batch_name,
         batch_code=batch_code,
         salesperson_name=salesperson_name,
+        items=items,
         receipts=receipts,
         aftersales=aftersales,
     )
@@ -304,6 +309,23 @@ async def get_sales_summary(
     """销售汇总统计"""
     summary = await SalesService.get_summary(db)
     return SaleSummary(**summary)
+
+
+# ==================== 重新计算收款状态（管理用） ====================
+
+@router.post("/recalculate-status", response_model=dict)
+async def recalculate_all_sales_status(
+    db: AsyncSession = Depends(get_db),
+):
+    """重新计算所有整鱼销售的已付金额和收款状态（修复历史数据）"""
+    from sqlalchemy import select
+    result = await db.execute(select(WholeFishSale))
+    sales = result.scalars().all()
+    updated = 0
+    for sale in sales:
+        await SalesService._update_paid_amount(db, sale)
+        updated += 1
+    return {"message": f"已更新 {updated} 条销售记录的收款状态"}
 
 
 # ==================== 批量导入 ====================

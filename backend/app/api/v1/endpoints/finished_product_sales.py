@@ -27,6 +27,7 @@ from app.schemas.finished_product_sales import (
     FinishedProductAftersalesCreate,
     FinishedProductAftersalesUpdate,
     FinishedProductAftersalesResponse,
+    FinishedProductSaleItemResponse,
 )
 from app.services.finished_product_sale_service import FinishedProductSaleService
 
@@ -66,6 +67,9 @@ async def _build_sale_response(
         FinishedProductAftersalesResponse.model_validate(a)
         for a in (sale.aftersales_records or [])
     ]
+    items = [
+        FinishedProductSaleItemResponse.model_validate(i) for i in (sale.items or [])
+    ]
 
     return FinishedProductSaleResponse(
         id=sale.id,
@@ -90,6 +94,7 @@ async def _build_sale_response(
         product_name=product_name,
         product_spec=product_spec,
         salesperson_name=salesperson_name,
+        items=items,
         receipts=receipts,
         aftersales=aftersales,
     )

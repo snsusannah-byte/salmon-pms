@@ -1,10 +1,3 @@
-"""
-成品销售 API 扩展（V2）
-在现有 finished_product_sales.py 基础上添加：
-- 销售带子项创建
-- 销售关联宰杀日期
-- 可用宰杀日期选项
-"""
 from datetime import date
 from decimal import Decimal
 from typing import List, Optional
@@ -20,6 +13,7 @@ from app.schemas.finished_product_v2 import (
     FinishedProductSaleItemResponse,
     FinishedProductSaleItemCreate,
     SlaughterDateOption,
+    FinishedProductSaleWithItemsCreate,
 )
 from app.services.daily_slaughter_service import DailySlaughterService
 from app.services.finished_product_sale_v2 import FinishedProductSaleServiceV2
@@ -29,21 +23,7 @@ router = APIRouter()
 
 @router.post("/with-items", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_sale_with_items(
-    sale_date: date,
-    customer_id: int,
-    product_id: int,
-    quantity: int,
-    unit_price: Decimal,
-    gross_amount: Decimal,
-    net_amount: Decimal,
-    slaughter_date: Optional[date] = None,
-    total_weight_kg: Optional[Decimal] = None,
-    scan_fee: Optional[Decimal] = Decimal("0"),
-    discount: Optional[Decimal] = Decimal("0"),
-    commission: Optional[Decimal] = Decimal("0"),
-    salesperson_id: Optional[int] = None,
-    notes: Optional[str] = None,
-    items: Optional[List[dict]] = None,
+    data: FinishedProductSaleWithItemsCreate,
     db: AsyncSession = Depends(get_db),
 ):
     """创建成品销售（带子项）
@@ -53,34 +33,16 @@ async def create_sale_with_items(
     - items: 销售子项列表 [{item_type, product_id, weight_kg/quantity, unit_price}]
       * item_type: main(正品按kg) / gift(赠品按件) / accessory(配套按件)
     """
-    sale_data = {
-        "sale_date": sale_date,
-        "customer_id": customer_id,
-        "product_id": product_id,
-        "quantity": quantity,
-        "unit_price": unit_price,
-        "gross_amount": gross_amount,
-        "net_amount": net_amount,
-        "scan_fee": scan_fee or Decimal("0"),
-        "discount": discount or Decimal("0"),
-        "commission": commission or Decimal("0"),
-        "paid_amount": Decimal("0"),
-        "status": "pending",
-        "salesperson_id": salesperson_id,
-        "notes": notes,
-        "slaughter_date": slaughter_date,
-        "total_weight_kg": total_weight_kg,
-    }
-    
-    items = items or []
+    sale_data = data.model_dump(exclude={"items"})
+    items = data.items or []
     
     # 如果没有提供子项，默认创建一个正品子项
-    if not items and total_weight_kg:
+    if not items and sale_data.get("total_weight_kg"):
         items = [{
             "item_type": SaleItemType.MAIN.value,
-            "product_id": product_id,
-            "weight_kg": total_weight_kg,
-            "unit_price": unit_price,
+            "product_id": sale_data["product_id"],
+            "weight_kg": sale_data["total_weight_kg"],
+            "unit_price": sale_data["unit_price"],
         }]
     
     try:

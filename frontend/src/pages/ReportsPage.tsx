@@ -395,8 +395,8 @@ function BatchReportsTab() {
     <div class="section-title" style="color:#4f46e5">📍 ${t.traceInfo}</div>
     <div class="trace-grid">
       <div class="trace-item"><div class="icon">🏭</div><div class="label">${isEn ? 'Plant' : '加工厂'}</div><div class="value">${detailData.invoices?.[0]?.processing_plant_name || '-'}</div></div>
-      <div class="trace-item"><div class="icon">📍</div><div class="label">${isEn ? 'Farm' : '养殖场'}</div><div class="value">${detailData.invoices?.[0]?.exporter_name || '-'}</div></div>
-      <div class="trace-item"><div class="icon">💱</div><div class="label">${isEn ? 'Rate' : '汇率'}</div><div class="value">${detailData.exchange_rate || '-'}</div></div>
+      <div class="trace-item"><div class="icon">📍</div><div class="label">${isEn ? 'Farm' : '养殖场'}</div><div class="value">${detailData.invoices?.[0]?.fish_farm_name || '-'}</div></div>
+      <div class="trace-item"><div class="icon">🚢</div><div class="label">${isEn ? 'Exporter' : '出口商'}</div><div class="value">${detailData.invoices?.[0]?.exporter_name || '-'}</div></div>
     </div>
   </div>
 
@@ -501,12 +501,12 @@ function BatchReportsTab() {
                   <div>
                     <div className="text-lg mb-0.5">📍</div>
                     <div className="text-muted-foreground">{detailLang === "zh" ? "养殖场" : "Farm"}</div>
-                    <div className="font-medium">{detailData.invoices?.[0]?.exporter_name || "-"}</div>
+                    <div className="font-medium">{detailData.invoices?.[0]?.fish_farm_name || "-"}</div>
                   </div>
                   <div>
-                    <div className="text-lg mb-0.5">💱</div>
-                    <div className="text-muted-foreground">{detailLang === "zh" ? "汇率" : "Rate"}</div>
-                    <div className="font-medium">{detailData.exchange_rate || "-"}</div>
+                    <div className="text-lg mb-0.5">🚢</div>
+                    <div className="text-muted-foreground">{detailLang === "zh" ? "出口商" : "Exporter"}</div>
+                    <div className="font-medium">{detailData.invoices?.[0]?.exporter_name || "-"}</div>
                   </div>
                 </div>
               </div>

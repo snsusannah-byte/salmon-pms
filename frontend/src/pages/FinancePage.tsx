@@ -82,7 +82,7 @@ const transactionTypeMap: Record<string, string> = {
 };
 
 const transactionCategoryMap: Record<string, string> = {
-  sales_income: "销售收入",
+  sales_income: "销售收款",
   investment: "投资款",
   loan: "借款",
   interest: "利息收入",
@@ -110,6 +110,7 @@ interface BatchOpt {
   id: number;
   batch_code: string;
   batch_name?: string;
+  invoice_nos?: string;
 }
 
 interface ExchangeRecord {
@@ -405,7 +406,7 @@ function ImportFeesTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => setFormOpen(true)}>
+        <Button size="sm" onClick={() => { setEditingTransaction(null); setFormOpen(true); }}>
           <Plus className="h-4 w-4 mr-1" />
           新增进口费用
         </Button>
@@ -929,7 +930,7 @@ function ExchangeTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => setFormOpen(true)}>
+        <Button size="sm" onClick={() => { setEditingTransaction(null); setFormOpen(true); }}>
           <Plus className="h-4 w-4 mr-1" />
           新增购汇
         </Button>
@@ -1153,7 +1154,7 @@ function ExchangeTab() {
                     {(() => {
                       const b = batches.find((b) => b.id === r.batch_id);
                       if (!b) return "-";
-                      return b.batch_name?.replace(/&/g, ", ") || "-";
+                      return b.invoice_nos?.replace(/&/g, ", ") || "-";
                     })()}
                   </TableCell>
                   <TableCell>{r.exchange_date}</TableCell>
@@ -1219,17 +1220,25 @@ function TransactionsTab() {
   const [counterparty, setCounterparty] = useState("");
   const [description, setDescription] = useState("");
   const [referenceNo, setReferenceNo] = useState("");
+  const [currency, setCurrency] = useState("CNY");
+  const [bankAccountId, setBankAccountId] = useState("");
+  const [selectedSaleId, setSelectedSaleId] = useState("");
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   // Reset on open
   useEffect(() => {
-    if (formOpen) {
+    if (formOpen && !editingTransaction) {
       setDate("");
       setAmount("");
       setCounterparty("");
       setDescription("");
       setReferenceNo("");
+      setCurrency("CNY");
+      setBankAccountId("");
+      setSelectedSaleId("");
+      setEditingTransaction(null);
     }
-  }, [formOpen]);
+  }, [formOpen, editingTransaction]);
 
   const { data, isLoading } = useQuery<Transaction[]>({
     queryKey: ["transactions"],
@@ -1238,6 +1247,27 @@ function TransactionsTab() {
       return res.data;
     },
   });
+
+  // Fetch bank accounts
+  const { data: bankAccountsData } = useQuery({
+    queryKey: ["bank-accounts-transactions"],
+    queryFn: async () => {
+      const res = await api.get("/v1/finance/bank-accounts");
+      return res.data;
+    },
+  });
+  const bankAccounts = bankAccountsData || [];
+
+  // Fetch sales for counterparty auto-fill
+  const { data: salesData } = useQuery({
+    queryKey: ["sales-for-transaction"],
+    queryFn: async () => {
+      const res = await api.get("/v1/sales/whole-fish?limit=500");
+      return res.data?.items || [];
+    },
+    enabled: category === "sales_income" && formOpen,
+  });
+  const salesList = salesData || [];
 
   const handleDelete = async (id: number) => {
     if (!confirm("确定删除？")) return;
@@ -1254,28 +1284,51 @@ function TransactionsTab() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.post("/v1/finance/transactions", {
+      const payload: any = {
         transaction_date: date,
         type,
         category,
         amount: Number(amount),
-        currency: "CNY",
+        currency,
         counterparty_name: counterparty || undefined,
         reference_no: referenceNo || undefined,
         description: description || undefined,
-      });
-      toast.success("交易记录创建成功");
+      };
+      if (type === "income" && bankAccountId) {
+        payload.to_account_id = Number(bankAccountId);
+      } else if (type === "expense" && bankAccountId) {
+        payload.from_account_id = Number(bankAccountId);
+      }
+
+      if (editingTransaction) {
+        await api.put(`/v1/finance/transactions/${editingTransaction.id}`, payload);
+        toast.success("交易记录已更新");
+      } else {
+        await api.post("/v1/finance/transactions", payload);
+        toast.success("交易记录创建成功");
+      }
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
       setFormOpen(false);
-      setDate("");
-      setAmount("");
-      setCounterparty("");
-      setDescription("");
-      setReferenceNo("");
+      setEditingTransaction(null);
     } catch (error: any) {
-      toast.error(error.response?.data?.detail ?? "创建失败");
+      toast.error(error.response?.data?.detail ?? (editingTransaction ? "更新失败" : "创建失败"));
     }
+  };
+
+  const handleOpenEdit = (transaction: Transaction) => {
+    setEditingTransaction(transaction);
+    setDate(transaction.transaction_date);
+    setType(transaction.type as any);
+    setCategory(transaction.category);
+    setAmount(String(transaction.amount));
+    setCurrency(transaction.currency || "CNY");
+    setCounterparty(transaction.counterparty_name || "");
+    setReferenceNo(transaction.reference_no || "");
+    setDescription(transaction.description || "");
+    setBankAccountId("");
+    setSelectedSaleId("");
+    setFormOpen(true);
   };
 
   // Income categories
@@ -1291,7 +1344,7 @@ function TransactionsTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end gap-2">
-        <Button size="sm" onClick={() => setFormOpen(true)}>
+        <Button size="sm" onClick={() => { setEditingTransaction(null); setFormOpen(true); }}>
           <Plus className="h-4 w-4 mr-1" />
           新增流水
         </Button>
@@ -1301,7 +1354,7 @@ function TransactionsTab() {
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>新增交易流水</DialogTitle>
+            <DialogTitle>{editingTransaction ? "编辑交易流水" : "新增交易流水"}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
@@ -1347,12 +1400,55 @@ function TransactionsTab() {
               </div>
               <div>
                 <Label>币种</Label>
-                <Input value="CNY" disabled className="bg-muted" />
+                <Select value={currency} onValueChange={(v) => setCurrency(v ?? "CNY")}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CNY">CNY</SelectItem>
+                    <SelectItem value="USD">USD</SelectItem>
+                    <SelectItem value="EUR">EUR</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
+            {category === "sales_income" && (
+              <div>
+                <Label>关联销售单</Label>
+                <Select value={selectedSaleId} onValueChange={(v) => {
+                  setSelectedSaleId(v ?? "");
+                  if (v) {
+                    const sale = salesList.find((s: any) => String(s.id) === v);
+                    if (sale && sale.customer_name) setCounterparty(sale.customer_name);
+                  }
+                }}>
+                  <SelectTrigger><SelectValue placeholder="选择销售单（可选）" /></SelectTrigger>
+                  <SelectContent>
+                    {salesList.map((s: any) => (
+                      <SelectItem key={s.id} value={String(s.id)} className="text-xs">
+                        {s.sale_no ?? `#${s.id}`} · {s.customer_name ?? "-"} · ${Number(s.net_amount).toFixed(0)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div>
+              <Label>银行账户</Label>
+              <Select value={bankAccountId} onValueChange={(v) => setBankAccountId(v ?? "")}>
+                <SelectTrigger><SelectValue placeholder="选择银行账户（可选）" /></SelectTrigger>
+                <SelectContent>
+                  {bankAccounts.map((b: any) => (
+                    <SelectItem key={b.id} value={String(b.id)} className="text-xs">
+                      {b.bank_name} {b.account_number?.slice(-4)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div>
               <Label>对方名称</Label>
-              <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder="可选" />
+              <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder={category === "sales_income" ? "选择销售单后自动填充" : "可选"} />
             </div>
             <div>
               <Label>参考号</Label>
@@ -1366,7 +1462,7 @@ function TransactionsTab() {
               <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>
                 取消
               </Button>
-              <Button type="submit">保存</Button>
+              <Button type="submit">{editingTransaction ? "更新" : "保存"}</Button>
             </DialogFooter>
           </form>
         </DialogContent>
@@ -1427,14 +1523,24 @@ function TransactionsTab() {
                     {r.reference_no ?? "-"}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-red-500"
-                      onClick={() => handleDelete(r.id)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handleOpenEdit(r)}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-red-500"
+                        onClick={() => handleDelete(r.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

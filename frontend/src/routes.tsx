@@ -22,6 +22,7 @@ import { SuppliersPage } from "@/pages/SuppliersPage";
 import { DailySlaughterPage } from "@/pages/DailySlaughterPage";
 import { LossRecordsPage } from "@/pages/LossRecordsPage";
 import NotificationsPage from "@/pages/NotificationsPage";
+import { BankAccountsPage } from "@/pages/BankAccountsPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
 const router = createBrowserRouter([
@@ -52,6 +53,7 @@ const router = createBrowserRouter([
       { path: "suppliers", element: <SuppliersPage /> },
       { path: "salespersons", element: <SalespersonPage /> },
       { path: "commissions", element: <CommissionPage /> },
+      { path: "bank-accounts", element: <BankAccountsPage /> },
       { path: "daily-slaughter", element: <DailySlaughterPage /> },
       { path: "loss-records", element: <LossRecordsPage /> },
       { path: "notifications", element: <NotificationsPage /> },

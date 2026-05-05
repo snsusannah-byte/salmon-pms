@@ -29,6 +29,7 @@ class FinishedProductSaleService:
             .options(
                 selectinload(FinishedProductSale.receipts),
                 selectinload(FinishedProductSale.aftersales_records),
+                selectinload(FinishedProductSale.items),
             )
             .where(FinishedProductSale.id == sale_id)
         )
@@ -46,6 +47,7 @@ class FinishedProductSaleService:
         query = select(FinishedProductSale).options(
             selectinload(FinishedProductSale.receipts),
             selectinload(FinishedProductSale.aftersales_records),
+            selectinload(FinishedProductSale.items),
         )
         count_query = select(func.count(FinishedProductSale.id))
 

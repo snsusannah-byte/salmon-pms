@@ -71,6 +71,47 @@ class AftersalesRecordResponse(AftersalesRecordBase):
     updated_at: datetime
 
 
+# ==================== 整鱼销售子项 ====================
+
+class WholeFishSaleItemBase(BaseModel):
+    """整鱼销售子项基础"""
+    spec: str = Field(..., max_length=100, description="规格")
+    box_count: int = Field(0, ge=0, description="箱数")
+    weight_kg: Decimal = Field(..., gt=0, description="重量(kg)")
+    unit_price: Decimal = Field(..., gt=0, description="单价")
+    sort_order: Optional[int] = Field(0, description="排序")
+    notes: Optional[str] = Field(None, description="备注")
+
+    @property
+    def amount(self) -> Decimal:
+        return self.weight_kg * self.unit_price
+
+
+class WholeFishSaleItemCreate(WholeFishSaleItemBase):
+    pass
+
+
+class WholeFishSaleItemUpdate(BaseModel):
+    spec: Optional[str] = Field(None, max_length=100)
+    box_count: Optional[int] = Field(None, ge=0)
+    weight_kg: Optional[Decimal] = Field(None, gt=0)
+    unit_price: Optional[Decimal] = Field(None, gt=0)
+    sort_order: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class WholeFishSaleItemResponse(WholeFishSaleItemBase):
+    """整鱼销售子项响应"""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    sale_id: int
+    amount: Decimal
+    created_at: datetime
+    updated_at: datetime
+
+
+# ==================== 整鱼销售（带子项） ====================
+
 class WholeFishSaleBase(BaseModel):
     """整鱼销售基础"""
     sale_no: Optional[str] = Field(None, max_length=20, description="销售单号")
@@ -95,7 +136,7 @@ class WholeFishSaleBase(BaseModel):
 
 
 class WholeFishSaleCreate(WholeFishSaleBase):
-    pass
+    items: Optional[List[WholeFishSaleItemCreate]] = Field(None, description="规格明细列表")
 
 
 class WholeFishSaleUpdate(BaseModel):
@@ -117,6 +158,7 @@ class WholeFishSaleUpdate(BaseModel):
     status: Optional[SalesStatus] = None
     salesperson_id: Optional[int] = None
     notes: Optional[str] = None
+    items: Optional[List[WholeFishSaleItemCreate]] = Field(None, description="规格明细列表（编辑时替换）")
 
 
 class WholeFishSaleResponse(WholeFishSaleBase):
@@ -130,6 +172,7 @@ class WholeFishSaleResponse(WholeFishSaleBase):
     batch_name: Optional[str] = None
     batch_code: Optional[str] = None
     salesperson_name: Optional[str] = None
+    items: List[WholeFishSaleItemResponse] = []
     receipts: List[SalesReceiptResponse] = []
     aftersales: List[AftersalesRecordResponse] = []
 

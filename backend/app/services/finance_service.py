@@ -321,13 +321,42 @@ class FinanceService:
         await db.refresh(tax_record)
         await db.refresh(clearance_record)
         
-        # 3. 更新发票报关状态为"已报关"
+        # 3. 更新发票报关状态为"已报关"（主票+所有从票同步更新）
         from app.models import InvoiceStatus
         invoice_result = await db.execute(select(ImportInvoice).where(ImportInvoice.id == invoice_id))
         invoice = invoice_result.scalar_one_or_none()
-        if invoice and invoice.customs_status == InvoiceStatus.PENDING_CUSTOMS:
-            invoice.customs_status = InvoiceStatus.CUSTOMS_PROCESSING
-            await db.commit()
+        
+        # 收集需要更新的发票ID列表
+        invoice_ids_to_update = [invoice_id]
+        
+        if invoice:
+            if invoice.is_master:
+                # 主票：找到所有从票
+                sub_result = await db.execute(
+                    select(ImportInvoice.id).where(ImportInvoice.parent_invoice_id == invoice_id)
+                )
+                for row in sub_result.all():
+                    invoice_ids_to_update.append(row[0])
+            elif invoice.parent_invoice_id:
+                # 从票：找到主票和所有其他从票
+                invoice_ids_to_update.append(invoice.parent_invoice_id)
+                sibling_result = await db.execute(
+                    select(ImportInvoice.id).where(
+                        ImportInvoice.parent_invoice_id == invoice.parent_invoice_id,
+                        ImportInvoice.id != invoice_id
+                    )
+                )
+                for row in sibling_result.all():
+                    invoice_ids_to_update.append(row[0])
+        
+        # 批量更新所有关联发票为"已报关"
+        for inv_id in set(invoice_ids_to_update):
+            inv_result = await db.execute(select(ImportInvoice).where(ImportInvoice.id == inv_id))
+            inv = inv_result.scalar_one_or_none()
+            if inv and inv.customs_status == InvoiceStatus.PENDING_CUSTOMS:
+                inv.customs_status = InvoiceStatus.CUSTOMS_PROCESSING
+        
+        await db.commit()
         
         return {
             "invoice_id": invoice_id,
@@ -451,6 +480,28 @@ class FinanceService:
 
     @staticmethod
     async def delete_transaction(db: AsyncSession, record: TransactionRecord) -> None:
+        # 如果关联了销售收款，同步删除并重新计算销售单状态
+        if record.id:
+            from app.models import SalesReceipt, WholeFishSale
+            from sqlalchemy import select
+            from app.services.sales_service import SalesService
+
+            result = await db.execute(
+                select(SalesReceipt).where(SalesReceipt.transaction_id == record.id)
+            )
+            receipt = result.scalar_one_or_none()
+            if receipt:
+                sale_id = receipt.sale_id
+                await db.delete(receipt)
+                await db.flush()
+                # 重新计算对应销售单的收款状态
+                sale_result = await db.execute(
+                    select(WholeFishSale).where(WholeFishSale.id == sale_id)
+                )
+                sale = sale_result.scalar_one_or_none()
+                if sale:
+                    await SalesService._update_paid_amount(db, sale)
+
         await db.delete(record)
         await db.commit()
 

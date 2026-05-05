@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Building2,
+  Landmark,
   Users,
   Package,
   FileText,
@@ -46,6 +47,7 @@ const bottomNavItems = [
   { icon: Store, label: "供应商管理", path: "/suppliers" },
   { icon: UserCog, label: "业务员", path: "/salespersons" },
   { icon: TrendingUp, label: "提成管理", path: "/commissions" },
+  { icon: Landmark, label: "银行账户", path: "/bank-accounts" },
   { icon: Settings, label: "系统设置", path: "/settings" },
 ];
 

@@ -121,6 +121,8 @@ class Company(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     chinese_name: Mapped[Optional[str]] = mapped_column(String(200))
+    company_full_name: Mapped[Optional[str]] = mapped_column(String(200))
+    brands: Mapped[Optional[str]] = mapped_column(String(500))
     type: Mapped[CompanyType] = mapped_column(Enum(CompanyType), nullable=False)
     code: Mapped[Optional[str]] = mapped_column(String(50))
     cooperation_date: Mapped[Optional[Date]] = mapped_column(Date)
@@ -183,11 +185,15 @@ class BankAccount(Base, TimestampMixin):
     __tablename__ = "bank_accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)  # 编号
     account_name: Mapped[str] = mapped_column(String(100), nullable=False)
     bank_name: Mapped[str] = mapped_column(String(200), nullable=False)
     account_number: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    type: Mapped[str] = mapped_column(String(20), default="public")  # public, private, scan
     currency: Mapped[str] = mapped_column(String(10), default="CNY")
     opening_balance: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    current_balance: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    company_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
@@ -508,6 +514,24 @@ class WholeFishSale(Base, TimestampMixin):
 
     receipts: Mapped[List["SalesReceipt"]] = relationship("SalesReceipt", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
     aftersales: Mapped[List["AftersalesRecord"]] = relationship("AftersalesRecord", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
+    items: Mapped[List["WholeFishSaleItem"]] = relationship("WholeFishSaleItem", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
+
+
+class WholeFishSaleItem(Base, TimestampMixin):
+    """整鱼销售子项（支持多条规格明细）"""
+    __tablename__ = "whole_fish_sale_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("whole_fish_sales.id"), nullable=False)
+    spec: Mapped[str] = mapped_column(String(100), nullable=False)  # 规格
+    box_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # 箱数
+    weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)  # 重量(kg)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)  # 单价
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 金额 = weight_kg * unit_price
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)  # 排序
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    sale: Mapped["WholeFishSale"] = relationship("WholeFishSale", back_populates="items", lazy="raise")
 
 
 class FinishedProductSale(Base, TimestampMixin):
@@ -542,6 +566,12 @@ class FinishedProductSale(Base, TimestampMixin):
     aftersales_records: Mapped[List["FinishedProductAftersales"]] = relationship(
         "FinishedProductAftersales",
         foreign_keys="FinishedProductAftersales.sale_id",
+        lazy="raise",
+        cascade="all, delete-orphan",
+    )
+    items: Mapped[List["FinishedProductSaleItem"]] = relationship(
+        "FinishedProductSaleItem",
+        foreign_keys="FinishedProductSaleItem.sale_id",
         lazy="raise",
         cascade="all, delete-orphan",
     )
@@ -587,6 +617,7 @@ class SalesReceipt(Base, TimestampMixin):
     bank_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bank_accounts.id"))
     reference_no: Mapped[Optional[str]] = mapped_column(String(100))
     notes: Mapped[Optional[str]] = mapped_column(Text)
+    transaction_id: Mapped[Optional[int]] = mapped_column(ForeignKey("transaction_records.id"), nullable=True)
 
     sale: Mapped["WholeFishSale"] = relationship("WholeFishSale", back_populates="receipts")
 

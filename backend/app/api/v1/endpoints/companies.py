@@ -27,6 +27,8 @@ async def _build_company_response(db: AsyncSession, company) -> CompanyResponse:
         "id": company.id,
         "name": company.name,
         "chinese_name": company.chinese_name,
+        "company_full_name": company.company_full_name,
+        "brands": company.brands,
         "type": company.type,
         "code": company.code,
         "cooperation_date": company.cooperation_date.isoformat() if company.cooperation_date else None,

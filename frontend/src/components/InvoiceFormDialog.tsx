@@ -16,7 +16,7 @@ import {
 import { api } from "@/lib/api";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 const productSchema = z.object({
   product_name: z.string().min(1, "产品名称不能为空"),
@@ -350,7 +350,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { onOpenChange(false); resetForm(); } }}>
-      <DialogContent className="!w-[500px] !max-w-[500px] p-4">
+      <DialogContent className="!w-[640px] !max-w-[90vw] p-4">
         <DialogHeader>
           <DialogTitle>{initialData ? "编辑发票" : "新增发票"}</DialogTitle>
         </DialogHeader>
@@ -553,80 +553,76 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
               </Button>
             </div>
 
-            {fields.length > 0 && (
-              <div className="grid grid-cols-12 gap-2 px-2 py-2 text-xs text-muted-foreground font-medium bg-muted/50 rounded-t-md">
-                <div className="col-span-2">产品</div>
-                <div className="col-span-2">规格</div>
-                <div className="col-span-1 text-center">箱数</div>
-                <div className="col-span-2 text-center">重量(kg)</div>
-                <div className="col-span-2 text-center">单价(USD)</div>
-                <div className="col-span-2 text-center">金额(USD)</div>
-                <div className="col-span-1"></div>
-              </div>
-            )}
-
             {fields.map((field, index) => {
               const netWeight = Number(form.watch(`products.${index}.net_weight_kg`) || 0);
               const unitPrice = Number(form.watch(`products.${index}.unit_price`) || 0);
               const lineAmount = netWeight * unitPrice;
+              const productName = form.watch(`products.${index}.product_name`);
               
               return (
-                <div key={field.id} className="grid grid-cols-12 gap-2 items-center px-2 py-2 border rounded-md">
-                  <div className="col-span-2">
-                    <div className="text-xs font-medium text-foreground truncate px-2 py-1.5 h-7 bg-muted/30 rounded border flex items-center" title={form.watch(`products.${index}.product_name`) || "-"}>
-                      {form.watch(`products.${index}.product_name`) || "选择规格后自动显示"}
-                    </div>
+                <div key={field.id} className="grid grid-cols-[minmax(100px,1fr)_110px_70px_90px_90px_80px_32px] gap-2 items-center">
+                  <div className="text-sm font-medium truncate min-w-0" title={productName || ""}>
+                    {productName || <span className="text-muted-foreground text-xs">产品名称</span>}
                   </div>
-                  <div className="col-span-2">
-                    <Select
-                      value={form.watch(`products.${index}.product_spec`) || undefined}
-                      onValueChange={(v) => {
-                        const spec = v || "";
-                        form.setValue(`products.${index}.product_spec`, spec);
-                        // 自动对应产品名称
-                        const productName = specToProductMap[spec];
-                        if (productName) {
-                          form.setValue(`products.${index}.product_name`, productName);
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="text-xs w-full h-7">
-                        <SelectValue placeholder="规格" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {specOptions.map((spec) => (
-                          <SelectItem key={spec} value={spec}>{spec}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <Select
+                    value={form.watch(`products.${index}.product_spec`) || undefined}
+                    onValueChange={(v) => {
+                      const spec = v || "";
+                      form.setValue(`products.${index}.product_spec`, spec);
+                      const productName = specToProductMap[spec];
+                      if (productName) {
+                        form.setValue(`products.${index}.product_name`, productName);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="text-xs w-full h-9 px-2">
+                      <SelectValue placeholder="规格" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {specOptions.map((spec) => (
+                        <SelectItem key={spec} value={spec}>{spec}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input 
+                    type="number" 
+                    inputMode="numeric" 
+                    className="text-center text-xs h-9 px-1" 
+                    placeholder="箱"
+                    {...form.register(`products.${index}.box_count`)} 
+                  />
+                  <Input 
+                    type="number" 
+                    step="0.001" 
+                    inputMode="decimal" 
+                    className="text-center text-xs h-9 px-1" 
+                    placeholder="kg"
+                    {...form.register(`products.${index}.net_weight_kg`)} 
+                  />
+                  <Input 
+                    type="number" 
+                    step="0.0001" 
+                    inputMode="decimal" 
+                    className="text-center text-xs h-9 px-1" 
+                    placeholder="USD"
+                    {...form.register(`products.${index}.unit_price`)} 
+                  />
+                  <div className="text-right text-xs font-medium tabular-nums">
+                    ${lineAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
-                  <div className="col-span-1">
-                    <Input type="number" inputMode="numeric" className="text-center text-xs h-7 px-1 appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" {...form.register(`products.${index}.box_count`)} />
-                  </div>
-                  <div className="col-span-2">
-                    <Input type="number" step="0.001" inputMode="decimal" className="text-center text-xs h-7 px-1 appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" {...form.register(`products.${index}.net_weight_kg`)} />
-                  </div>
-                  <div className="col-span-2">
-                    <Input type="number" step="0.0001" inputMode="decimal" className="text-center text-xs h-7 px-1 appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" {...form.register(`products.${index}.unit_price`)} />
-                  </div>
-                  <div className="col-span-2 text-center text-xs font-medium truncate" title={lineAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}>
-                    {lineAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                  <div className="col-span-1 flex justify-end">
-                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => remove(index)}>
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-red-500 shrink-0" onClick={() => remove(index)}>
+                    <X className="h-4 w-4" />
+                  </Button>
                 </div>
               );
             })}
 
-            {/* 汇总行 - 移到产品列表下方 */}
+            {/* 汇总行 */}
             {fields.length > 0 && (
-              <div className="flex gap-4 text-sm bg-muted/50 px-4 py-3 rounded-md justify-end">
-                <span className="text-muted-foreground">总箱数: <strong className="text-foreground">{totalBoxes}</strong></span>
-                <span className="text-muted-foreground">总重量: <strong className="text-foreground">{totalWeight.toFixed(2)} kg</strong></span>
-                <span className="text-muted-foreground">总金额: <strong className="text-primary">${totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong></span>
+              <div className="flex justify-end items-center gap-4 text-sm pt-1 border-t">
+                <span className="text-muted-foreground">总箱数: <span className="font-medium text-foreground">{totalBoxes}</span></span>
+                <span className="text-muted-foreground">总重量: <span className="font-medium text-foreground">{totalWeight.toFixed(2)} kg</span></span>
+                <span className="text-muted-foreground">总金额: <span className="font-bold text-primary">${totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></span>
               </div>
             )}
           </div>

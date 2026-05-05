@@ -17,6 +17,131 @@ from app.services.finance_service import FinanceService
 router = APIRouter()
 
 
+# ==================== 银行账户 ====================
+
+@router.get("/bank-accounts", response_model=list[dict])
+async def list_bank_accounts(
+    db: AsyncSession = Depends(get_db),
+):
+    """银行账户列表"""
+    from sqlalchemy import select
+    from app.models import BankAccount, Company
+    result = await db.execute(
+        select(BankAccount).where(BankAccount.is_active == True).order_by(BankAccount.bank_name)
+    )
+    accounts = result.scalars().all()
+    
+    # Fetch company names
+    company_ids = [a.company_id for a in accounts if a.company_id]
+    company_map = {}
+    if company_ids:
+        result2 = await db.execute(select(Company.id, Company.name).where(Company.id.in_(company_ids)))
+        company_map = {r[0]: r[1] for r in result2.all()}
+    
+    return [
+        {
+            "id": a.id,
+            "code": a.code,
+            "account_name": a.account_name,
+            "bank_name": a.bank_name,
+            "account_number": a.account_number,
+            "type": a.type,
+            "currency": a.currency,
+            "current_balance": str(a.current_balance) if a.current_balance else "0",
+            "company_id": a.company_id,
+            "company_name": company_map.get(a.company_id) if a.company_id else None,
+            "is_active": a.is_active,
+        }
+        for a in accounts
+    ]
+
+
+@router.post("/bank-accounts", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def create_bank_account(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """创建银行账户（编号自动生成）"""
+    from sqlalchemy import select, func
+    from app.models import BankAccount
+    
+    # 自动生成编号: BA + 6位自增序号
+    result = await db.execute(
+        select(func.max(BankAccount.id))
+    )
+    max_id = result.scalar() or 0
+    auto_code = f"BA{max_id + 1:06d}"
+    
+    # 如果用户传了code且不为空，用用户的；否则用自动生成的
+    code = data.get("code", "").strip()
+    if not code:
+        code = auto_code
+    
+    account = BankAccount(
+        code=code,
+        account_name=data.get("account_name", ""),
+        bank_name=data.get("bank_name", ""),
+        account_number=data.get("account_number") or "",
+        type=data.get("type", "public"),
+        currency=data.get("currency", "CNY"),
+        opening_balance=data.get("opening_balance", 0),
+        current_balance=data.get("opening_balance", 0),
+        company_id=data.get("company_id"),
+        notes=data.get("notes"),
+    )
+    db.add(account)
+    await db.commit()
+    await db.refresh(account)
+    return {"id": account.id, "code": account.code, "message": "创建成功"}
+
+
+@router.put("/bank-accounts/{account_id}", response_model=dict)
+async def update_bank_account(
+    account_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新银行账户"""
+    from sqlalchemy import select
+    from app.models import BankAccount
+    
+    result = await db.execute(select(BankAccount).where(BankAccount.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="银行账户不存在")
+    
+    for field in ["code", "account_name", "bank_name", "account_number", "type", "currency", "company_id", "notes", "is_active"]:
+        if field in data:
+            setattr(account, field, data[field])
+    if "opening_balance" in data:
+        account.opening_balance = data["opening_balance"]
+    if "current_balance" in data:
+        account.current_balance = data["current_balance"]
+    
+    await db.commit()
+    await db.refresh(account)
+    return {"id": account.id, "code": account.code, "message": "更新成功"}
+
+
+@router.delete("/bank-accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_bank_account(
+    account_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除银行账户（软删除）"""
+    from sqlalchemy import select
+    from app.models import BankAccount
+    
+    result = await db.execute(select(BankAccount).where(BankAccount.id == account_id))
+    account = result.scalar_one_or_none()
+    if not account:
+        raise HTTPException(status_code=404, detail="银行账户不存在")
+    
+    account.is_active = False
+    await db.commit()
+    return None
+
+
 # ==================== 购汇记录 ====================
 
 @router.get("/exchange", response_model=List[ExchangeRecordResponse])
