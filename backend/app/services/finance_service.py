@@ -45,34 +45,40 @@ class FinanceService:
         await db.commit()
         await db.refresh(record)
         
-        # 更新发票购汇状态为"已购汇"
-        await FinanceService._update_invoice_exchange_status(db, data.get("invoice_id"))
+        # 更新发票购汇状态（支持按发票ID或批次ID）
+        await FinanceService._update_invoice_exchange_status(
+            db, 
+            invoice_id=data.get("invoice_id"), 
+            batch_id=data.get("batch_id")
+        )
         
         return record
 
     @staticmethod
-    async def _update_invoice_exchange_status(db: AsyncSession, invoice_id: Optional[int]) -> None:
-        """更新发票购汇状态：有购汇记录=已购汇，无记录=未购汇"""
-        if not invoice_id:
+    async def _update_invoice_exchange_status(db: AsyncSession, invoice_id: Optional[int], batch_id: Optional[int] = None) -> None:
+        """更新发票购汇状态：支持按发票ID或批次ID更新"""
+        from app.models import ImportInvoice, ExchangeStatus, BatchInvoice
+
+        invoice_ids = []
+        
+        if invoice_id:
+            invoice_ids.append(invoice_id)
+        elif batch_id:
+            # 按批次获取所有关联的发票
+            result = await db.execute(
+                select(BatchInvoice.invoice_id).where(BatchInvoice.batch_id == batch_id)
+            )
+            invoice_ids = [r[0] for r in result.all()]
+        
+        if not invoice_ids:
             return
         
-        from app.models import ImportInvoice, ExchangeStatus
-        
-        result = await db.execute(select(ImportInvoice).where(ImportInvoice.id == invoice_id))
-        invoice = result.scalar_one_or_none()
-        if not invoice:
-            return
-        
-        # 检查是否有购汇记录
-        has_exchange = await db.execute(
-            select(func.count(ExchangeRecord.id)).where(ExchangeRecord.invoice_id == invoice_id)
-        )
-        exchange_count = has_exchange.scalar() or 0
-        
-        if exchange_count > 0:
-            invoice.exchange_status = ExchangeStatus.COMPLETED
-        else:
-            invoice.exchange_status = ExchangeStatus.NOT_EXCHANGED
+        # 批量更新这些发票为"已购汇"
+        for inv_id in invoice_ids:
+            result = await db.execute(select(ImportInvoice).where(ImportInvoice.id == inv_id))
+            inv = result.scalar_one_or_none()
+            if inv:
+                inv.exchange_status = ExchangeStatus.COMPLETED
         
         await db.commit()
 
@@ -88,11 +94,12 @@ class FinanceService:
     @staticmethod
     async def delete_exchange_record(db: AsyncSession, record: ExchangeRecord) -> None:
         invoice_id = record.invoice_id
+        batch_id = record.batch_id
         await db.delete(record)
         await db.commit()
         
         # 更新发票购汇状态
-        await FinanceService._update_invoice_exchange_status(db, invoice_id)
+        await FinanceService._update_invoice_exchange_status(db, invoice_id=invoice_id, batch_id=batch_id)
 
     # ============== 进口税费 ==============
 
