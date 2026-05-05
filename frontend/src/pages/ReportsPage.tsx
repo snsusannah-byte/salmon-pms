@@ -41,7 +41,8 @@ import {
 // ==================== 工具函数 ====================
 
 function fmt$(v: number | string | null | undefined) {
-  const n = Number(v || 0);
+  const n = Number(v ?? 0);
+  if (Number.isNaN(n)) return "¥0.00";
   return `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
@@ -278,7 +279,7 @@ function BatchReportsTab() {
 
       {/* 批次财报详情弹窗 — 提取到循环外部 */}
       <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setDetailId(null); }}>
-        <DialogContent className="max-w-[900px] max-h-[85vh] overflow-y-auto print:max-w-none print:w-full print:h-auto print:overflow-visible">
+        <DialogContent className="w-[1100px] max-w-[95vw] max-h-[85vh] overflow-y-auto print:max-w-none print:w-full print:h-auto print:overflow-visible">
           <DialogHeader>
             <div className="flex items-center justify-between">
               <DialogTitle className="text-base">
@@ -495,7 +496,7 @@ function InvoiceReportsTab() {
 
       {/* 单票财报详情弹窗 — 提取到循环外部 */}
       <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setDetailId(null); }}>
-        <DialogContent className="max-w-[900px] max-h-[85vh] overflow-y-auto print:max-w-none print:w-full print:h-auto print:overflow-visible">
+        <DialogContent className="w-[1100px] max-w-[95vw] max-h-[85vh] overflow-y-auto print:max-w-none print:w-full print:h-auto print:overflow-visible">
           <DialogHeader>
             <div className="flex items-center justify-between">
               <DialogTitle className="text-base">
