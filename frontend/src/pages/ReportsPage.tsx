@@ -18,7 +18,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -29,15 +28,13 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
-  FileBarChart,
-  FileSpreadsheet,
-  FileText,
   TrendingUp,
   Package,
   DollarSign,
   ArrowDownLeft,
   ArrowUpRight,
   Printer,
+  Languages,
 } from "lucide-react";
 
 // ==================== 工具函数 ====================
@@ -148,6 +145,8 @@ function BatchReportsTab() {
   const [endDate, setEndDate] = useState("");
   const [searchKey, setSearchKey] = useState("");
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLang, setDetailLang] = useState<"zh" | "en">("zh");
 
   const { data, isLoading } = useQuery({
     queryKey: ["reports-batches", page, startDate, endDate, searchKey],
@@ -258,68 +257,9 @@ function BatchReportsTab() {
                         : "-"}
                     </TableCell>
                     <TableCell className="text-center">
-                      <Dialog>
-                        <DialogTrigger>
-                          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setDetailId(item.batch_id)}>
-                            <Eye className="h-3.5 w-3.5" />
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-[900px] max-h-[85vh] overflow-y-auto">
-                          <DialogHeader>
-                            <DialogTitle className="text-base">批次财报详情</DialogTitle>
-                          </DialogHeader>
-                          {detailData ? (
-                            <div className="space-y-4 text-sm">
-                              <div className="grid grid-cols-3 gap-3 text-xs">
-                                <div><span className="text-muted-foreground">批次:</span> {detailData.batch_code}</div>
-                                <div><span className="text-muted-foreground">名称:</span> {detailData.batch_name}</div>
-                                <div><span className="text-muted-foreground">日期:</span> {fmtDate(detailData.batch_date)}</div>
-                              </div>
-                              <div className="border rounded-lg overflow-hidden">
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow className="bg-muted/50">
-                                      <TableHead className="text-xs">发票号</TableHead>
-                                      <TableHead className="text-xs text-right">采购金额(CNY)</TableHead>
-                                      <TableHead className="text-xs text-right">税费(CNY)</TableHead>
-                                      <TableHead className="text-xs text-right">清关费(CNY)</TableHead>
-                                      <TableHead className="text-xs text-right">购汇(CNY)</TableHead>
-                                      <TableHead className="text-xs text-right">销售净额(CNY)</TableHead>
-                                      <TableHead className="text-xs text-right">净利润(CNY)</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {(detailData.invoices || []).map((inv: any) => (
-                                      <TableRow key={inv.invoice_id}>
-                                        <TableCell className="text-xs">{inv.invoice_no}</TableCell>
-                                        <TableCell className="text-xs text-right">{fmt$(inv.purchase_cost_cny)}</TableCell>
-                                        <TableCell className="text-xs text-right">{fmt$(inv.import_duty + inv.import_vat)}</TableCell>
-                                        <TableCell className="text-xs text-right">{fmt$(inv.clearance_cost)}</TableCell>
-                                        <TableCell className="text-xs text-right">{fmt$(inv.exchange_payment)}</TableCell>
-                                        <TableCell className="text-xs text-right">{fmt$(inv.sales_net)}</TableCell>
-                                        <TableCell className={cn("text-xs text-right font-medium", clsProfit(Number(inv.net_profit)))}>
-                                          {fmt$(inv.net_profit)}
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                              <div className="flex justify-end gap-4 text-xs font-medium">
-                                <span>总采购: {fmt$(detailData.total_purchase_cny)}</span>
-                                <span>总销售: {fmt$(detailData.total_sales_net)}</span>
-                                <span className={clsProfit(Number(detailData.net_profit))}>
-                                  净利润: {fmt$(detailData.net_profit)}
-                                </span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="py-8 text-center">
-                              <Loader2 className="h-5 w-5 animate-spin mx-auto" />
-                            </div>
-                          )}
-                        </DialogContent>
-                      </Dialog>
+                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => { setDetailId(item.batch_id); setDetailOpen(true); }}>
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))
@@ -334,6 +274,88 @@ function BatchReportsTab() {
           />
         </CardContent>
       </Card>
+
+      {/* 批次财报详情弹窗 — 提取到循环外部 */}
+      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setDetailId(null); }}>
+        <DialogContent className="max-w-[900px] max-h-[85vh] overflow-y-auto print:max-w-none print:w-full print:h-auto print:overflow-visible">
+          <DialogHeader>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-base">
+                {detailLang === "zh" ? "批次财报详情" : "Batch Financial Report"}
+              </DialogTitle>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => setDetailLang(detailLang === "zh" ? "en" : "zh")}>
+                  <Languages className="h-3.5 w-3.5" />
+                  {detailLang === "zh" ? "EN" : "中"}
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => window.print()}>
+                  <Printer className="h-3.5 w-3.5" />
+                  {detailLang === "zh" ? "打印" : "Print"}
+                </Button>
+              </div>
+            </div>
+          </DialogHeader>
+          {detailData ? (
+            <div className="space-y-4 text-sm print:text-xs">
+              {/* 打印样式 */}
+              <style>{`
+                @media print {
+                  body * { visibility: hidden; }
+                  [data-radix-dialog-content] *, [data-radix-dialog-content] { visibility: visible; }
+                  [data-radix-dialog-content] { position: absolute; left: 0; top: 0; width: 100%; }
+                  .print\:hidden { display: none !important; }
+                }
+              `}</style>
+              <div className="grid grid-cols-3 gap-3 text-xs print:grid-cols-3">
+                <div><span className="text-muted-foreground">{detailLang === "zh" ? "批次:" : "Batch:"}</span> {detailData.batch_code}</div>
+                <div><span className="text-muted-foreground">{detailLang === "zh" ? "名称:" : "Name:"}</span> {detailData.batch_name}</div>
+                <div><span className="text-muted-foreground">{detailLang === "zh" ? "日期:" : "Date:"}</span> {fmtDate(detailData.batch_date)}</div>
+              </div>
+              <div className="border rounded-lg overflow-hidden print:border-black">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="text-xs">{detailLang === "zh" ? "发票号" : "Invoice No"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "采购金额(CNY)" : "Purchase(CNY)"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "税费(CNY)" : "Tax(CNY)"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "清关费(CNY)" : "Clearance(CNY)"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "购汇(CNY)" : "Exchange(CNY)"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "销售净额(CNY)" : "Net Sales(CNY)"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "净利润(CNY)" : "Net Profit(CNY)"}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(detailData.invoices || []).map((inv: any) => (
+                      <TableRow key={inv.invoice_id}>
+                        <TableCell className="text-xs">{inv.invoice_no}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt$(inv.purchase_cost_cny)}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt$(inv.import_duty + inv.import_vat)}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt$(inv.clearance_cost)}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt$(inv.exchange_payment)}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt$(inv.sales_net)}</TableCell>
+                        <TableCell className={cn("text-xs text-right font-medium", clsProfit(Number(inv.net_profit)))}>
+                          {fmt$(inv.net_profit)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex justify-end gap-4 text-xs font-medium print:flex">
+                <span>{detailLang === "zh" ? "总采购:" : "Total Purchase:"} {fmt$(detailData.total_purchase_cny)}</span>
+                <span>{detailLang === "zh" ? "总销售:" : "Total Sales:"} {fmt$(detailData.total_sales_net)}</span>
+                <span className={clsProfit(Number(detailData.net_profit))}>
+                  {detailLang === "zh" ? "净利润:" : "Net Profit:"} {fmt$(detailData.net_profit)}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="py-8 text-center">
+              <Loader2 className="h-5 w-5 animate-spin mx-auto" />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -346,6 +368,8 @@ function InvoiceReportsTab() {
   const [endDate, setEndDate] = useState("");
   const [searchKey, setSearchKey] = useState("");
   const [detailId, setDetailId] = useState<number | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLang, setDetailLang] = useState<"zh" | "en">("zh");
 
   const { data, isLoading } = useQuery({
     queryKey: ["reports-invoices", page, startDate, endDate, searchKey],
@@ -450,66 +474,9 @@ function InvoiceReportsTab() {
                         : "-"}
                     </TableCell>
                     <TableCell className="text-center">
-                      <Dialog>
-                        <DialogTrigger>
-                          <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setDetailId(item.invoice_id)}>
-                            <Eye className="h-3.5 w-3.5" />
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-[900px] max-h-[85vh] overflow-y-auto">
-                          <DialogHeader>
-                            <DialogTitle className="text-base">单票财报详情</DialogTitle>
-                          </DialogHeader>
-                          {detailData ? (
-                            <div className="space-y-4 text-sm">
-                              <div className="grid grid-cols-3 gap-3 text-xs">
-                                <div><span className="text-muted-foreground">发票:</span> {detailData.invoice_no}</div>
-                                <div><span className="text-muted-foreground">日期:</span> {fmtDate(detailData.invoice_date)}</div>
-                                <div><span className="text-muted-foreground">批次:</span> {detailData.batch_name || "-"}</div>
-                              </div>
-                              <div className="border rounded-lg overflow-hidden">
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow className="bg-muted/50">
-                                      <TableHead className="text-xs">日期</TableHead>
-                                      <TableHead className="text-xs">客户</TableHead>
-                                      <TableHead className="text-xs">规格</TableHead>
-                                      <TableHead className="text-xs text-right">重量(kg)</TableHead>
-                                      <TableHead className="text-xs text-right">单价</TableHead>
-                                      <TableHead className="text-xs text-right">毛额(CNY)</TableHead>
-                                      <TableHead className="text-xs text-right">净额(CNY)</TableHead>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {(detailData.sales || []).map((sale: any, idx: number) => (
-                                      <TableRow key={idx}>
-                                        <TableCell className="text-xs">{fmtDate(sale.sale_date)}</TableCell>
-                                        <TableCell className="text-xs">{sale.customer_name || "-"}</TableCell>
-                                        <TableCell className="text-xs">{sale.spec || "-"}</TableCell>
-                                        <TableCell className="text-xs text-right">{Number(sale.weight_kg || 0).toLocaleString()}</TableCell>
-                                        <TableCell className="text-xs text-right">{fmt$(sale.unit_price)}</TableCell>
-                                        <TableCell className="text-xs text-right">{fmt$(sale.gross_amount)}</TableCell>
-                                        <TableCell className="text-xs text-right font-medium">{fmt$(sale.net_amount)}</TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                              <div className="flex justify-end gap-4 text-xs font-medium">
-                                <span>采购成本: {fmt$(detailData.purchase_cost_cny)}</span>
-                                <span>总销售: {fmt$(detailData.total_sales_net)}</span>
-                                <span className={clsProfit(Number(detailData.net_profit))}>
-                                  净利润: {fmt$(detailData.net_profit)}
-                                </span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="py-8 text-center">
-                              <Loader2 className="h-5 w-5 animate-spin mx-auto" />
-                            </div>
-                          )}
-                        </DialogContent>
-                      </Dialog>
+                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => { setDetailId(item.invoice_id); setDetailOpen(true); }}>
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))
@@ -524,6 +491,85 @@ function InvoiceReportsTab() {
           />
         </CardContent>
       </Card>
+
+      {/* 单票财报详情弹窗 — 提取到循环外部 */}
+      <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setDetailId(null); }}>
+        <DialogContent className="max-w-[900px] max-h-[85vh] overflow-y-auto print:max-w-none print:w-full print:h-auto print:overflow-visible">
+          <DialogHeader>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-base">
+                {detailLang === "zh" ? "单票财报详情" : "Invoice Financial Report"}
+              </DialogTitle>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => setDetailLang(detailLang === "zh" ? "en" : "zh")}>
+                  <Languages className="h-3.5 w-3.5" />
+                  {detailLang === "zh" ? "EN" : "中"}
+                </Button>
+                <Button variant="ghost" size="sm" className="h-7 gap-1" onClick={() => window.print()}>
+                  <Printer className="h-3.5 w-3.5" />
+                  {detailLang === "zh" ? "打印" : "Print"}
+                </Button>
+              </div>
+            </div>
+          </DialogHeader>
+          {detailData ? (
+            <div className="space-y-4 text-sm print:text-xs">
+              <style>{`
+                @media print {
+                  body * { visibility: hidden; }
+                  [data-radix-dialog-content] *, [data-radix-dialog-content] { visibility: visible; }
+                  [data-radix-dialog-content] { position: absolute; left: 0; top: 0; width: 100%; }
+                  .print\:hidden { display: none !important; }
+                }
+              `}</style>
+              <div className="grid grid-cols-3 gap-3 text-xs print:grid-cols-3">
+                <div><span className="text-muted-foreground">{detailLang === "zh" ? "发票:" : "Invoice:"}</span> {detailData.invoice_no}</div>
+                <div><span className="text-muted-foreground">{detailLang === "zh" ? "日期:" : "Date:"}</span> {fmtDate(detailData.invoice_date)}</div>
+                <div><span className="text-muted-foreground">{detailLang === "zh" ? "批次:" : "Batch:"}</span> {detailData.batch_name || "-"}</div>
+              </div>
+              <div className="border rounded-lg overflow-hidden print:border-black">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="text-xs">{detailLang === "zh" ? "日期" : "Date"}</TableHead>
+                      <TableHead className="text-xs">{detailLang === "zh" ? "客户" : "Customer"}</TableHead>
+                      <TableHead className="text-xs">{detailLang === "zh" ? "规格" : "Spec"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "重量(kg)" : "Weight(kg)"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "单价" : "Unit Price"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "毛额(CNY)" : "Gross(CNY)"}</TableHead>
+                      <TableHead className="text-xs text-right">{detailLang === "zh" ? "净额(CNY)" : "Net(CNY)"}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(detailData.sales || []).map((sale: any, idx: number) => (
+                      <TableRow key={idx}>
+                        <TableCell className="text-xs">{fmtDate(sale.sale_date)}</TableCell>
+                        <TableCell className="text-xs">{sale.customer_name || "-"}</TableCell>
+                        <TableCell className="text-xs">{sale.spec || "-"}</TableCell>
+                        <TableCell className="text-xs text-right">{Number(sale.weight_kg || 0).toLocaleString()}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt$(sale.unit_price)}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt$(sale.gross_amount)}</TableCell>
+                        <TableCell className="text-xs text-right font-medium">{fmt$(sale.net_amount)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex justify-end gap-4 text-xs font-medium print:flex">
+                <span>{detailLang === "zh" ? "采购成本:" : "Purchase:"} {fmt$(detailData.purchase_cost_cny)}</span>
+                <span>{detailLang === "zh" ? "总销售:" : "Total Sales:"} {fmt$(detailData.total_sales_net)}</span>
+                <span className={clsProfit(Number(detailData.net_profit))}>
+                  {detailLang === "zh" ? "净利润:" : "Net Profit:"} {fmt$(detailData.net_profit)}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="py-8 text-center">
+              <Loader2 className="h-5 w-5 animate-spin mx-auto" />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -16,7 +16,6 @@ import {
   TrendingUp,
   Warehouse,
   Scissors,
-  AlertTriangle,
   Layers,
   Store,
 } from "lucide-react";
@@ -37,10 +36,7 @@ const finishedProductItems = [
   { icon: BarChart3, label: "成品报表", path: "/finished-product-reports" },
 ];
 
-const slaughterItems = [
-  { icon: Scissors, label: "日常屠宰", path: "/daily-slaughter" },
-  { icon: AlertTriangle, label: "损耗记录", path: "/loss-records" },
-];
+
 
 const bottomNavItems = [
   { icon: Package, label: "产品管理", path: "/products" },
@@ -87,30 +83,6 @@ export function Sidebar() {
         <div className="pt-4 mt-2 border-t">
           <p className="px-3 text-xs text-muted-foreground mb-2">成品管理</p>
           {finishedProductItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* 屠宰管理分组 */}
-        <div className="pt-4 mt-2 border-t">
-          <p className="px-3 text-xs text-muted-foreground mb-2">屠宰管理</p>
-          {slaughterItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
             return (
