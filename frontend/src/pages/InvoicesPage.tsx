@@ -376,7 +376,7 @@ export function InvoicesPage() {
                         <span className="text-xs text-muted-foreground mr-1">└</span>
                       )}
                       {invoice.invoice_no}
-                      {invoice.is_master && (
+                      {(invoice.is_master === true || invoice.is_master === null) && !invoice.parent_invoice_id && (
                         <Badge variant="outline" className="ml-1 text-[10px] h-4 px-1 bg-blue-50 text-blue-600">主</Badge>
                       )}
                       {invoice.parent_invoice_id && invoice.parent_invoice_no && (
@@ -419,7 +419,7 @@ export function InvoicesPage() {
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleDelete(invoice)} title="删除" disabled={invoice.is_locked}>
                           <Trash2 className={cn("h-4 w-4", invoice.is_locked && "text-muted-foreground")} />
                         </Button>
-                        {(invoice.is_master || invoice.parent_invoice_id) && (
+                        {((invoice.is_master === true || invoice.is_master === null) || invoice.parent_invoice_id) && (
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500" onClick={() => handleAllocate(invoice)} title="费用分摊">
                             <DollarSign className="h-4 w-4" />
                           </Button>
