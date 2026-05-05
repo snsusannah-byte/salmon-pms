@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,17 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Search, Calculator, UserCog, TrendingUp } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Search, Calculator, UserCog, TrendingUp, Wallet, CheckCircle } from "lucide-react";
+import { toast } from "sonner";
 
 interface CommissionRecord {
   id: number;
@@ -26,7 +36,7 @@ interface CommissionRecord {
   sale_amount: number;
   commission_rate: number;
   commission_amount: number;
-  status: string; // pending / paid
+  status: string;
   paid_date: string | null;
   notes: string | null;
 }
@@ -38,11 +48,15 @@ interface CommissionSummary {
 }
 
 export function CommissionPage() {
+  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   });
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [payDialogOpen, setPayDialogOpen] = useState(false);
+  const [payTargetSp, setPayTargetSp] = useState<{ id: number; name: string } | null>(null);
 
   const { data: records, isLoading } = useQuery({
     queryKey: ["commissions", month, search],
@@ -50,7 +64,7 @@ export function CommissionPage() {
       const params = new URLSearchParams();
       params.set("month", month);
       if (search) params.set("search", search);
-      const res = await api.get(`/v1/commissions/?${params.toString()}`);
+      const res = await api.get(`/v1/salespersons/commissions/?${params.toString()}`);
       return res.data as { items: CommissionRecord[]; summary: CommissionSummary };
     },
   });
@@ -63,9 +77,61 @@ export function CommissionPage() {
     },
   });
 
+  const payMutation = useMutation({
+    mutationFn: async ({ spId, recordIds }: { spId: number; recordIds: number[] }) => {
+      const res = await api.post(`/v1/salespersons/${spId}/pay-commission`, recordIds);
+      return res.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`成功发放 ${data.paid_count} 笔提成`);
+      qc.invalidateQueries({ queryKey: ["commissions"] });
+      setSelectedIds(new Set());
+      setPayDialogOpen(false);
+      setPayTargetSp(null);
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || "发放失败");
+    },
+  });
+
+  const pendingRecords = records?.items.filter((r) => r.status === "pending") ?? [];
+
+  function toggleSelect(id: number) {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  }
+
+  function toggleSelectAll() {
+    const pendingIds = pendingRecords.map((r) => r.id);
+    if (selectedIds.size === pendingIds.length && pendingIds.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(pendingIds));
+    }
+  }
+
+  function handlePayClick(spId: number, spName: string) {
+    const ids = pendingRecords.filter((r) => r.salesperson_id === spId).map((r) => r.id);
+    if (ids.length === 0) {
+      toast.info("该业务员没有待发放提成");
+      return;
+    }
+    setPayTargetSp({ id: spId, name: spName });
+    setPayDialogOpen(true);
+  }
+
+  function handleConfirmPay() {
+    if (!payTargetSp) return;
+    const ids = pendingRecords
+      .filter((r) => r.salesperson_id === payTargetSp.id)
+      .map((r) => r.id);
+    payMutation.mutate({ spId: payTargetSp.id, recordIds: ids });
+  }
+
   return (
     <div className="space-y-6">
-      {/* 标题 */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">提成管理</h1>
@@ -107,115 +173,235 @@ export function CommissionPage() {
         </Card>
       </div>
 
-      {/* 筛选 */}
-      <div className="flex gap-4">
-        <div className="relative max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="搜索业务员、客户..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label className="text-xs">月份</Label>
-          <Input
-            type="month"
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="w-40"
-          />
-        </div>
-      </div>
+      <Tabs defaultValue="overview">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="overview">业务员概览</TabsTrigger>
+          <TabsTrigger value="records">提成明细</TabsTrigger>
+        </TabsList>
 
-      {/* 业务员提成概览 */}
-      <div className="border rounded-lg">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>业务员</TableHead>
-              <TableHead>默认提成比例</TableHead>
-              <TableHead>本月销售额</TableHead>
-              <TableHead>本月提成</TableHead>
-              <TableHead>待发放</TableHead>
-              <TableHead>已发放</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {salespersons?.map((sp) => {
-              const spRecords = records?.items.filter((r) => r.salesperson_id === sp.id) ?? [];
-              const totalSale = spRecords.reduce((sum, r) => sum + r.sale_amount, 0);
-              const totalCommission = spRecords.reduce((sum, r) => sum + r.commission_amount, 0);
-              const pending = spRecords.filter((r) => r.status === "pending").reduce((sum, r) => sum + r.commission_amount, 0);
-              const paid = spRecords.filter((r) => r.status === "paid").reduce((sum, r) => sum + r.commission_amount, 0);
-              return (
-                <TableRow key={sp.id}>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      <UserCog className="h-4 w-4 text-blue-500" />
-                      {sp.name}
-                    </div>
-                  </TableCell>
-                  <TableCell>{sp.commission_rate}%</TableCell>
-                  <TableCell>¥{totalSale.toLocaleString()}</TableCell>
-                  <TableCell className="font-medium">¥{totalCommission.toLocaleString()}</TableCell>
-                  <TableCell className="text-orange-600">¥{pending.toLocaleString()}</TableCell>
-                  <TableCell className="text-green-600">¥{paid.toLocaleString()}</TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+        <TabsContent value="overview" className="space-y-4 mt-4">
+          {/* 筛选 */}
+          <div className="flex gap-4">
+            <div className="relative max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索业务员..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">月份</Label>
+              <Input
+                type="month"
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                className="w-40"
+              />
+            </div>
+          </div>
 
-      {/* 明细表格 */}
-      <div className="border rounded-lg">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>日期</TableHead>
-              <TableHead>业务员</TableHead>
-              <TableHead>客户</TableHead>
-              <TableHead>销售金额</TableHead>
-              <TableHead>提成比例</TableHead>
-              <TableHead>提成金额</TableHead>
-              <TableHead>状态</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">加载中...</TableCell>
-              </TableRow>
-            ) : records?.items.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                  暂无提成记录
-                </TableCell>
-              </TableRow>
-            ) : (
-              records?.items.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="text-sm">{r.sale_date}</TableCell>
-                  <TableCell className="font-medium">{r.salesperson_name}</TableCell>
-                  <TableCell>{r.customer_name}</TableCell>
-                  <TableCell>¥{r.sale_amount.toLocaleString()}</TableCell>
-                  <TableCell>{r.commission_rate}%</TableCell>
-                  <TableCell className="font-medium">¥{r.commission_amount.toLocaleString()}</TableCell>
-                  <TableCell>
-                    {r.status === "pending" ? (
-                      <Badge variant="secondary" className="bg-orange-100 text-orange-800">待发放</Badge>
-                    ) : (
-                      <Badge variant="secondary" className="bg-green-100 text-green-800">已发放</Badge>
-                    )}
-                  </TableCell>
+          {/* 业务员提成概览 */}
+          <div className="border rounded-lg">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>业务员</TableHead>
+                  <TableHead>默认提成比例</TableHead>
+                  <TableHead>本月销售额</TableHead>
+                  <TableHead>本月提成</TableHead>
+                  <TableHead>待发放</TableHead>
+                  <TableHead>已发放</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              </TableHeader>
+              <TableBody>
+                {salespersons?.map((sp) => {
+                  const spRecords = records?.items.filter((r) => r.salesperson_id === sp.id) ?? [];
+                  const totalSale = spRecords.reduce((sum, r) => sum + r.sale_amount, 0);
+                  const totalCommission = spRecords.reduce((sum, r) => sum + r.commission_amount, 0);
+                  const pending = spRecords
+                    .filter((r) => r.status === "pending")
+                    .reduce((sum, r) => sum + r.commission_amount, 0);
+                  const paid = spRecords
+                    .filter((r) => r.status === "paid")
+                    .reduce((sum, r) => sum + r.commission_amount, 0);
+                  return (
+                    <TableRow key={sp.id}>
+                      <TableCell className="font-medium">
+                        <div className="flex items-center gap-2">
+                          <UserCog className="h-4 w-4 text-blue-500" />
+                          {sp.name}
+                        </div>
+                      </TableCell>
+                      <TableCell>{sp.commission_rate}%</TableCell>
+                      <TableCell>¥{totalSale.toLocaleString()}</TableCell>
+                      <TableCell className="font-medium">
+                        ¥{totalCommission.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-orange-600">
+                        ¥{pending.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-green-600">
+                        ¥{paid.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={pending <= 0 || payMutation.isPending}
+                          onClick={() => handlePayClick(sp.id, sp.name)}
+                        >
+                          <Wallet className="h-3 w-3 mr-1" />
+                          发放
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="records" className="space-y-4 mt-4">
+          {/* 筛选 */}
+          <div className="flex gap-4">
+            <div className="relative max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索业务员、客户..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">月份</Label>
+              <Input
+                type="month"
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                className="w-40"
+              />
+            </div>
+          </div>
+
+          {/* 明细表格 */}
+          <div className="border rounded-lg">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={
+                        pendingRecords.length > 0 && selectedIds.size === pendingRecords.length
+                      }
+                      onCheckedChange={toggleSelectAll}
+                    />
+                  </TableHead>
+                  <TableHead>日期</TableHead>
+                  <TableHead>业务员</TableHead>
+                  <TableHead>客户</TableHead>
+                  <TableHead>销售金额</TableHead>
+                  <TableHead>提成比例</TableHead>
+                  <TableHead>提成金额</TableHead>
+                  <TableHead>状态</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8">
+                      加载中...
+                    </TableCell>
+                  </TableRow>
+                ) : records?.items.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      暂无提成记录
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  records?.items.map((r) => (
+                    <TableRow key={r.id}>
+                      <TableCell>
+                        {r.status === "pending" && (
+                          <Checkbox
+                            checked={selectedIds.has(r.id)}
+                            onCheckedChange={() => toggleSelect(r.id)}
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm">{r.sale_date}</TableCell>
+                      <TableCell className="font-medium">{r.salesperson_name}</TableCell>
+                      <TableCell>{r.customer_name}</TableCell>
+                      <TableCell>¥{r.sale_amount.toLocaleString()}</TableCell>
+                      <TableCell>{r.commission_rate}%</TableCell>
+                      <TableCell className="font-medium">
+                        ¥{r.commission_amount.toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        {r.status === "pending" ? (
+                          <Badge variant="secondary" className="bg-orange-100 text-orange-800">
+                            待发放
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="bg-green-100 text-green-800">
+                            已发放
+                          </Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* 发放确认弹窗 */}
+      <Dialog open={payDialogOpen} onOpenChange={setPayDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认发放提成</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p>
+              业务员：<span className="font-medium">{payTargetSp?.name}</span>
+            </p>
+            <p>
+              待发放笔数：
+              <span className="font-medium">
+                {pendingRecords.filter((r) => r.salesperson_id === payTargetSp?.id).length} 笔
+              </span>
+            </p>
+            <p>
+              待发放金额：
+              <span className="font-medium text-orange-600">
+                ¥
+                {pendingRecords
+                  .filter((r) => r.salesperson_id === payTargetSp?.id)
+                  .reduce((sum, r) => sum + r.commission_amount, 0)
+                  .toLocaleString()}
+              </span>
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPayDialogOpen(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={handleConfirmPay}
+              disabled={payMutation.isPending}
+            >
+              {payMutation.isPending ? "发放中..." : "确认发放"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
