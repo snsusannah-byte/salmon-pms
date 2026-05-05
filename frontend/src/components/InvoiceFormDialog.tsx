@@ -127,6 +127,8 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
       inspection_certificate: "",
       customs_status: "pending_customs",
       exchange_status: "not_exchanged",
+      is_master: true,
+      parent_invoice_id: undefined,
       notes: "",
       products: [],
     },
@@ -247,7 +249,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         inspection_certificate: "",
         customs_status: "pending_customs",
         exchange_status: "not_exchanged",
-        is_master: false,
+        is_master: true,
         parent_invoice_id: undefined,
         notes: "",
         products: [],
@@ -348,7 +350,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { onOpenChange(false); resetForm(); } }}>
-      <DialogContent className="!w-[500px] !max-w-[500px] max-h-[90vh] overflow-y-auto p-6">
+      <DialogContent className="!w-[900px] !max-w-[95vw] max-h-[95vh] overflow-y-auto p-4">
         <DialogHeader>
           <DialogTitle>{initialData ? "编辑发票" : "新增发票"}</DialogTitle>
         </DialogHeader>
@@ -356,71 +358,71 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         <form onSubmit={form.handleSubmit(onSubmit, (errors) => {
           console.error("表单验证错误:", errors);
           toast.error("请检查表单必填项");
-        })} className="space-y-8">
+        })} className="space-y-4">
           {/* 基本信息 */}
-          <div className="space-y-6">
+          <div className="space-y-3">
             <h3 className="text-sm font-semibold text-foreground">基本信息</h3>
-            <div className="grid grid-cols-3 gap-6">
-              <div className="space-y-2">
-                <Label htmlFor="invoice_no">发票号（供应商原始编号） *</Label>
-                <Input id="invoice_no" {...form.register("invoice_no")} placeholder="如: 8690" />
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="invoice_no" className="text-xs">发票号（供应商原始编号） *</Label>
+                <Input id="invoice_no" {...form.register("invoice_no")} placeholder="如: 8690" className="h-8" />
                 {form.formState.errors.invoice_no && <p className="text-xs text-red-500">{form.formState.errors.invoice_no.message}</p>}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="invoice_date">发票日期 *</Label>
-                <Input id="invoice_date" type="date" {...form.register("invoice_date")} />
+              <div className="space-y-1">
+                <Label htmlFor="invoice_date" className="text-xs">发票日期 *</Label>
+                <Input id="invoice_date" type="date" {...form.register("invoice_date")} className="h-8" />
                 {form.formState.errors.invoice_date && <p className="text-xs text-red-500">{form.formState.errors.invoice_date.message}</p>}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="kill_date">宰杀日期 *</Label>
-                <Input id="kill_date" type="date" {...form.register("kill_date")} />
+              <div className="space-y-1">
+                <Label htmlFor="kill_date" className="text-xs">宰杀日期 *</Label>
+                <Input id="kill_date" type="date" {...form.register("kill_date")} className="h-8" />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="processing_plant_id">加工厂 *</Label>
+              <div className="space-y-1">
+                <Label htmlFor="processing_plant_id" className="text-xs">加工厂 *</Label>
                 <Select
                   value={form.watch("processing_plant_id") ? String(form.watch("processing_plant_id")) : undefined}
                   onValueChange={(v) => form.setValue("processing_plant_id", parseInt(v || "0"))}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full h-8 text-xs">
                     <SelectValue placeholder="选择加工厂" />
                   </SelectTrigger>
                   <SelectContent>
                     {processingPlants.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                      <SelectItem key={c.id} value={String(c.id)} className="text-xs">{c.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 {form.formState.errors.processing_plant_id && <p className="text-xs text-red-500">{form.formState.errors.processing_plant_id.message}</p>}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="fish_farm_id">渔场</Label>
+              <div className="space-y-1">
+                <Label htmlFor="fish_farm_id" className="text-xs">渔场</Label>
                 <Select
                   value={form.watch("fish_farm_id") ? String(form.watch("fish_farm_id")) : undefined}
                   onValueChange={(v) => form.setValue("fish_farm_id", parseInt(v || "0"))}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full h-8 text-xs">
                     <SelectValue placeholder="选择渔场" />
                   </SelectTrigger>
                   <SelectContent>
                     {fishFarms.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                      <SelectItem key={c.id} value={String(c.id)} className="text-xs">{c.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 {form.formState.errors.fish_farm_id && <p className="text-xs text-red-500">{form.formState.errors.fish_farm_id.message}</p>}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="exporter_id">出口商 *</Label>
+              <div className="space-y-1">
+                <Label htmlFor="exporter_id" className="text-xs">出口商 *</Label>
                 <Select
                   value={form.watch("exporter_id") ? String(form.watch("exporter_id")) : undefined}
                   onValueChange={(v) => form.setValue("exporter_id", parseInt(v || "0"))}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full h-8 text-xs">
                     <SelectValue placeholder="选择出口商" />
                   </SelectTrigger>
                   <SelectContent>
                     {exporters.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                      <SelectItem key={c.id} value={String(c.id)} className="text-xs">{c.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
