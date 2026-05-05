@@ -365,17 +365,17 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1">
                 <Label htmlFor="invoice_no" className="text-xs">发票号（供应商原始编号） *</Label>
-                <Input id="invoice_no" {...form.register("invoice_no")} placeholder="如: 8690" className="h-8" />
+                <Input id="invoice_no" {...form.register("invoice_no")} placeholder="如: 8690" className="h-7" />
                 {form.formState.errors.invoice_no && <p className="text-xs text-red-500">{form.formState.errors.invoice_no.message}</p>}
               </div>
               <div className="space-y-1">
                 <Label htmlFor="invoice_date" className="text-xs">发票日期 *</Label>
-                <Input id="invoice_date" type="date" {...form.register("invoice_date")} className="h-8" />
+                <Input id="invoice_date" type="date" {...form.register("invoice_date")} className="h-7" />
                 {form.formState.errors.invoice_date && <p className="text-xs text-red-500">{form.formState.errors.invoice_date.message}</p>}
               </div>
               <div className="space-y-1">
                 <Label htmlFor="kill_date" className="text-xs">宰杀日期 *</Label>
-                <Input id="kill_date" type="date" {...form.register("kill_date")} className="h-8" />
+                <Input id="kill_date" type="date" {...form.register("kill_date")} className="h-7" />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="processing_plant_id" className="text-xs">加工厂 *</Label>
@@ -383,7 +383,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   value={form.watch("processing_plant_id") ? String(form.watch("processing_plant_id")) : undefined}
                   onValueChange={(v) => form.setValue("processing_plant_id", parseInt(v || "0"))}
                 >
-                  <SelectTrigger className="w-full h-8 text-xs">
+                  <SelectTrigger className="w-full h-7 text-xs">
                     <SelectValue placeholder="选择加工厂" />
                   </SelectTrigger>
                   <SelectContent>
@@ -400,7 +400,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   value={form.watch("fish_farm_id") ? String(form.watch("fish_farm_id")) : undefined}
                   onValueChange={(v) => form.setValue("fish_farm_id", parseInt(v || "0"))}
                 >
-                  <SelectTrigger className="w-full h-8 text-xs">
+                  <SelectTrigger className="w-full h-7 text-xs">
                     <SelectValue placeholder="选择渔场" />
                   </SelectTrigger>
                   <SelectContent>
@@ -417,7 +417,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   value={form.watch("exporter_id") ? String(form.watch("exporter_id")) : undefined}
                   onValueChange={(v) => form.setValue("exporter_id", parseInt(v || "0"))}
                 >
-                  <SelectTrigger className="w-full h-8 text-xs">
+                  <SelectTrigger className="w-full h-7 text-xs">
                     <SelectValue placeholder="选择出口商" />
                   </SelectTrigger>
                   <SelectContent>
@@ -432,10 +432,10 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
           </div>
 
           {/* 主从发票关系 */}
-          <div className="space-y-6">
+          <div className="space-y-3">
             <h3 className="text-sm font-semibold text-foreground">AWB 主从关系</h3>
-            <div className="grid grid-cols-3 gap-6">
-              <div className="space-y-2">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
                 <Label htmlFor="is_master">发票类型</Label>
                 <Select
                   value={form.watch("is_master") ? "master" : "sub"}
@@ -456,7 +456,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                 </Select>
               </div>
               {!form.watch("is_master") && (
-                <div className="space-y-2">
+                <div className="space-y-1">
                   <Label htmlFor="parent_invoice_id">关联主票 *</Label>
                   <Select
                     value={form.watch("parent_invoice_id") ? String(form.watch("parent_invoice_id")) : undefined}
@@ -499,34 +499,34 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
           </div>
 
           {/* 物流与证书信息 */}
-          <div className="space-y-6">
+          <div className="space-y-3">
             <h3 className="text-sm font-semibold text-foreground">物流与证书信息</h3>
-            <div className="grid grid-cols-3 gap-6">
-              <div className="space-y-2">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
                 <Label htmlFor="awb_no">AWB航空运单号 *</Label>
                 <Input id="awb_no" {...form.register("awb_no")} placeholder="如: 176-12345678" />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="gross_weight_kg">毛重(kg)</Label>
                 <Input id="gross_weight_kg" {...form.register("gross_weight_kg")} placeholder="毛重" />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="eta">ETA预计到达 *</Label>
                 <Input id="eta" type="datetime-local" {...form.register("eta")} />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="departure_date">发运时间</Label>
                 <Input id="departure_date" type="date" {...form.register("departure_date")} />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="flight_info">航班信息</Label>
                 <Input id="flight_info" {...form.register("flight_info")} placeholder="如: CA1234" />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="origin_certificate">原产地证书</Label>
                 <Input id="origin_certificate" {...form.register("origin_certificate")} placeholder="证书编号" />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label htmlFor="inspection_certificate">检验检疫证书</Label>
                 <Input id="inspection_certificate" {...form.register("inspection_certificate")} placeholder="证书编号" />
               </div>
@@ -534,7 +534,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
           </div>
 
           {/* 产品明细 */}
-          <div className="space-y-6">
+          <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-foreground">产品明细</h3>
               <Button type="button" variant="outline" size="sm" onClick={addProduct}>
@@ -563,7 +563,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
               return (
                 <div key={field.id} className="grid grid-cols-12 gap-2 items-center px-2 py-2 border rounded-md">
                   <div className="col-span-2">
-                    <div className="text-xs font-medium text-foreground truncate px-2 py-1.5 h-8 bg-muted/30 rounded border flex items-center" title={form.watch(`products.${index}.product_name`) || "-"}>
+                    <div className="text-xs font-medium text-foreground truncate px-2 py-1.5 h-7 bg-muted/30 rounded border flex items-center" title={form.watch(`products.${index}.product_name`) || "-"}>
                       {form.watch(`products.${index}.product_name`) || "选择规格后自动显示"}
                     </div>
                   </div>
@@ -580,7 +580,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                         }
                       }}
                     >
-                      <SelectTrigger className="text-xs w-full h-8">
+                      <SelectTrigger className="text-xs w-full h-7">
                         <SelectValue placeholder="规格" />
                       </SelectTrigger>
                       <SelectContent>
@@ -591,13 +591,13 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                     </Select>
                   </div>
                   <div className="col-span-1">
-                    <Input type="number" inputMode="numeric" className="text-center text-xs h-8 px-1 appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" {...form.register(`products.${index}.box_count`)} />
+                    <Input type="number" inputMode="numeric" className="text-center text-xs h-7 px-1 appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" {...form.register(`products.${index}.box_count`)} />
                   </div>
                   <div className="col-span-2">
-                    <Input type="number" step="0.001" inputMode="decimal" className="text-center text-xs h-8 px-1 appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" {...form.register(`products.${index}.net_weight_kg`)} />
+                    <Input type="number" step="0.001" inputMode="decimal" className="text-center text-xs h-7 px-1 appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" {...form.register(`products.${index}.net_weight_kg`)} />
                   </div>
                   <div className="col-span-2">
-                    <Input type="number" step="0.0001" inputMode="decimal" className="text-center text-xs h-8 px-1 appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" {...form.register(`products.${index}.unit_price`)} />
+                    <Input type="number" step="0.0001" inputMode="decimal" className="text-center text-xs h-7 px-1 appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" {...form.register(`products.${index}.unit_price`)} />
                   </div>
                   <div className="col-span-2 text-center text-xs font-medium truncate" title={lineAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}>
                     {lineAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -622,7 +622,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
           </div>
 
           {/* 备注 */}
-          <div className="space-y-2">
+          <div className="space-y-1">
             <Label htmlFor="notes">备注</Label>
             <textarea
               id="notes"
