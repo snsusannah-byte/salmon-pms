@@ -162,6 +162,15 @@ class BatchService:
             for idx, inv_id in enumerate(invoice_ids):
                 bi = BatchInvoice(batch_id=batch.id, invoice_id=inv_id, sort_order=idx)
                 db.add(bi)
+            
+            # 更新关联发票的报关状态为"已结关"
+            from app.models import ImportInvoice, InvoiceStatus
+            invoice_result = await db.execute(
+                select(ImportInvoice).where(ImportInvoice.id.in_(invoice_ids))
+            )
+            invoices = invoice_result.scalars().all()
+            for inv in invoices:
+                inv.customs_status = InvoiceStatus.CLEARED
 
         await db.commit()
         await db.refresh(batch)
@@ -192,6 +201,16 @@ class BatchService:
 
         bi = BatchInvoice(batch_id=batch_id, invoice_id=invoice_id)
         db.add(bi)
+        
+        # 更新发票报关状态为"已结关"
+        from app.models import ImportInvoice, InvoiceStatus
+        invoice_result = await db.execute(
+            select(ImportInvoice).where(ImportInvoice.id == invoice_id)
+        )
+        invoice = invoice_result.scalar_one_or_none()
+        if invoice:
+            invoice.customs_status = InvoiceStatus.CLEARED
+        
         await db.commit()
         await db.refresh(bi)
         return bi

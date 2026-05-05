@@ -28,19 +28,19 @@ import { toast } from "sonner";
 import { BatchImportButton } from "@/components/BatchImportButton";
 
 const customsStatusMap: Record<string, { label: string; color: string }> = {
-  PENDING_SHIPMENT: { label: "未报关", color: "bg-gray-100 text-gray-800" },
-  IN_TRANSIT: { label: "运输中", color: "bg-blue-100 text-blue-800" },
-  PENDING_CUSTOMS: { label: "待报关", color: "bg-yellow-100 text-yellow-800" },
-  CUSTOMS_PROCESSING: { label: "报关中", color: "bg-orange-100 text-orange-800" },
-  CLEARED: { label: "已清关", color: "bg-green-100 text-green-800" },
-  PICKED_UP: { label: "已提货", color: "bg-purple-100 text-purple-800" },
-  // 兼容旧数据
-  pending_shipment: { label: "未报关", color: "bg-gray-100 text-gray-800" },
-  in_transit: { label: "运输中", color: "bg-blue-100 text-blue-800" },
   pending_customs: { label: "待报关", color: "bg-yellow-100 text-yellow-800" },
-  customs_processing: { label: "报关中", color: "bg-orange-100 text-orange-800" },
-  cleared: { label: "已清关", color: "bg-green-100 text-green-800" },
-  picked_up: { label: "已提货", color: "bg-purple-100 text-purple-800" },
+  customs_processing: { label: "已报关", color: "bg-blue-100 text-blue-800" },
+  cleared: { label: "已结关", color: "bg-green-100 text-green-800" },
+  // 兼容旧数据（已不使用的状态映射到新状态）
+  pending_shipment: { label: "待报关", color: "bg-yellow-100 text-yellow-800" },
+  in_transit: { label: "已报关", color: "bg-blue-100 text-blue-800" },
+  picked_up: { label: "已结关", color: "bg-green-100 text-green-800" },
+  PENDING_CUSTOMS: { label: "待报关", color: "bg-yellow-100 text-yellow-800" },
+  CUSTOMS_PROCESSING: { label: "已报关", color: "bg-blue-100 text-blue-800" },
+  CLEARED: { label: "已结关", color: "bg-green-100 text-green-800" },
+  PENDING_SHIPMENT: { label: "待报关", color: "bg-yellow-100 text-yellow-800" },
+  IN_TRANSIT: { label: "已报关", color: "bg-blue-100 text-blue-800" },
+  PICKED_UP: { label: "已结关", color: "bg-green-100 text-green-800" },
 };
 
 const exchangeStatusMap: Record<string, { label: string; color: string }> = {
@@ -273,9 +273,9 @@ export function InvoicesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部报关</SelectItem>
-            {Object.entries(customsStatusMap).map(([key, { label }]) => (
-              <SelectItem key={key} value={key}>{label}</SelectItem>
-            ))}
+            <SelectItem value="pending_customs">待报关</SelectItem>
+            <SelectItem value="customs_processing">已报关</SelectItem>
+            <SelectItem value="cleared">已结关</SelectItem>
           </SelectContent>
         </Select>
         <Select value={exchangeStatus} onValueChange={(v) => { setExchangeStatus(v ?? "all"); setPage(1); }}>

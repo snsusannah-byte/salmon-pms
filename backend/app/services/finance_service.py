@@ -319,6 +319,14 @@ class FinanceService:
         await db.refresh(tax_record)
         await db.refresh(clearance_record)
         
+        # 3. 更新发票报关状态为"已报关"
+        from app.models import InvoiceStatus
+        invoice_result = await db.execute(select(ImportInvoice).where(ImportInvoice.id == invoice_id))
+        invoice = invoice_result.scalar_one_or_none()
+        if invoice and invoice.customs_status == InvoiceStatus.PENDING_CUSTOMS:
+            invoice.customs_status = InvoiceStatus.CUSTOMS_PROCESSING
+            await db.commit()
+        
         return {
             "invoice_id": invoice_id,
             "tax_record_id": tax_record.id,

@@ -33,13 +33,14 @@ class CompanyType(str, PyEnum):
 
 
 class InvoiceStatus(str, PyEnum):
-    """报关状态（清关流程）"""
-    PENDING_SHIPMENT = "pending_shipment"      # 待发货
-    IN_TRANSIT = "in_transit"                  # 运输中
-    PENDING_CUSTOMS = "pending_customs"        # 待报关
-    CUSTOMS_PROCESSING = "customs_processing"  # 报关中
-    CLEARED = "cleared"                        # 已清关
-    PICKED_UP = "picked_up"                    # 已提货
+    """报关状态（3态流转）"""
+    PENDING_CUSTOMS = "pending_customs"        # 待报关（新建发票默认）
+    CUSTOMS_PROCESSING = "customs_processing"  # 已报关（费用录入后）
+    CLEARED = "cleared"                        # 已结关（加入批次后）
+    # 已弃用状态（兼容旧数据）
+    PENDING_SHIPMENT = "pending_shipment"      # 已弃用-映射为待报关
+    IN_TRANSIT = "in_transit"                  # 已弃用-映射为已报关
+    PICKED_UP = "picked_up"                    # 已弃用-映射为已结关
 
 
 class ExchangeStatus(str, PyEnum):

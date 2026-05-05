@@ -280,7 +280,7 @@ function BatchReportsTab() {
 
       {/* 批次财报详情弹窗 — 提取到循环外部 */}
       <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setDetailId(null); }}>
-        <DialogContent className="w-[1100px] max-w-[95vw] max-h-[85vh] overflow-y-auto print:max-w-none print:w-full print:h-auto print:overflow-visible">
+        <DialogContent className="w-[1100px] max-w-[95vw] print:max-w-none print:w-full print:h-auto print:overflow-visible">
           <DialogHeader>
             <div className="flex items-center justify-between">
               <DialogTitle className="text-base">
@@ -428,7 +428,6 @@ function BatchReportsTab() {
                 <div className="border rounded-lg p-2.5 space-y-1.5">
                   <p className="text-xs font-semibold text-blue-600">{detailLang === "zh" ? "采购信息" : "Purchase Info"}</p>
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "金额(USD)" : "Amount(USD)"}</span><span>${Number(detailData.total_purchase_usd || 0).toLocaleString()}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "金额(CNY)" : "Amount(CNY)"}</span><span>{fmt$(detailData.total_purchase_cny)}</span></div>
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "重量" : "Weight"}</span><span>{Number(detailData.total_weight_kg || 0).toLocaleString()} kg</span></div>
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "箱数" : "Boxes"}</span><span>{detailData.total_boxes || 0}</span></div>
                 </div>
@@ -463,35 +462,30 @@ function BatchReportsTab() {
               {(detailData.sales && detailData.sales.length > 0) && (
                 <div className="border rounded-lg overflow-hidden">
                   <p className="text-xs font-semibold px-2.5 py-1.5 bg-muted/50">{detailLang === "zh" ? "销售明细" : "Sales Details"}</p>
-                  <div className="max-h-[180px] overflow-y-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-muted/50">
-                          <TableHead className="text-xs py-1">{detailLang === "zh" ? "日期" : "Date"}</TableHead>
-                          <TableHead className="text-xs py-1">{detailLang === "zh" ? "客户" : "Customer"}</TableHead>
-                          <TableHead className="text-xs py-1">{detailLang === "zh" ? "规格" : "Spec"}</TableHead>
-                          <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "重量" : "Weight"}</TableHead>
-                          <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "单价" : "Price"}</TableHead>
-                          <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "净额" : "Net"}</TableHead>
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="text-xs py-1">{detailLang === "zh" ? "日期" : "Date"}</TableHead>
+                        <TableHead className="text-xs py-1">{detailLang === "zh" ? "客户" : "Customer"}</TableHead>
+                        <TableHead className="text-xs py-1">{detailLang === "zh" ? "规格" : "Spec"}</TableHead>
+                        <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "重量" : "Weight"}</TableHead>
+                        <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "单价" : "Price"}</TableHead>
+                        <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "净额" : "Net"}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {detailData.sales.map((sale: any, idx: number) => (
+                        <TableRow key={idx}>
+                          <TableCell className="text-xs py-1">{fmtDate(sale.sale_date)}</TableCell>
+                          <TableCell className="text-xs py-1">{sale.customer_name || "-"}</TableCell>
+                          <TableCell className="text-xs py-1">{sale.spec || "-"}</TableCell>
+                          <TableCell className="text-xs py-1 text-right">{Number(sale.weight_kg || 0).toLocaleString()}</TableCell>
+                          <TableCell className="text-xs py-1 text-right">{fmt$(sale.unit_price)}</TableCell>
+                          <TableCell className="text-xs py-1 text-right font-medium">{fmt$(sale.net_amount)}</TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {detailData.sales.slice(0, 10).map((sale: any, idx: number) => (
-                          <TableRow key={idx}>
-                            <TableCell className="text-xs py-1">{fmtDate(sale.sale_date)}</TableCell>
-                            <TableCell className="text-xs py-1">{sale.customer_name || "-"}</TableCell>
-                            <TableCell className="text-xs py-1">{sale.spec || "-"}</TableCell>
-                            <TableCell className="text-xs py-1 text-right">{Number(sale.weight_kg || 0).toLocaleString()}</TableCell>
-                            <TableCell className="text-xs py-1 text-right">{fmt$(sale.unit_price)}</TableCell>
-                            <TableCell className="text-xs py-1 text-right font-medium">{fmt$(sale.net_amount)}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  {detailData.sales.length > 10 && (
-                    <p className="text-xs text-muted-foreground text-center py-1">... {detailData.sales.length - 10} {detailLang === "zh" ? "条更多记录" : "more records"}</p>
-                  )}
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               )}
 
