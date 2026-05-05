@@ -48,6 +48,8 @@ const formSchema = z.object({
   inspection_certificate: z.string().max(100).optional().or(z.literal("")),
   customs_status: z.string().default("pending_customs"),
   exchange_status: z.string().default("not_exchanged"),
+  is_master: z.boolean().default(false),
+  parent_invoice_id: z.coerce.number().optional(),
   notes: z.string().optional().or(z.literal("")),
   products: z.array(productSchema).min(1, "至少需要一条产品明细"),
 });
@@ -81,6 +83,9 @@ interface Invoice {
   inspection_certificate: string | null;
   customs_status: string;
   exchange_status: string;
+  is_master?: boolean;
+  parent_invoice_id?: number | null;
+  parent_invoice_no?: string | null;
   notes: string | null;
   products: InvoiceProduct[];
 }
@@ -168,6 +173,16 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
     name: "products",
   });
 
+  // 查询所有主票（用于从票选择主票）
+  const { data: invoicesData } = useQuery({
+    queryKey: ["master-invoices"],
+    queryFn: async () => {
+      const res = await api.get("/v1/invoices/?limit=500");
+      return res.data;
+    },
+    enabled: open && !form.watch("is_master"),
+  });
+
   // 当弹窗打开且 initialData 变化时，重置表单
   React.useEffect(() => {
     if (open) {
@@ -198,6 +213,8 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         inspection_certificate: initialData.inspection_certificate ?? "",
         customs_status: initialData.customs_status,
         exchange_status: initialData.exchange_status,
+        is_master: initialData.is_master ?? false,
+        parent_invoice_id: initialData.parent_invoice_id ?? undefined,
         notes: initialData.notes ?? "",
         products: initialData.products.map((p) => ({
           product_name: p.product_name,
@@ -230,6 +247,8 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         inspection_certificate: "",
         customs_status: "pending_customs",
         exchange_status: "not_exchanged",
+        is_master: false,
+        parent_invoice_id: undefined,
         notes: "",
         products: [],
       });
@@ -269,6 +288,8 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         total_amount_usd: Number(tAmount.toFixed(2)),
         kill_date: data.kill_date || undefined,
         arrival_date: data.arrival_date || undefined,
+        is_master: data.is_master,
+        parent_invoice_id: data.parent_invoice_id || undefined,
       };
 
       if (initialData) {
@@ -406,6 +427,73 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                 {form.formState.errors.exporter_id && <p className="text-xs text-red-500">{form.formState.errors.exporter_id.message}</p>}
               </div>
             </div>
+          </div>
+
+          {/* 主从发票关系 */}
+          <div className="space-y-6">
+            <h3 className="text-sm font-semibold text-foreground">AWB 主从关系</h3>
+            <div className="grid grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="is_master">发票类型</Label>
+                <Select
+                  value={form.watch("is_master") ? "master" : "sub"}
+                  onValueChange={(v) => {
+                    form.setValue("is_master", v === "master");
+                    if (v === "master") {
+                      form.setValue("parent_invoice_id", undefined);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="选择类型" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="master">主票（录入AWB费用）</SelectItem>
+                    <SelectItem value="sub">从票（共享AWB）</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {!form.watch("is_master") && (
+                <div className="space-y-2">
+                  <Label htmlFor="parent_invoice_id">关联主票 *</Label>
+                  <Select
+                    value={form.watch("parent_invoice_id") ? String(form.watch("parent_invoice_id")) : undefined}
+                    onValueChange={(v) => {
+                      const parentId = parseInt(v || "0");
+                      form.setValue("parent_invoice_id", parentId);
+                      // 自动填充主票信息
+                      const parent = invoicesData?.items.find((i: any) => i.id === parentId);
+                      if (parent) {
+                        form.setValue("awb_no", parent.awb_no || "");
+                        form.setValue("gross_weight_kg", parent.gross_weight_kg ? Number(parent.gross_weight_kg) : 0);
+                        form.setValue("eta", parent.eta ? parent.eta.slice(0, 16) : "");
+                        form.setValue("departure_date", parent.departure_date || "");
+                        form.setValue("flight_info", parent.flight_info || "");
+                        form.setValue("origin_certificate", parent.origin_certificate || "");
+                        form.setValue("inspection_certificate", parent.inspection_certificate || "");
+                        form.setValue("processing_plant_id", parent.processing_plant_id);
+                        form.setValue("fish_farm_id", parent.fish_farm_id || 0);
+                        form.setValue("exporter_id", parent.exporter_id);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="选择主票" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {invoicesData?.items.filter((i: any) => i.is_master && !i.parent_invoice_id).map((i: any) => (
+                        <SelectItem key={i.id} value={String(i.id)}>{i.invoice_no} ({i.awb_no})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+            {!form.watch("is_master") && form.watch("parent_invoice_id") && (
+              <div className="text-xs text-muted-foreground bg-muted/50 p-2 rounded">
+                从票将自动继承主票的 AWB、物流和证书信息
+              </div>
+            )}
           </div>
 
           {/* 物流与证书信息 */}

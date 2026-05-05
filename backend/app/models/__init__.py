@@ -235,6 +235,10 @@ class ImportInvoice(Base, TimestampMixin):
     origin_certificate: Mapped[Optional[str]] = mapped_column(String(100))  # 原产地证书
     inspection_certificate: Mapped[Optional[str]] = mapped_column(String(100))  # 检验检疫证书
     
+    # 主从发票关系（V8.3新增）
+    parent_invoice_id: Mapped[Optional[int]] = mapped_column(ForeignKey("import_invoices.id"), nullable=True)
+    is_master: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否主票（AWB级别费用录入方）
+    
     # 成本相关（V8.2新增）
     unit_price_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))  # 采购单价(USD)
     estimated_exchange_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6))  # 预估汇率
@@ -253,6 +257,9 @@ class ImportInvoice(Base, TimestampMixin):
     fish_farm: Mapped["Company"] = relationship("Company", foreign_keys=[fish_farm_id])
     exporter: Mapped["Company"] = relationship("Company", foreign_keys=[exporter_id])
     products: Mapped[List["InvoiceProduct"]] = relationship("InvoiceProduct", back_populates="invoice", lazy="raise", uselist=True, cascade="all, delete-orphan")
+    # 主从关系
+    parent_invoice: Mapped[Optional["ImportInvoice"]] = relationship("ImportInvoice", remote_side=[id], foreign_keys=[parent_invoice_id], lazy="raise")
+    sub_invoices: Mapped[List["ImportInvoice"]] = relationship("ImportInvoice", foreign_keys=[parent_invoice_id], lazy="raise")
 
 
 class ProductCategory(str, Enum):

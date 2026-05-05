@@ -121,10 +121,26 @@ class InvoiceService:
 
     @staticmethod
     async def create(db: AsyncSession, data: InvoiceCreate) -> ImportInvoice:
-        """创建发票"""
+        """创建发票（支持主从结构）"""
         # 提取产品明细
         products_data = data.products if data.products else []
         invoice_data = data.model_dump(exclude={"products"}, exclude_unset=True)
+        
+        # 从票自动继承主票信息
+        parent_invoice_id = invoice_data.get("parent_invoice_id")
+        if parent_invoice_id:
+            parent = await InvoiceService.get_by_id(db, parent_invoice_id)
+            if not parent:
+                raise HTTPException(status_code=404, detail="主票不存在")
+            # 从票继承主票的物流/证书信息
+            inherit_fields = ["awb_no", "gross_weight_kg", "eta", "departure_date", 
+                            "flight_info", "origin_certificate", "inspection_certificate",
+                            "processing_plant_id", "fish_farm_id", "exporter_id"]
+            for field in inherit_fields:
+                if not invoice_data.get(field) and getattr(parent, field, None):
+                    invoice_data[field] = getattr(parent, field)
+            # 从票标记为非主票
+            invoice_data["is_master"] = False
         
         # PostgreSQL 外键约束：把 0 转为 None
         for fk_field in ["processing_plant_id", "fish_farm_id", "exporter_id"]:

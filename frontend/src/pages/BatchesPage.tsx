@@ -420,10 +420,13 @@ export function BatchesPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>{batch.invoice_nos?.replace(/&/g, ", ")}</TableCell>
-                    <TableCell>
+                    <TableCell className="text-right">
+                      {(batch.total_boxes || 0).toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right">
                       {Number(batch.total_weight_kg || 0).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                     </TableCell>
-                    <TableCell className="font-semibold">
+                    <TableCell className="text-right font-semibold">
                       ${Number(batch.total_amount_usd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </TableCell>
                     <TableCell>
@@ -453,13 +456,13 @@ export function BatchesPage() {
             <tfoot className="bg-muted/50 border-t">
               <TableRow className="font-medium text-sm">
                 <TableCell colSpan={4} className="text-right">本页合计：</TableCell>
-                <TableCell>
+                <TableCell className="text-right">
                   {data.items.reduce((sum, b) => sum + (b.total_boxes || 0), 0)}
                 </TableCell>
-                <TableCell>
+                <TableCell className="text-right">
                   {data.items.reduce((sum, b) => sum + Number(b.total_weight_kg || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                 </TableCell>
-                <TableCell className="text-primary font-semibold">
+                <TableCell className="text-right text-primary font-semibold">
                   ${data.items.reduce((sum, b) => sum + Number(b.total_amount_usd || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </TableCell>
                 <TableCell></TableCell>

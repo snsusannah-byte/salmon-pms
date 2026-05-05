@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -23,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { InvoiceFormDialog } from "@/components/InvoiceFormDialog";
 import { InvoiceDetailDrawer } from "@/components/InvoiceDetailDrawer";
-import { Plus, Search, Eye, Pencil, Trash2, Lock, Unlock } from "lucide-react";
+import { Plus, Search, Eye, Pencil, Trash2, Lock, Unlock, DollarSign } from "lucide-react";
 import { toast } from "sonner";
 import { BatchImportButton } from "@/components/BatchImportButton";
 
@@ -88,6 +89,9 @@ interface Invoice {
   customs_status: string;
   exchange_status: string;
   is_locked: boolean;
+  is_master: boolean;
+  parent_invoice_id: number | null;
+  parent_invoice_no: string | null;
   processing_plant_name: string | null;
   processing_plant_code: string | null;
   fish_farm_name: string | null;
@@ -157,6 +161,7 @@ export function InvoicesPage() {
   };
 
   const [deleteConfirm, setDeleteConfirm] = useState<Invoice | null>(null);
+  const [allocateInvoice, setAllocateInvoice] = useState<Invoice | null>(null);
 
   const handleDelete = async (invoice: Invoice) => {
     if (invoice.is_locked) {
@@ -164,6 +169,10 @@ export function InvoicesPage() {
       return;
     }
     setDeleteConfirm(invoice);
+  };
+
+  const handleAllocate = async (invoice: Invoice) => {
+    setAllocateInvoice(invoice);
   };
 
   const confirmDelete = async () => {
@@ -363,7 +372,16 @@ export function InvoicesPage() {
                   <TableRow key={invoice.id}>
                     <TableCell className="font-medium">
                       {invoice.is_locked && <Lock className="h-3 w-3 inline mr-1 text-red-500" />}
+                      {invoice.parent_invoice_id && (
+                        <span className="text-xs text-muted-foreground mr-1">└</span>
+                      )}
                       {invoice.invoice_no}
+                      {invoice.is_master && (
+                        <Badge variant="outline" className="ml-1 text-[10px] h-4 px-1 bg-blue-50 text-blue-600">主</Badge>
+                      )}
+                      {invoice.parent_invoice_id && invoice.parent_invoice_no && (
+                        <span className="text-xs text-muted-foreground ml-1">({invoice.parent_invoice_no})</span>
+                      )}
                     </TableCell>
                     <TableCell>{invoice.invoice_date}</TableCell>
                     <TableCell>{invoice.kill_date ?? "-"}</TableCell>
@@ -401,6 +419,11 @@ export function InvoicesPage() {
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleDelete(invoice)} title="删除" disabled={invoice.is_locked}>
                           <Trash2 className={cn("h-4 w-4", invoice.is_locked && "text-muted-foreground")} />
                         </Button>
+                        {(invoice.is_master || invoice.parent_invoice_id) && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500" onClick={() => handleAllocate(invoice)} title="费用分摊">
+                            <DollarSign className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -455,6 +478,73 @@ export function InvoicesPage() {
             >
               下一页
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* 费用分摊弹窗 */}
+      {allocateInvoice && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 shadow-lg">
+            <h3 className="text-lg font-semibold mb-2">AWB 费用分摊</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              发票: {allocateInvoice.invoice_no} {allocateInvoice.awb_no && `(AWB: ${allocateInvoice.awb_no})`}
+            </p>
+            <div className="space-y-3 mb-6">
+              <div className="space-y-1">
+                <Label className="text-xs">清关运费(总额)</Label>
+                <Input type="number" id="clearance_cost" placeholder="0" defaultValue="" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">进口关税(总额)</Label>
+                <Input type="number" id="import_duty" placeholder="0" defaultValue="" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">进口增值税(总额)</Label>
+                <Input type="number" id="import_vat" placeholder="0" defaultValue="" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">分摊方式</Label>
+                <Select defaultValue="by_boxes">
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="by_boxes">按箱数</SelectItem>
+                    <SelectItem value="by_weight">按重量</SelectItem>
+                    <SelectItem value="by_amount">按金额</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setAllocateInvoice(null)}>
+                取消
+              </Button>
+              <Button onClick={async () => {
+                try {
+                  const clearance_cost = (document.getElementById('clearance_cost') as HTMLInputElement)?.value;
+                  const import_duty = (document.getElementById('import_duty') as HTMLInputElement)?.value;
+                  const import_vat = (document.getElementById('import_vat') as HTMLInputElement)?.value;
+                  const allocation_method = document.querySelector('[data-value]')?.getAttribute('data-value') || 'by_boxes';
+                  
+                  const params = new URLSearchParams();
+                  if (clearance_cost) params.append('clearance_cost', clearance_cost);
+                  if (import_duty) params.append('import_duty', import_duty);
+                  if (import_vat) params.append('import_vat', import_vat);
+                  params.append('allocation_method', allocation_method);
+                  
+                  await api.post(`/v1/invoices/${allocateInvoice.id}/allocate-costs?${params.toString()}`);
+                  toast.success('费用分摊成功');
+                  queryClient.invalidateQueries({ queryKey: ['invoices'] });
+                  setAllocateInvoice(null);
+                } catch (error: any) {
+                  toast.error(error.response?.data?.detail || '分摊失败');
+                }
+              }}>
+                确认分摊
+              </Button>
+            </div>
           </div>
         </div>
       )}

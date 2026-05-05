@@ -97,6 +97,8 @@ async def list_invoices(
             "customs_status": item.customs_status,
             "exchange_status": item.exchange_status,
             "is_locked": item.is_locked,
+            "parent_invoice_id": item.parent_invoice_id,
+            "is_master": item.is_master,
             "notes": item.notes,
             "created_at": item.created_at,
             "updated_at": item.updated_at,
@@ -107,8 +109,37 @@ async def list_invoices(
             "fish_farm_code": None,
             "exporter_name": None,
             "exporter_code": None,
+            "parent_invoice_no": None,
+            "sub_invoices": [],
             "products": [],
         }
+        
+        # 查询主票信息
+        if item.parent_invoice_id:
+            from app.models import ImportInvoice
+            parent_result = await db.execute(
+                select(ImportInvoice).where(ImportInvoice.id == item.parent_invoice_id)
+            )
+            parent = parent_result.scalar_one_or_none()
+            if parent:
+                item_dict["parent_invoice_no"] = parent.invoice_no
+        
+        # 查询子票列表（仅主票）
+        if item.is_master:
+            from app.models import ImportInvoice
+            sub_result = await db.execute(
+                select(ImportInvoice).where(ImportInvoice.parent_invoice_id == item.id)
+            )
+            subs = sub_result.scalars().all()
+            for s in subs:
+                sub_dict = {
+                    "id": s.id,
+                    "invoice_no": s.invoice_no,
+                    "total_boxes": s.total_boxes,
+                    "total_amount_usd": s.total_amount_usd,
+                    "total_weight_kg": s.total_weight_kg,
+                }
+                item_dict["sub_invoices"].append(sub_dict)
         
         # 查询关联的公司名称和编号
         from app.models import Company
@@ -557,6 +588,137 @@ async def delete_invoice_product(
 
 
 # ==================== 批量导入 ====================
+
+@router.post("/{invoice_id}/allocate-costs", response_model=dict)
+async def allocate_costs(
+    invoice_id: int,
+    clearance_cost: Optional[float] = Query(None, description="清关运费(总额)"),
+    import_duty: Optional[float] = Query(None, description="进口关税(总额)"),
+    import_vat: Optional[float] = Query(None, description="进口增值税(总额)"),
+    allocation_method: str = Query("by_boxes", description="分摊方式: by_boxes / by_weight / by_amount"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    AWB级别费用分摊 — 按箱数/重量/金额比例分摊到主票和从票
+    
+    8703（主票，81箱）+ 8710（从票，27箱）共享 AWB:
+    清关费 ¥10,000 → 8703 分摊 81/108=¥7,500, 8710 分摊 27/108=¥2,500
+    """
+    from decimal import Decimal
+    from app.models import ImportTax, ClearanceCost, ImportInvoice
+    
+    # 获取主票
+    master = await InvoiceService.get_by_id(db, invoice_id)
+    if not master:
+        raise HTTPException(status_code=404, detail="发票不存在")
+    
+    # 检查是否是主票
+    if not master.is_master and not master.parent_invoice_id:
+        raise HTTPException(status_code=400, detail="请选择一个AWB组的主票进行费用分摊")
+    
+    # 如果传入的是从票，找到主票
+    target_master = master
+    if master.parent_invoice_id:
+        target_master = await InvoiceService.get_by_id(db, master.parent_invoice_id)
+    
+    # 获取组内所有发票（主票+从票）
+    result = await db.execute(
+        select(ImportInvoice).where(
+            (ImportInvoice.id == target_master.id) | 
+            (ImportInvoice.parent_invoice_id == target_master.id)
+        )
+    )
+    group_invoices = result.scalars().all()
+    
+    if not group_invoices:
+        raise HTTPException(status_code=400, detail="AWB组内没有发票")
+    
+    # 计算分摊基数
+    total_boxes = sum(inv.total_boxes or 0 for inv in group_invoices)
+    total_weight = sum(inv.total_weight_kg or Decimal("0") for inv in group_invoices)
+    total_amount = sum(inv.total_amount_usd or Decimal("0") for inv in group_invoices)
+    
+    if total_boxes == 0:
+        raise HTTPException(status_code=400, detail="组内发票箱数都为0，无法分摊")
+    
+    allocated = []
+    
+    for inv in group_invoices:
+        # 计算分摊比例
+        if allocation_method == "by_weight" and total_weight > 0:
+            ratio = float(inv.total_weight_kg or 0) / float(total_weight)
+        elif allocation_method == "by_amount" and total_amount > 0:
+            ratio = float(inv.total_amount_usd or 0) / float(total_amount)
+        else:
+            # 默认按箱数
+            ratio = (inv.total_boxes or 0) / total_boxes
+        
+        # 分摊清关费
+        if clearance_cost:
+            allocated_clearance = Decimal(str(clearance_cost)) * Decimal(str(ratio))
+            
+            # 查找或创建 ClearanceCost 记录
+            cost_result = await db.execute(
+                select(ClearanceCost).where(ClearanceCost.invoice_id == inv.id)
+            )
+            cost = cost_result.scalar_one_or_none()
+            
+            if cost:
+                cost.clearance_fee = allocated_clearance
+                cost.total_cost = allocated_clearance
+            else:
+                cost = ClearanceCost(
+                    invoice_id=inv.id,
+                    cost_date=date.today(),
+                    clearance_fee=allocated_clearance,
+                    total_cost=allocated_clearance,
+                    notes=f"AWB费用分摊 ({target_master.invoice_no})"
+                )
+                db.add(cost)
+        
+        # 分摊税费
+        if import_duty or import_vat:
+            allocated_duty = Decimal(str(import_duty or 0)) * Decimal(str(ratio))
+            allocated_vat = Decimal(str(import_vat or 0)) * Decimal(str(ratio))
+            
+            tax_result = await db.execute(
+                select(ImportTax).where(ImportTax.invoice_id == inv.id)
+            )
+            tax = tax_result.scalar_one_or_none()
+            
+            if tax:
+                tax.import_duty = allocated_duty
+                tax.import_vat = allocated_vat
+                tax.total_tax = allocated_duty + allocated_vat
+            else:
+                tax = ImportTax(
+                    invoice_id=inv.id,
+                    tax_date=date.today(),
+                    import_duty=allocated_duty,
+                    import_vat=allocated_vat,
+                    total_tax=allocated_duty + allocated_vat,
+                    notes=f"AWB税费分摊 ({target_master.invoice_no})"
+                )
+                db.add(tax)
+        
+        allocated.append({
+            "invoice_id": inv.id,
+            "invoice_no": inv.invoice_no,
+            "ratio": round(ratio, 4),
+            "clearance_cost": float(Decimal(str(clearance_cost or 0)) * Decimal(str(ratio))) if clearance_cost else None,
+            "import_duty": float(Decimal(str(import_duty or 0)) * Decimal(str(ratio))) if import_duty else None,
+            "import_vat": float(Decimal(str(import_vat or 0)) * Decimal(str(ratio))) if import_vat else None,
+        })
+    
+    await db.commit()
+    
+    return {
+        "master_invoice": target_master.invoice_no,
+        "allocation_method": allocation_method,
+        "total_boxes": total_boxes,
+        "allocated": allocated,
+    }
+
 
 @router.post("/batch-import", status_code=status.HTTP_201_CREATED)
 async def batch_import_invoices(

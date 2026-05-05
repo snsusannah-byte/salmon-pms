@@ -68,6 +68,10 @@ class InvoiceBase(BaseModel):
     origin_certificate: Optional[str] = Field(None, max_length=100, description="原产地证书")
     inspection_certificate: Optional[str] = Field(None, max_length=100, description="检验检疫证书")
     
+    # 主从发票关系（V8.3新增）
+    parent_invoice_id: Optional[int] = Field(None, description="主票ID（从票关联主票）")
+    is_master: bool = Field(False, description="是否主票（AWB级别费用录入方）")
+    
     # 报关状态（清关流程）
     customs_status: Optional[InvoiceStatus] = Field(InvoiceStatus.PENDING_SHIPMENT, description="报关状态")
     # 购汇状态
@@ -127,6 +131,11 @@ class InvoiceUpdate(BaseModel):
     customs_status: Optional[InvoiceStatus] = None
     exchange_status: Optional[ExchangeStatus] = None
     is_locked: Optional[bool] = None
+    
+    # 主从发票关系（V8.3新增）
+    parent_invoice_id: Optional[int] = Field(None, description="主票ID")
+    is_master: Optional[bool] = Field(None, description="是否主票")
+    
     notes: Optional[str] = None
     
     # 产品明细（编辑时可选）
@@ -169,6 +178,12 @@ class InvoiceResponse(InvoiceBase):
     fish_farm_code: Optional[str] = None
     exporter_name: Optional[str] = None
     exporter_code: Optional[str] = None
+    
+    # 主从发票关系（V8.3新增）
+    parent_invoice_id: Optional[int] = None
+    is_master: bool = False
+    parent_invoice_no: Optional[str] = None  # 主票发票号
+    sub_invoices: List[dict] = Field(default_factory=list)  # 子票列表（仅主票返回）
     
     # 产品明细 - 使用普通列表避免ORM映射问题
     products: List[InvoiceProductResponse] = []
