@@ -45,13 +45,13 @@ const customsStatusMap: Record<string, { label: string; color: string }> = {
 };
 
 const exchangeStatusMap: Record<string, { label: string; color: string }> = {
-  NOT_EXCHANGED: { label: "未购汇", color: "bg-gray-100 text-gray-800" },
-  PARTIAL: { label: "部分购汇", color: "bg-yellow-100 text-yellow-800" },
-  COMPLETED: { label: "全部购汇", color: "bg-green-100 text-green-800" },
-  // 兼容旧数据
   not_exchanged: { label: "未购汇", color: "bg-gray-100 text-gray-800" },
-  partial: { label: "部分购汇", color: "bg-yellow-100 text-yellow-800" },
-  completed: { label: "全部购汇", color: "bg-green-100 text-green-800" },
+  completed: { label: "已购汇", color: "bg-green-100 text-green-800" },
+  // 兼容旧数据
+  partial: { label: "已购汇", color: "bg-green-100 text-green-800" },
+  NOT_EXCHANGED: { label: "未购汇", color: "bg-gray-100 text-gray-800" },
+  COMPLETED: { label: "已购汇", color: "bg-green-100 text-green-800" },
+  PARTIAL: { label: "已购汇", color: "bg-green-100 text-green-800" },
 };
 
 interface InvoiceProduct {
@@ -295,9 +295,8 @@ export function InvoicesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部购汇</SelectItem>
-            {Object.entries(exchangeStatusMap).map(([key, { label }]) => (
-              <SelectItem key={key} value={key}>{label}</SelectItem>
-            ))}
+            <SelectItem value="not_exchanged">未购汇</SelectItem>
+            <SelectItem value="completed">已购汇</SelectItem>
           </SelectContent>
         </Select>
       </div>

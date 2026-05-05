@@ -48,7 +48,7 @@ const formSchema = z.object({
   inspection_certificate: z.string().max(100).optional().or(z.literal("")),
   customs_status: z.string().default("pending_customs"),
   exchange_status: z.string().default("not_exchanged"),
-  is_master: z.boolean().default(false),
+  is_master: z.boolean().default(true),
   parent_invoice_id: z.coerce.number().optional(),
   notes: z.string().optional().or(z.literal("")),
   products: z.array(productSchema).min(1, "至少需要一条产品明细"),
@@ -215,7 +215,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         inspection_certificate: initialData.inspection_certificate ?? "",
         customs_status: initialData.customs_status,
         exchange_status: initialData.exchange_status,
-        is_master: initialData.is_master ?? false,
+        is_master: initialData.is_master ?? true,
         parent_invoice_id: initialData.parent_invoice_id ?? undefined,
         notes: initialData.notes ?? "",
         products: initialData.products.map((p) => ({
@@ -384,7 +384,9 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   onValueChange={(v) => form.setValue("processing_plant_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger className="w-full h-7 text-xs">
-                    <SelectValue placeholder="选择加工厂" />
+                    <SelectValue placeholder="选择加工厂">
+                      {processingPlants.find(c => c.id === form.watch("processing_plant_id"))?.name || "选择加工厂"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {processingPlants.map((c) => (
@@ -401,7 +403,9 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   onValueChange={(v) => form.setValue("fish_farm_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger className="w-full h-7 text-xs">
-                    <SelectValue placeholder="选择渔场" />
+                    <SelectValue placeholder="选择渔场">
+                      {fishFarms.find(c => c.id === form.watch("fish_farm_id"))?.name || "选择渔场"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {fishFarms.map((c) => (
@@ -418,7 +422,9 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   onValueChange={(v) => form.setValue("exporter_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger className="w-full h-7 text-xs">
-                    <SelectValue placeholder="选择出口商" />
+                    <SelectValue placeholder="选择出口商">
+                      {exporters.find(c => c.id === form.watch("exporter_id"))?.name || "选择出口商"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {exporters.map((c) => (
@@ -447,7 +453,9 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   }}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="选择类型" />
+                    <SelectValue placeholder="选择类型">
+                      {form.watch("is_master") ? "主票" : "从票"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="master">主票（录入AWB费用）</SelectItem>
@@ -480,7 +488,9 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                     }}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="选择主票" />
+                      <SelectValue placeholder="选择主票">
+                        {invoicesData?.items.find((i: any) => i.id === form.watch("parent_invoice_id"))?.invoice_no || "选择主票"}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {invoicesData?.items.filter((i: any) => i.is_master && !i.parent_invoice_id).map((i: any) => (

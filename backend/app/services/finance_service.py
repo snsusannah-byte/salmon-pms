@@ -45,45 +45,36 @@ class FinanceService:
         await db.commit()
         await db.refresh(record)
         
-        # 检查发票是否全部购汇完成
-        await FinanceService._check_invoice_exchange_complete(db, data.get("invoice_id"))
+        # 更新发票购汇状态为"已购汇"
+        await FinanceService._update_invoice_exchange_status(db, data.get("invoice_id"))
         
         return record
 
     @staticmethod
-    async def _check_invoice_exchange_complete(db: AsyncSession, invoice_id: Optional[int]) -> None:
-        """检查发票购汇是否完成"""
+    async def _update_invoice_exchange_status(db: AsyncSession, invoice_id: Optional[int]) -> None:
+        """更新发票购汇状态：有购汇记录=已购汇，无记录=未购汇"""
         if not invoice_id:
             return
         
-        from app.models import ImportInvoice, WholeFishSale, ExchangeStatus
+        from app.models import ImportInvoice, ExchangeStatus
         
         result = await db.execute(select(ImportInvoice).where(ImportInvoice.id == invoice_id))
         invoice = result.scalar_one_or_none()
         if not invoice:
             return
         
-        exchange_result = await db.execute(
-            select(func.sum(ExchangeRecord.amount_usd)).where(ExchangeRecord.invoice_id == invoice_id)
+        # 检查是否有购汇记录
+        has_exchange = await db.execute(
+            select(func.count(ExchangeRecord.id)).where(ExchangeRecord.invoice_id == invoice_id)
         )
-        total_exchanged = exchange_result.scalar() or Decimal("0")
+        exchange_count = has_exchange.scalar() or 0
         
-        if total_exchanged >= invoice.total_amount_usd:
-            invoice.exchange_status = ExchangeStatus.EXCHANGED
-            await db.commit()
-            
-            sales_result = await db.execute(
-                select(WholeFishSale).where(
-                    WholeFishSale.batch_id.in_(
-                        select(BatchInvoice.batch_id).where(BatchInvoice.invoice_id == invoice_id)
-                    ),
-                    WholeFishSale.is_locked == False
-                )
-            )
-            sales = sales_result.scalars().all()
-            for sale in sales:
-                sale.is_locked = True
-            await db.commit()
+        if exchange_count > 0:
+            invoice.exchange_status = ExchangeStatus.COMPLETED
+        else:
+            invoice.exchange_status = ExchangeStatus.NOT_EXCHANGED
+        
+        await db.commit()
 
     @staticmethod
     async def update_exchange_record(db: AsyncSession, record: ExchangeRecord, data: dict) -> ExchangeRecord:
@@ -96,8 +87,12 @@ class FinanceService:
 
     @staticmethod
     async def delete_exchange_record(db: AsyncSession, record: ExchangeRecord) -> None:
+        invoice_id = record.invoice_id
         await db.delete(record)
         await db.commit()
+        
+        # 更新发票购汇状态
+        await FinanceService._update_invoice_exchange_status(db, invoice_id)
 
     # ============== 进口税费 ==============
 
