@@ -375,7 +375,7 @@ async def batch_import_sales(
                 customer_category=record.get("customer_category"),
             )
             
-            # 解析批次（按 batch_name 查找）
+            # 解析批次（按 batch_name / batch_code / 发票号 查找）
             batch_id = None
             from sqlalchemy import select as sa_select
             batch_result = await db.execute(
@@ -387,6 +387,23 @@ async def batch_import_sales(
                     sa_select(Batch).where(Batch.batch_code == batch_name)
                 )
                 batch = batch_result.scalar_one_or_none()
+            # 支持按发票号查找批次（适用于合并发票场景）
+            if not batch:
+                from app.models import ImportInvoice, BatchInvoice
+                invoice_result = await db.execute(
+                    sa_select(ImportInvoice).where(ImportInvoice.invoice_no == batch_name)
+                )
+                invoice = invoice_result.scalar_one_or_none()
+                if invoice:
+                    bi_result = await db.execute(
+                        sa_select(BatchInvoice).where(BatchInvoice.invoice_id == invoice.id)
+                    )
+                    bi = bi_result.scalar_one_or_none()
+                    if bi:
+                        batch_result = await db.execute(
+                            sa_select(Batch).where(Batch.id == bi.batch_id)
+                        )
+                        batch = batch_result.scalar_one_or_none()
             if batch:
                 batch_id = batch.id
             else:

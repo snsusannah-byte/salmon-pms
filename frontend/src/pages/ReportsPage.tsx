@@ -299,7 +299,6 @@ function BatchReportsTab() {
           </DialogHeader>
           {detailData ? (
             <div className="space-y-4 text-sm print:text-xs">
-              {/* 打印样式 */}
               <style>{`
                 @media print {
                   body * { visibility: hidden; }
@@ -308,12 +307,74 @@ function BatchReportsTab() {
                   .print\:hidden { display: none !important; }
                 }
               `}</style>
-              <div className="grid grid-cols-3 gap-3 text-xs print:grid-cols-3">
-                <div><span className="text-muted-foreground">{detailLang === "zh" ? "批次:" : "Batch:"}</span> {detailData.batch_code}</div>
-                <div><span className="text-muted-foreground">{detailLang === "zh" ? "名称:" : "Name:"}</span> {detailData.batch_name}</div>
-                <div><span className="text-muted-foreground">{detailLang === "zh" ? "日期:" : "Date:"}</span> {fmtDate(detailData.batch_date)}</div>
+
+              {/* === 第一部分：汇总行 === */}
+              <div className="grid grid-cols-4 md:grid-cols-7 gap-2 text-xs bg-muted/30 p-3 rounded-lg print:grid-cols-7">
+                <div className="space-y-0.5"><p className="text-muted-foreground">{detailLang === "zh" ? "批次号" : "Batch No"}</p><p className="font-semibold">{detailData.batch_code}</p></div>
+                <div className="space-y-0.5"><p className="text-muted-foreground">{detailLang === "zh" ? "名称" : "Name"}</p><p className="font-semibold">{detailData.batch_name}</p></div>
+                <div className="space-y-0.5"><p className="text-muted-foreground">{detailLang === "zh" ? "日期" : "Date"}</p><p className="font-semibold">{fmtDate(detailData.batch_date)}</p></div>
+                <div className="space-y-0.5"><p className="text-muted-foreground">{detailLang === "zh" ? "总采购" : "Purchase"}</p><p className="font-semibold">{fmt$(detailData.total_purchase_cny)}</p></div>
+                <div className="space-y-0.5"><p className="text-muted-foreground">{detailLang === "zh" ? "总销售" : "Sales"}</p><p className="font-semibold">{fmt$(detailData.total_sales_net)}</p></div>
+                <div className="space-y-0.5"><p className="text-muted-foreground">{detailLang === "zh" ? "净利润" : "Net Profit"}</p><p className={cn("font-semibold", clsProfit(Number(detailData.net_profit)))}>{fmt$(detailData.net_profit)}</p></div>
+                <div className="space-y-0.5"><p className="text-muted-foreground">{detailLang === "zh" ? "利润率" : "Margin"}</p><p className={cn("font-semibold", clsProfit(Number(detailData.profit_margin || 0)))}>{detailData.profit_margin ? `${Number(detailData.profit_margin).toFixed(1)}%` : "-"}</p></div>
               </div>
+
+              {/* === 第二部分：4宫格 === */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 print:grid-cols-2">
+                {/* 采购信息 */}
+                <div className="border rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-blue-600">{detailLang === "zh" ? "采购信息" : "Purchase Info"}</p>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "采购金额(USD)" : "Amount(USD)"}</span><span>${Number(detailData.total_purchase_usd || 0).toLocaleString()}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "采购金额(CNY)" : "Amount(CNY)"}</span><span>{fmt$(detailData.total_purchase_cny)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "总重量" : "Weight"}</span><span>{Number(detailData.total_weight_kg || 0).toLocaleString()} kg</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "总箱数" : "Boxes"}</span><span>{detailData.total_boxes || 0}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "发票数" : "Invoices"}</span><span>{detailData.invoice_count || 0}</span></div>
+                  </div>
+                </div>
+                {/* 进口费用 */}
+                <div className="border rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-amber-600">{detailLang === "zh" ? "进口费用" : "Import Costs"}</p>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "进口关税" : "Import Duty"}</span><span>{fmt$(detailData.total_import_duty)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "进口增值税" : "Import VAT"}</span><span>{fmt$(detailData.total_import_vat)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "清关费" : "Clearance"}</span><span>{fmt$(detailData.total_clearance_cost)}</span></div>
+                    {detailData.clearance_breakdown && (
+                      <>
+                        <div className="flex justify-between pl-2"><span className="text-muted-foreground">{detailLang === "zh" ? "  清关费" : "  Fee"}</span><span>{fmt$(detailData.clearance_breakdown.clearance_fee)}</span></div>
+                        <div className="flex justify-between pl-2"><span className="text-muted-foreground">{detailLang === "zh" ? "  运费" : "  Freight"}</span><span>{fmt$(detailData.clearance_breakdown.freight_fee)}</span></div>
+                        <div className="flex justify-between pl-2"><span className="text-muted-foreground">{detailLang === "zh" ? "  其他" : "  Other"}</span><span>{fmt$(detailData.clearance_breakdown.other_costs)}</span></div>
+                      </>
+                    )}
+                    <div className="flex justify-between border-t pt-1 font-medium"><span>{detailLang === "zh" ? "税费合计" : "Total Taxes"}</span><span>{fmt$(detailData.total_taxes)}</span></div>
+                  </div>
+                </div>
+                {/* 购汇登记 */}
+                <div className="border rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-green-600">{detailLang === "zh" ? "购汇登记" : "Exchange"}</p>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "汇率" : "Rate"}</span><span>{detailData.exchange_rate || "-"}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "购汇金额" : "Payment"}</span><span>{fmt$(detailData.total_exchange_payment)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "手续费" : "Fee"}</span><span>{fmt$(detailData.total_exchange_fee)}</span></div>
+                    <div className="flex justify-between border-t pt-1 font-medium"><span>{detailLang === "zh" ? "购汇合计" : "Total"}</span><span>{fmt$((Number(detailData.total_exchange_payment || 0) + Number(detailData.total_exchange_fee || 0)))}</span></div>
+                  </div>
+                </div>
+                {/* 损益分析 */}
+                <div className="border rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-semibold text-purple-600">{detailLang === "zh" ? "损益分析" : "Profit/Loss"}</p>
+                  <div className="space-y-1 text-xs">
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "销售净额" : "Net Sales"}</span><span className="font-medium">{fmt$(detailData.total_sales_net)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "支出合计" : "Total Expense"}</span><span>{fmt$(detailData.total_expenses)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "账面损耗" : "Shrinkage"}</span><span>{fmt$(detailData.shrinkage)}</span></div>
+                    <div className="flex justify-between border-t pt-1 font-medium"><span className={clsProfit(Number(detailData.net_profit))}>{detailLang === "zh" ? "净利润" : "Net Profit"}</span><span className={clsProfit(Number(detailData.net_profit))}>{fmt$(detailData.net_profit)}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">{detailLang === "zh" ? "利润率" : "Margin"}</span><span className={clsProfit(Number(detailData.profit_margin || 0))}>{detailData.profit_margin ? `${Number(detailData.profit_margin).toFixed(1)}%` : "-"}</span></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* === 第三部分：发票明细表格 === */}
               <div className="border rounded-lg overflow-hidden print:border-black">
+                <p className="text-xs font-semibold px-3 py-2 bg-muted/50">{detailLang === "zh" ? "发票明细" : "Invoice Details"}</p>
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-muted/50">
@@ -331,24 +392,55 @@ function BatchReportsTab() {
                       <TableRow key={inv.invoice_id}>
                         <TableCell className="text-xs">{inv.invoice_no}</TableCell>
                         <TableCell className="text-xs text-right">{fmt$(inv.purchase_cost_cny)}</TableCell>
-                        <TableCell className="text-xs text-right">{fmt$(inv.import_duty + inv.import_vat)}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt$(Number(inv.import_duty || 0) + Number(inv.import_vat || 0))}</TableCell>
                         <TableCell className="text-xs text-right">{fmt$(inv.clearance_cost)}</TableCell>
-                        <TableCell className="text-xs text-right">{fmt$(inv.exchange_payment)}</TableCell>
+                        <TableCell className="text-xs text-right">{fmt$(Number(inv.exchange_payment || 0) + Number(inv.exchange_fee || 0))}</TableCell>
                         <TableCell className="text-xs text-right">{fmt$(inv.sales_net)}</TableCell>
-                        <TableCell className={cn("text-xs text-right font-medium", clsProfit(Number(inv.net_profit)))}>
-                          {fmt$(inv.net_profit)}
-                        </TableCell>
+                        <TableCell className={cn("text-xs text-right font-medium", clsProfit(Number(inv.net_profit)))}>{fmt$(inv.net_profit)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
+
+              {/* === 第四部分：销售明细（如果有） === */}
+              {detailData.sales && detailData.sales.length > 0 && (
+                <div className="border rounded-lg overflow-hidden print:border-black">
+                  <p className="text-xs font-semibold px-3 py-2 bg-muted/50">{detailLang === "zh" ? "销售明细" : "Sales Details"}</p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/50">
+                        <TableHead className="text-xs">{detailLang === "zh" ? "日期" : "Date"}</TableHead>
+                        <TableHead className="text-xs">{detailLang === "zh" ? "客户" : "Customer"}</TableHead>
+                        <TableHead className="text-xs">{detailLang === "zh" ? "规格" : "Spec"}</TableHead>
+                        <TableHead className="text-xs text-right">{detailLang === "zh" ? "重量(kg)" : "Weight(kg)"}</TableHead>
+                        <TableHead className="text-xs text-right">{detailLang === "zh" ? "单价" : "Unit Price"}</TableHead>
+                        <TableHead className="text-xs text-right">{detailLang === "zh" ? "毛额(CNY)" : "Gross(CNY)"}</TableHead>
+                        <TableHead className="text-xs text-right">{detailLang === "zh" ? "净额(CNY)" : "Net(CNY)"}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {detailData.sales.map((sale: any, idx: number) => (
+                        <TableRow key={idx}>
+                          <TableCell className="text-xs">{fmtDate(sale.sale_date)}</TableCell>
+                          <TableCell className="text-xs">{sale.customer_name || "-"}</TableCell>
+                          <TableCell className="text-xs">{sale.spec || "-"}</TableCell>
+                          <TableCell className="text-xs text-right">{Number(sale.weight_kg || 0).toLocaleString()}</TableCell>
+                          <TableCell className="text-xs text-right">{fmt$(sale.unit_price)}</TableCell>
+                          <TableCell className="text-xs text-right">{fmt$(sale.gross_amount)}</TableCell>
+                          <TableCell className="text-xs text-right font-medium">{fmt$(sale.net_amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {/* 底部汇总 */}
               <div className="flex justify-end gap-4 text-xs font-medium print:flex">
                 <span>{detailLang === "zh" ? "总采购:" : "Total Purchase:"} {fmt$(detailData.total_purchase_cny)}</span>
                 <span>{detailLang === "zh" ? "总销售:" : "Total Sales:"} {fmt$(detailData.total_sales_net)}</span>
-                <span className={clsProfit(Number(detailData.net_profit))}>
-                  {detailLang === "zh" ? "净利润:" : "Net Profit:"} {fmt$(detailData.net_profit)}
-                </span>
+                <span className={clsProfit(Number(detailData.net_profit))}>{detailLang === "zh" ? "净利润:" : "Net Profit:"} {fmt$(detailData.net_profit)}</span>
               </div>
             </div>
           ) : (
