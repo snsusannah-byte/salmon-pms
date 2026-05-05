@@ -172,7 +172,7 @@ function BatchReportsTab() {
     queryKey: ["batch-report-detail", detailId],
     queryFn: async () => {
       if (!detailId) return null;
-      const res = await api.get(`/v1/reports/batches/${detailId}`);
+      const res = await api.get(`/v1/reports/batch/${detailId}`);
       return res.data;
     },
     enabled: !!detailId,
@@ -390,7 +390,7 @@ function InvoiceReportsTab() {
     queryKey: ["invoice-report-detail", detailId],
     queryFn: async () => {
       if (!detailId) return null;
-      const res = await api.get(`/v1/reports/invoices/${detailId}`);
+      const res = await api.get(`/v1/reports/invoice/${detailId}`);
       return res.data;
     },
     enabled: !!detailId,
