@@ -148,6 +148,8 @@ export function SalesPage() {
   });
 
   const summary = {
+    totalCount: allSalesData?.items?.length || 0,
+    totalBoxes: allSalesData?.items?.reduce((sum, s) => sum + Number(s.box_count || 0), 0) || 0,
     totalWeight: allSalesData?.items?.reduce((sum, s) => sum + Number(s.weight_kg || 0), 0) || 0,
     totalNetAmount: allSalesData?.items?.reduce((sum, s) => sum + Number(s.net_amount || 0), 0) || 0,
     totalPaid: allSalesData?.items?.reduce((sum, s) => sum + Number(s.paid_amount || 0), 0) || 0,
@@ -475,7 +477,9 @@ export function SalesPage() {
 
       {/* 汇总行 */}
       {data?.items && data.items.length > 0 && (
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-6 gap-4">
+          <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">记录条数</p><p className="text-2xl font-bold">{summary.totalCount.toLocaleString()}</p></CardContent></Card>
+          <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">总箱数</p><p className="text-2xl font-bold">{summary.totalBoxes.toLocaleString()}</p></CardContent></Card>
           <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">总重量</p><p className="text-2xl font-bold">{summary.totalWeight.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p></CardContent></Card>
           <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">总销售金额</p><p className="text-2xl font-bold">${summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
           <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">已收金额</p><p className="text-2xl font-bold text-green-600">${summary.totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
