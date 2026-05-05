@@ -350,7 +350,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) { onOpenChange(false); resetForm(); } }}>
-      <DialogContent className="!w-[900px] !max-w-[95vw] max-h-[95vh] overflow-y-auto p-4">
+      <DialogContent className="!w-[900px] !max-w-[95vw] p-4">
         <DialogHeader>
           <DialogTitle>{initialData ? "编辑发票" : "新增发票"}</DialogTitle>
         </DialogHeader>
