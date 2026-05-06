@@ -55,6 +55,9 @@ class BatchReportSummaryItem(BaseModel):
     net_profit: Decimal = Decimal("0")
     profit_margin: Optional[Decimal] = None
 
+    # 锁定状态
+    is_locked: bool = False
+
 
 class BatchReportListResponse(BaseModel):
     """批次财报列表响应"""
@@ -71,6 +74,13 @@ class BatchReportInvoiceDetail(BaseModel):
     invoice_no: str
     invoice_date: date
     processing_plant_name: Optional[str] = None
+    processing_plant_eu_code: Optional[str] = None
+    processing_plant_customs_code: Optional[str] = None
+    processing_plant_coc_no: Optional[str] = None
+    fish_farm_name: Optional[str] = None
+    fish_farm_ggn: Optional[str] = None
+    fish_farm_coc_no: Optional[str] = None
+    fish_farm_area: Optional[str] = None
     exporter_name: Optional[str] = None
     total_amount_usd: Decimal = Decimal("0")
     total_boxes: int = 0
@@ -135,6 +145,12 @@ class BatchReportDetail(BaseModel):
     net_profit: Decimal = Decimal("0")
     profit_margin: Optional[Decimal] = None
 
+    # 累计利润（需要后端计算）
+    cumulative_profit: Decimal = Decimal("0")
+
+    # 锁定状态
+    is_locked: bool = False
+
     # 明细
     invoices: List[BatchReportInvoiceDetail] = []
     sales: List[dict] = []
@@ -150,6 +166,7 @@ class InvoiceReportSummaryItem(BaseModel):
     invoice_date: date
     processing_plant_name: Optional[str] = None
     exporter_name: Optional[str] = None
+    supplier_name: Optional[str] = None  # 供应商（真正的付款对象）
     batch_name: Optional[str] = None
     batch_code: Optional[str] = None
 
@@ -230,7 +247,15 @@ class InvoiceReportDetail(BaseModel):
     kill_date: Optional[date] = None
     arrival_date: Optional[date] = None
     processing_plant_name: Optional[str] = None
+    processing_plant_eu_code: Optional[str] = None
+    processing_plant_customs_code: Optional[str] = None
+    processing_plant_coc_no: Optional[str] = None
+    fish_farm_name: Optional[str] = None
+    fish_farm_ggn: Optional[str] = None
+    fish_farm_coc_no: Optional[str] = None
+    fish_farm_area: Optional[str] = None
     exporter_name: Optional[str] = None
+    supplier_name: Optional[str] = None
     awb_no: Optional[str] = None
     gross_weight_kg: Optional[Decimal] = None
     batch_name: Optional[str] = None

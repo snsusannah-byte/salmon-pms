@@ -36,6 +36,7 @@ const formSchema = z.object({
   processing_plant_id: z.coerce.number().min(1, "请选择加工厂"),
   fish_farm_id: z.coerce.number().min(0, "渔场ID不能为负数").optional().nullable(),
   exporter_id: z.coerce.number().min(1, "请选择出口商"),
+  supplier_id: z.coerce.number().min(1, "请选择供应商"),
   total_amount_usd: z.coerce.number().min(0, "金额不能为负数"),
   total_boxes: z.coerce.number().min(0, "箱数不能为负数"),
   total_weight_kg: z.coerce.number().min(0, "重量不能为负数"),
@@ -71,6 +72,7 @@ interface Invoice {
   processing_plant_id: number;
   fish_farm_id: number;
   exporter_id: number;
+  supplier_id: number;
   total_amount_usd: string;
   total_boxes: number;
   total_weight_kg: string;
@@ -115,6 +117,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
       processing_plant_id: 0,
       fish_farm_id: null,
       exporter_id: 0,
+      supplier_id: 61,
       total_amount_usd: 0,
       total_boxes: 0,
       total_weight_kg: 0,
@@ -157,6 +160,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
   const processingPlants = companiesData?.items.filter(c => c.type === "processing_plant") || [];
   const fishFarms = companiesData?.items.filter(c => c.type === "fish_farm") || [];
   const exporters = companiesData?.items.filter(c => c.type === "exporter") || [];
+  const suppliers = companiesData?.items.filter(c => c.type === "supplier") || [];
 
   // 从真实产品数据构建选项
   const productNameOptions = [...new Set(productsData?.map(p => p.name).filter(Boolean) || [])] as string[];
@@ -203,6 +207,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         processing_plant_id: initialData.processing_plant_id,
         fish_farm_id: initialData.fish_farm_id,
         exporter_id: initialData.exporter_id,
+        supplier_id: initialData.supplier_id || 61,
         total_amount_usd: Number(initialData.total_amount_usd),
         total_boxes: initialData.total_boxes,
         total_weight_kg: Number(initialData.total_weight_kg),
@@ -237,6 +242,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         processing_plant_id: 0,
         fish_farm_id: null,
         exporter_id: 0,
+        supplier_id: 61,
         total_amount_usd: 0,
         total_boxes: 0,
         total_weight_kg: 0,
@@ -433,6 +439,27 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                   </SelectContent>
                 </Select>
                 {form.formState.errors.exporter_id && <p className="text-xs text-red-500">{form.formState.errors.exporter_id.message}</p>}
+              </div>
+              <div>
+                <Label htmlFor="supplier_id" className="text-xs">供应商 *</Label>
+                <Select
+                  value={form.watch("supplier_id") ? String(form.watch("supplier_id")) : undefined}
+                  onValueChange={(v) => form.setValue("supplier_id", parseInt(v || "0"))}
+                >
+                  <SelectTrigger id="supplier_id">
+                    <SelectValue placeholder="选择供应商">
+                      {suppliers.find(c => c.id === form.watch("supplier_id"))?.name || "选择供应商"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.formState.errors.supplier_id && <p className="text-xs text-red-500">{form.formState.errors.supplier_id.message}</p>}
               </div>
             </div>
           </div>

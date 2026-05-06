@@ -109,7 +109,8 @@ class CompanyService:
     async def list_companies(
         db: AsyncSession,
         type: Optional[CompanyType] = None,
-        exclude_type: Optional[CompanyType] = None,
+        exclude_type: Optional[List[CompanyType]] = None,
+        business_role: Optional[str] = None,
         search: Optional[str] = None,
         is_active: Optional[bool] = None,
         skip: int = 0,
@@ -129,8 +130,19 @@ class CompanyService:
             count_query = count_query.where(Company.type == type)
         
         if exclude_type:
-            query = query.where(Company.type != exclude_type)
-            count_query = count_query.where(Company.type != exclude_type)
+            for et in exclude_type:
+                query = query.where(Company.type != et)
+                count_query = count_query.where(Company.type != et)
+        
+        # 业务角色筛选（上游溯源 vs 业务往来）
+        if business_role:
+            from app.schemas.company import UPSTREAM_TYPES, BUSINESS_PARTNER_TYPES
+            if business_role == "upstream":
+                query = query.where(Company.type.in_(list(UPSTREAM_TYPES)))
+                count_query = count_query.where(Company.type.in_(list(UPSTREAM_TYPES)))
+            elif business_role == "business_partner":
+                query = query.where(Company.type.in_(list(BUSINESS_PARTNER_TYPES)))
+                count_query = count_query.where(Company.type.in_(list(BUSINESS_PARTNER_TYPES)))
         
         if is_active is not None:
             query = query.where(Company.is_active == is_active)
@@ -237,6 +249,43 @@ class CompanyService:
         """删除主体（软删除：标记为不活跃）"""
         company.is_active = False
         await db.commit()
+    
+    @staticmethod
+    async def get_supplier_payables(db: AsyncSession, supplier_ids: List[int]) -> dict[int, dict]:
+        """批量获取供应商应付款
+        
+        Returns:
+            {supplier_id: {payable_usd, payable_cny}}
+        """
+        from sqlalchemy import func
+        from app.models import ImportInvoice
+        
+        if not supplier_ids:
+            return {}
+        
+        # 查询每个供应商的发票总额(USD)
+        result = await db.execute(
+            select(
+                ImportInvoice.supplier_id,
+                func.count(ImportInvoice.id).label("invoice_count"),
+                func.sum(ImportInvoice.total_amount_usd).label("total_usd"),
+            )
+            .where(ImportInvoice.supplier_id.in_(supplier_ids))
+            .group_by(ImportInvoice.supplier_id)
+        )
+        
+        payables = {}
+        for row in result.mappings():
+            supplier_id = row["supplier_id"]
+            total_usd = row["total_usd"] or 0
+            # 使用平均汇率 6.928 转换为 CNY（后续可从 exchange_records 动态获取）
+            exchange_rate = 6.928
+            payables[supplier_id] = {
+                "payable_usd": float(total_usd),
+                "payable_cny": float(total_usd * exchange_rate),
+            }
+        
+        return payables
     
     @staticmethod
     async def hard_delete(db: AsyncSession, company: Company) -> None:

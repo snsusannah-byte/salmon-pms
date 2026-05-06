@@ -13,8 +13,31 @@ from app.schemas.finance import (
     BatchPurchaseTotalResponse,
 )
 from app.services.finance_service import FinanceService
+from app.models import BatchInvoice, ImportInvoice, Batch
+from sqlalchemy import select
 
 router = APIRouter()
+
+
+# ==================== 批次锁定检查 ====================
+
+async def _check_batch_locked_by_invoice(db: AsyncSession, invoice_id: int):
+    """通过发票ID检查批次是否已锁定"""
+    bi = await db.execute(
+        select(BatchInvoice).where(BatchInvoice.invoice_id == invoice_id)
+    )
+    row = bi.scalar_one_or_none()
+    if row:
+        batch = await db.get(Batch, row.batch_id)
+        if batch and batch.is_locked:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该批次已锁定，禁止修改")
+
+
+async def _check_batch_locked(db: AsyncSession, batch_id: int):
+    """直接检查批次是否已锁定"""
+    batch = await db.get(Batch, batch_id)
+    if batch and batch.is_locked:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该批次已锁定，禁止修改")
 
 
 # ==================== 银行账户 ====================
@@ -163,6 +186,8 @@ async def create_exchange_record(
     db: AsyncSession = Depends(get_db),
 ):
     """创建购汇记录"""
+    if data.batch_id:
+        await _check_batch_locked(db, data.batch_id)
     record = await FinanceService.create_exchange_record(db, data.model_dump())
     return ExchangeRecordResponse.model_validate(record)
 
@@ -174,12 +199,12 @@ async def update_exchange_record(
     db: AsyncSession = Depends(get_db),
 ):
     """更新购汇记录"""
-    from sqlalchemy import select
-    from app.models import ExchangeRecord
     result = await db.execute(select(ExchangeRecord).where(ExchangeRecord.id == record_id))
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="购汇记录不存在")
+    if record.batch_id:
+        await _check_batch_locked(db, record.batch_id)
     updated = await FinanceService.update_exchange_record(db, record, data.model_dump(exclude_unset=True))
     return ExchangeRecordResponse.model_validate(updated)
 
@@ -190,12 +215,12 @@ async def delete_exchange_record(
     db: AsyncSession = Depends(get_db),
 ):
     """删除购汇记录"""
-    from sqlalchemy import select
-    from app.models import ExchangeRecord
     result = await db.execute(select(ExchangeRecord).where(ExchangeRecord.id == record_id))
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="购汇记录不存在")
+    if record.batch_id:
+        await _check_batch_locked(db, record.batch_id)
     await FinanceService.delete_exchange_record(db, record)
     return None
 
@@ -223,7 +248,21 @@ async def create_import_fee(
     db: AsyncSession = Depends(get_db),
 ):
     """创建统一进口费用（同时写入税费+清关表）"""
+    if data.invoice_id:
+        await _check_batch_locked_by_invoice(db, data.invoice_id)
     result = await FinanceService.create_import_fee(db, data.model_dump())
+    return {"success": True, "data": result}
+
+
+@router.put("/import-fees/{invoice_id}")
+async def update_import_fee(
+    invoice_id: int,
+    data: ImportFeeCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新统一进口费用（复用 create 逻辑，已存在则更新）"""
+    await _check_batch_locked_by_invoice(db, invoice_id)
+    result = await FinanceService.create_import_fee(db, {**data.model_dump(), "invoice_id": invoice_id})
     return {"success": True, "data": result}
 
 
@@ -233,6 +272,7 @@ async def delete_import_fee(
     db: AsyncSession = Depends(get_db),
 ):
     """删除统一进口费用（同时删除税费+清关记录）"""
+    await _check_batch_locked_by_invoice(db, invoice_id)
     await FinanceService.delete_import_fee(db, invoice_id)
     return None
 

@@ -2,11 +2,11 @@ from typing import List, Optional, Tuple
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, exists
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Batch, BatchInvoice, ImportInvoice, BatchStatus
+from app.models import Batch, BatchInvoice, ImportInvoice, BatchStatus, ExchangeStatus
 
 
 class BatchService:
@@ -26,6 +26,7 @@ class BatchService:
         db: AsyncSession,
         status: Optional[BatchStatus] = None,
         search: Optional[str] = None,
+        exclude_fully_exchanged: bool = False,
         skip: int = 0,
         limit: int = 100,
     ) -> Tuple[List[Batch], int]:
@@ -42,6 +43,34 @@ class BatchService:
         if filters:
             query = query.where(and_(*filters))
             count_query = count_query.where(and_(*filters))
+
+        # 排除已全部购汇的批次
+        if exclude_fully_exchanged:
+            # 获取还有未购汇发票的批次ID
+            not_completed_result = await db.execute(
+                select(BatchInvoice.batch_id).distinct()
+                .join(ImportInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
+                .where(ImportInvoice.exchange_status != ExchangeStatus.COMPLETED)
+            )
+            not_completed_ids = {r[0] for r in not_completed_result.all()}
+            
+            # 获取没有关联发票的批次ID（也需要显示，因为可能是新批次）
+            no_invoice_result = await db.execute(
+                select(Batch.id).where(
+                    ~exists(
+                        select(1).select_from(BatchInvoice).where(BatchInvoice.batch_id == Batch.id)
+                    )
+                )
+            )
+            no_invoice_ids = {r[0] for r in no_invoice_result.all()}
+            
+            include_ids = not_completed_ids | no_invoice_ids
+            if include_ids:
+                query = query.where(Batch.id.in_(include_ids))
+                count_query = count_query.where(Batch.id.in_(include_ids))
+            else:
+                # 所有批次都已购汇，返回空
+                return [], 0
 
         query = query.order_by(Batch.batch_code.desc())
         query = query.offset(skip).limit(limit)

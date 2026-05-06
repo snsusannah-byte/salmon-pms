@@ -78,13 +78,14 @@ async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
 async def list_batches(
     status: Optional[BatchStatus] = Query(None, description="批次状态"),
     search: Optional[str] = Query(None, description="搜索批次名称"),
+    exclude_fully_exchanged: bool = Query(False, description="排除已全部购汇的批次"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     """批次列表"""
     items, total = await BatchService.list_batches(
-        db=db, status=status, search=search, skip=skip, limit=limit
+        db=db, status=status, search=search, exclude_fully_exchanged=exclude_fully_exchanged, skip=skip, limit=limit
     )
 
     result_items = []

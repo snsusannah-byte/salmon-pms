@@ -6,6 +6,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models import CompanyType, CustomerCategory
 
+# 主体业务角色分类
+UPSTREAM_TYPES = {"processing_plant", "fish_farm", "exporter"}  # 上游溯源（不参与应收应付）
+BUSINESS_PARTNER_TYPES = {"supplier", "customer", "customs_broker", "logistics", "internal"}  # 业务往来（参与应收应付）
+
+
+def get_business_role(company_type: str) -> str:
+    """根据主体类型返回业务角色：upstream(上游溯源) 或 business_partner(业务往来)"""
+    if company_type in UPSTREAM_TYPES:
+        return "upstream"
+    return "business_partner"
+
 
 class CompanyBase(BaseModel):
     """主体基础信息"""
@@ -27,6 +38,7 @@ class CompanyBase(BaseModel):
     website: Optional[str] = Field(None, max_length=255, description="网址")
     bank_name: Optional[str] = Field(None, max_length=200, description="开户行")
     bank_account: Optional[str] = Field(None, max_length=100, description="银行账号")
+    payee: Optional[str] = Field(None, max_length=200, description="收款人")
     credit_limit: Optional[Decimal] = Field(None, ge=0, description="信用额度")
     # 客户专用字段
     logistics_info: Optional[str] = Field(None, description="物流信息")
@@ -79,6 +91,8 @@ class CompanyUpdate(BaseModel):
     website: Optional[str] = Field(None, max_length=255)
     bank_name: Optional[str] = Field(None, max_length=200)
     bank_account: Optional[str] = Field(None, max_length=100)
+    payee: Optional[str] = Field(None, max_length=200)
+    currency: Optional[str] = Field("CNY", max_length=10, description="币种: CNY/USD/EUR")
     credit_limit: Optional[Decimal] = Field(None, ge=0)
     logistics_info: Optional[str] = Field(None)
     salesperson_id: Optional[int] = Field(None)
@@ -90,9 +104,12 @@ class CompanyUpdate(BaseModel):
 class CompanyResponse(CompanyBase):
     """主体响应"""
     model_config = ConfigDict(from_attributes=True)
-    
+
     id: int
     salesperson_name: Optional[str] = Field(None, description="业务员名称")
+    business_role: str = Field(default="business_partner", description="业务角色：upstream(上游溯源) / business_partner(业务往来)")
+    payable_usd: Optional[float] = Field(None, description="应付款(USD)")
+    payable_cny: Optional[float] = Field(None, description="应付款(CNY)")
     created_at: datetime
     updated_at: datetime
 

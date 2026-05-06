@@ -237,9 +237,9 @@ class SalesService:
         transaction = TransactionRecord(
             transaction_date=data.get("receipt_date"),
             type=TransactionType.INCOME,
-            category=TransactionCategory.SALES_INCOME,
+            category=TransactionCategory.MAIN_BUSINESS_REVENUE,
             amount=data.get("amount"),
-            currency="USD",
+            currency="CNY",
             to_account_id=bank_account_id,
             counterparty_id=sale.customer_id,
             counterparty_name=customer_name,

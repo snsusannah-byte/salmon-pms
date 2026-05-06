@@ -170,6 +170,15 @@ async def list_invoices(
                 item_dict["exporter_name"] = row[0]
                 item_dict["exporter_code"] = row[1]
         
+        if item.supplier_id:
+            company_result = await db.execute(
+                select(Company.name, Company.code).where(Company.id == item.supplier_id)
+            )
+            row = company_result.one_or_none()
+            if row:
+                item_dict["supplier_name"] = row[0]
+                item_dict["supplier_code"] = row[1]
+        
         # 添加产品明细，并实时汇总计算总箱数/总金额
         computed_boxes = 0
         computed_amount = Decimal("0")
@@ -262,6 +271,8 @@ async def create_invoice(
         "fish_farm_code": None,
         "exporter_name": None,
         "exporter_code": None,
+        "supplier_name": None,
+        "supplier_code": None,
         "products": [],
     }
     
@@ -283,6 +294,15 @@ async def create_invoice(
         if row:
             result["exporter_name"] = row[0]
             result["exporter_code"] = row[1]
+    
+    if invoice.supplier_id:
+        company_result = await db.execute(
+            select(Company.name, Company.code).where(Company.id == invoice.supplier_id)
+        )
+        row = company_result.one_or_none()
+        if row:
+            result["supplier_name"] = row[0]
+            result["supplier_code"] = row[1]
     
     # 查询产品明细
     product_result = await db.execute(

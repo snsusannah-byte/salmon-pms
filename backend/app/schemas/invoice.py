@@ -54,6 +54,7 @@ class InvoiceBase(BaseModel):
     processing_plant_id: Optional[int] = Field(None, description="加工厂ID")
     fish_farm_id: Optional[int] = Field(None, description="渔场ID")
     exporter_id: Optional[int] = Field(None, description="出口商ID")
+    supplier_id: Optional[int] = Field(None, description="供应商ID")
     
     total_amount_usd: Optional[Decimal] = Field(None, ge=0, description="总金额(USD)")
     total_boxes: int = Field(0, ge=0, description="总箱数")
@@ -114,6 +115,7 @@ class InvoiceUpdate(BaseModel):
     processing_plant_id: Optional[int] = None
     fish_farm_id: Optional[int] = None
     exporter_id: Optional[int] = None
+    supplier_id: Optional[int] = None
     
     total_amount_usd: Optional[Decimal] = Field(None, ge=0)
     total_boxes: Optional[int] = Field(None, ge=0)
@@ -178,6 +180,8 @@ class InvoiceResponse(InvoiceBase):
     fish_farm_code: Optional[str] = None
     exporter_name: Optional[str] = None
     exporter_code: Optional[str] = None
+    supplier_name: Optional[str] = None
+    supplier_code: Optional[str] = None
     
     # 主从发票关系（V8.3新增）
     parent_invoice_id: Optional[int] = None

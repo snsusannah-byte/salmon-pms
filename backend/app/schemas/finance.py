@@ -180,6 +180,7 @@ class ImportFeeCreate(BaseModel):
     """统一进口费用创建"""
     invoice_id: int = Field(..., description="发票ID")
     expense_date: date = Field(..., description="费用日期")
+    customs_broker_id: Optional[int] = Field(15, description="报关行ID")
     # 海关税费
     import_duty: Decimal = Field(0, ge=0, description="进口关税")
     import_vat: Decimal = Field(0, ge=0, description="进口增值税")
@@ -199,6 +200,8 @@ class ImportFeeResponse(BaseModel):
     invoice_id: int
     invoice_no: Optional[str] = None
     expense_date: date
+    customs_broker_id: Optional[int] = None
+    customs_broker_name: Optional[str] = None
     import_duty: Decimal
     import_vat: Decimal
     pickup_fee: Decimal
@@ -219,6 +222,8 @@ class ImportFeeListItem(BaseModel):
     invoice_id: int
     invoice_no: Optional[str] = None
     expense_date: Optional[date] = None
+    customs_broker_id: Optional[int] = None
+    customs_broker_name: Optional[str] = None
     import_duty: Optional[Decimal] = None
     import_vat: Optional[Decimal] = None
     tax_total: Optional[Decimal] = None

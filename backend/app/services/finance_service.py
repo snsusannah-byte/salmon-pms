@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy import select, func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.models import (
     ExchangeRecord, ImportTax, ClearanceCost,
@@ -56,30 +57,72 @@ class FinanceService:
 
     @staticmethod
     async def _update_invoice_exchange_status(db: AsyncSession, invoice_id: Optional[int], batch_id: Optional[int] = None) -> None:
-        """更新发票购汇状态：支持按发票ID或批次ID更新"""
+        """更新发票购汇状态：按实际购汇金额判断，支持发票级和批次级购汇"""
         from app.models import ImportInvoice, ExchangeStatus, BatchInvoice
+        from sqlalchemy import func
+        from decimal import Decimal
 
         invoice_ids = []
-        
         if invoice_id:
             invoice_ids.append(invoice_id)
         elif batch_id:
-            # 按批次获取所有关联的发票
             result = await db.execute(
                 select(BatchInvoice.invoice_id).where(BatchInvoice.batch_id == batch_id)
             )
             invoice_ids = [r[0] for r in result.all()]
-        
+
         if not invoice_ids:
             return
-        
-        # 批量更新这些发票为"已购汇"
+
         for inv_id in invoice_ids:
             result = await db.execute(select(ImportInvoice).where(ImportInvoice.id == inv_id))
             inv = result.scalar_one_or_none()
-            if inv:
-                inv.exchange_status = ExchangeStatus.COMPLETED
-        
+            if not inv:
+                continue
+
+            # 1. 直接关联该发票的购汇金额
+            direct_ex = await db.execute(
+                select(func.sum(ExchangeRecord.amount_usd))
+                .where(ExchangeRecord.invoice_id == inv_id)
+            )
+            direct_total = direct_ex.scalar() or Decimal("0")
+
+            # 2. 批次级购汇（未指定具体发票的）— 仅在批量更新时按金额比例分摊
+            batch_share = Decimal("0")
+            if not invoice_id and batch_id:
+                # 获取该发票在该批次中的金额占比
+                batch_purchase_result = await db.execute(
+                    select(func.sum(ImportInvoice.total_amount_usd))
+                    .join(BatchInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
+                    .where(BatchInvoice.batch_id == batch_id)
+                )
+                batch_purchase_total = batch_purchase_result.scalar() or Decimal("0")
+
+                batch_ex_result = await db.execute(
+                    select(func.sum(ExchangeRecord.amount_usd))
+                    .where(ExchangeRecord.batch_id == batch_id)
+                    .where(ExchangeRecord.invoice_id.is_(None))
+                )
+                batch_ex_total = batch_ex_result.scalar() or Decimal("0")
+
+                inv_amount = inv.total_amount_usd or Decimal("0")
+                if batch_purchase_total > 0 and inv_amount > 0:
+                    proportion = inv_amount / batch_purchase_total
+                    batch_share = batch_ex_total * proportion
+
+            total_exchanged = direct_total + batch_share
+            invoice_total = inv.total_amount_usd or Decimal("0")
+
+            # 判断购汇状态
+            if total_exchanged >= invoice_total and invoice_total > 0:
+                status = ExchangeStatus.COMPLETED
+            elif total_exchanged > 0:
+                status = ExchangeStatus.PARTIAL
+            else:
+                status = ExchangeStatus.NOT_EXCHANGED
+
+            inv.exchange_status = status
+
         await db.commit()
 
     @staticmethod
@@ -198,6 +241,8 @@ class FinanceService:
             i.id AS invoice_id,
             i.invoice_no,
             COALESCE(t.tax_date, c.cost_date) AS expense_date,
+            c.customs_broker_id,
+            co.name AS customs_broker_name,
             COALESCE(t.import_duty, 0) AS import_duty,
             COALESCE(t.import_vat, 0) AS import_vat,
             COALESCE(t.total_tax, 0) AS tax_total,
@@ -210,6 +255,7 @@ class FinanceService:
         FROM import_invoices i
         LEFT JOIN import_taxes t ON t.invoice_id = i.id
         LEFT JOIN clearance_costs c ON c.invoice_id = i.id
+        LEFT JOIN companies co ON co.id = c.customs_broker_id
         WHERE (t.id IS NOT NULL OR c.id IS NOT NULL)
         """
         count_sql = """
@@ -245,6 +291,8 @@ class FinanceService:
                 "invoice_id": row["invoice_id"],
                 "invoice_no": row["invoice_no"],
                 "expense_date": row["expense_date"],
+                "customs_broker_id": row["customs_broker_id"],
+                "customs_broker_name": row["customs_broker_name"],
                 "import_duty": row["import_duty"],
                 "import_vat": row["import_vat"],
                 "tax_total": row["tax_total"],
@@ -291,6 +339,8 @@ class FinanceService:
         clearance_data = {
             "invoice_id": invoice_id,
             "cost_date": expense_date,
+            "customs_broker_id": data.get("customs_broker_id") or 15,
+            "customs_broker": "威揽",  # 冗余文本，保持兼容
             "clearance_fee": Decimal(str(data.get("pickup_fee", 0))),
             "freight_fee": Decimal(str(data.get("freight", 0))),
             "inspection_fee": Decimal(str(data.get("yard_fee", 0))),
@@ -383,7 +433,7 @@ class FinanceService:
 
     @staticmethod
     async def get_batch_purchase_total(db: AsyncSession, batch_id: int) -> dict:
-        """获取批次采购总额（汇总该批次下所有发票的 total_amount_usd）"""
+        """获取批次采购总额（汇总该批次下所有发票的 total_amount_usd）及已购汇金额"""
         result = await db.execute(
             select(
                 Batch.id,
@@ -406,26 +456,56 @@ class FinanceService:
                 "batch_code": None,
                 "batch_name": None,
                 "total_usd": Decimal("0"),
+                "exchanged_usd": Decimal("0"),
+                "remaining_usd": Decimal("0"),
                 "invoice_count": 0,
                 "invoices": [],
             }
         
-        # 获取每张发票明细
+        # 获取该批次已购汇金额
+        exchange_result = await db.execute(
+            select(func.sum(ExchangeRecord.amount_usd))
+            .where(ExchangeRecord.batch_id == batch_id)
+        )
+        exchanged_usd = exchange_result.scalar() or Decimal("0")
+        
+        total_usd = row["total_usd"] or Decimal("0")
+        remaining_usd = total_usd - exchanged_usd
+        if remaining_usd < 0:
+            remaining_usd = Decimal("0")
+        
+        # 获取每张发票明细及各自购汇情况
         invoice_result = await db.execute(
             select(ImportInvoice.id, ImportInvoice.invoice_no, ImportInvoice.total_amount_usd)
             .join(BatchInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
             .where(BatchInvoice.batch_id == batch_id)
         )
-        invoices = [
-            {"id": r.id, "invoice_no": r.invoice_no, "total_amount_usd": r.total_amount_usd}
-            for r in invoice_result.all()
-        ]
+        invoices = []
+        for r in invoice_result.all():
+            # 查该发票已购汇金额
+            inv_ex_result = await db.execute(
+                select(func.sum(ExchangeRecord.amount_usd))
+                .where(ExchangeRecord.invoice_id == r.id)
+            )
+            inv_exchanged = inv_ex_result.scalar() or Decimal("0")
+            inv_remaining = r.total_amount_usd - inv_exchanged
+            if inv_remaining < 0:
+                inv_remaining = Decimal("0")
+            invoices.append({
+                "id": r.id,
+                "invoice_no": r.invoice_no,
+                "total_amount_usd": r.total_amount_usd,
+                "exchanged_usd": inv_exchanged,
+                "remaining_usd": inv_remaining,
+            })
         
         return {
             "batch_id": row["id"],
             "batch_code": row["batch_code"],
             "batch_name": row["batch_name"],
-            "total_usd": row["total_usd"] or Decimal("0"),
+            "total_usd": total_usd,
+            "exchanged_usd": exchanged_usd,
+            "remaining_usd": remaining_usd,
             "invoice_count": row["invoice_count"] or 0,
             "invoices": invoices,
         }

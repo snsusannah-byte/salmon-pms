@@ -66,6 +66,8 @@ interface InvoiceDetail {
   fish_farm_name: string | null;
   exporter_id: number;
   exporter_name: string | null;
+  supplier_id: number;
+  supplier_name: string | null;
   total_amount_usd: string;
   total_boxes: number;
   total_weight_kg: string;
@@ -168,6 +170,10 @@ export function InvoiceDetailDrawer({ invoiceId, open, onOpenChange, onEdit }: I
               <div>
                 <span className="text-muted-foreground">出口商:</span>
                 <span className="ml-2">{invoice.exporter_name ?? "-"}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">供应商:</span>
+                <span className="ml-2">{invoice.supplier_name ?? "-"}</span>
               </div>
             </div>
           </div>

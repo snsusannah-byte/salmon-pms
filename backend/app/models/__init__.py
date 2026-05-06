@@ -71,22 +71,56 @@ class TransactionType(str, PyEnum):
 
 
 class TransactionCategory(str, PyEnum):
-    # 收入
-    SALES_INCOME = "sales_income"              # 销售收入
-    INVESTMENT = "investment"                  # 投资款
-    LOAN = "loan"                              # 借款
-    INTEREST = "interest"                      # 利息收入
-    # 支出
-    ONLINE_OPERATION = "online_operation"      # 线上运营
-    RENT = "rent"                              # 场地租赁
-    FIXED_ASSET = "fixed_asset"                # 固定资产
-    SALARY = "salary"                          # 工资
-    TRAVEL = "travel"                          # 差旅
-    SCAN_FEE = "scan_fee"                      # 扫码手续费
-    TAX = "tax"                                # 税费
-    LOGISTICS_COST = "logistics_cost"          # 物流费
-    CLEARANCE_COST = "clearance_cost"          # 清关费
-    OTHER = "other"                            # 其他
+    # === 收入 ===
+    MAIN_BUSINESS_REVENUE = "main_business_revenue"       # 主营业务收入（整鱼/成品/副产品）
+    OTHER_BUSINESS_REVENUE = "other_business_revenue"     # 其他业务收入（废料）
+    NON_BUSINESS_REVENUE = "non_business_revenue"         # 营业外收入（投资/借款/利息）
+    FUND_POOLING = "fund_pooling"                         # 资金归集（银行/线上零售）
+
+    # === 支出-销售费用 ===
+    MARKETING_FEE = "marketing_fee"                         # 市场推广费
+    PACKAGING_CONSUMABLES = "packaging_consumables"         # 包装物及低值易耗品
+    GIFT_FEE = "gift_fee"                                   # 赠品费用
+    SCAN_FEE = "scan_fee"                                   # 扫码手续费
+    TRANSPORT_FEE = "transport_fee"                         # 运输装卸费
+    SALES_COMMISSION = "sales_commission"                   # 销售佣金
+
+    # === 支出-管理费用 ===
+    STAFF_SALARY = "staff_salary"                           # 职工薪酬
+    RENT_FEE = "rent_fee"                                   # 租赁费
+    OFFICE_FEE = "office_fee"                               # 办公费
+    TRAVEL_FEE = "travel_fee"                               # 差旅费
+    AGENCY_FEE = "agency_fee"                               # 中介服务费
+    DEPRECIATION = "depreciation"                           # 固定资产折旧
+    MAINTENANCE_FEE = "maintenance_fee"                    # 维修维护费
+    INSURANCE_FEE = "insurance_fee"                         # 保险费
+    ENTERTAINMENT_FEE = "entertainment_fee"                 # 业务招待费
+    TRAINING_FEE = "training_fee"                         # 培训费
+
+    # === 支出-财务费用 ===
+    INTEREST_EXPENSE = "interest_expense"                   # 利息支出
+    EXCHANGE_LOSS = "exchange_loss"                         # 汇兑损益
+    BANK_FEE = "bank_fee"                                   # 银行手续费
+
+    # === 支出-成本支出 ===
+    GOODS_PAYMENT = "goods_payment"                         # 货款支付
+    TAX_PAYMENT = "tax_payment"                             # 税费支付
+    CLEARANCE_PAYMENT = "clearance_payment"                 # 清关费支付
+    INTERNATIONAL_FREIGHT = "international_freight"         # 国际运费支付
+
+    # === 旧分类（兼容已有数据，已废弃）===
+    SALES_INCOME = "sales_income"                           # [废弃] 销售收入
+    INVESTMENT = "investment"                               # [废弃] 投资款
+    LOAN = "loan"                                           # [废弃] 借款
+    INTEREST = "interest"                                   # [废弃] 利息收入
+    ONLINE_OPERATION = "online_operation"                   # [废弃] 线上运营
+    RENT = "rent"                                           # [废弃] 场地租赁
+    FIXED_ASSET = "fixed_asset"                             # [废弃] 固定资产
+    SALARY = "salary"                                       # [废弃] 工资
+    TRAVEL = "travel"                                       # [废弃] 差旅
+    LOGISTICS_COST = "logistics_cost"                       # [废弃] 物流费
+    CLEARANCE_COST = "clearance_cost"                       # [废弃] 清关费
+    OTHER = "other"                                         # [废弃] 其他
 
 
 class InventoryStatus(str, PyEnum):
@@ -137,6 +171,8 @@ class Company(Base, TimestampMixin):
     website: Mapped[Optional[str]] = mapped_column(String(255))
     bank_name: Mapped[Optional[str]] = mapped_column(String(200))
     bank_account: Mapped[Optional[str]] = mapped_column(String(100))
+    payee: Mapped[Optional[str]] = mapped_column(String(200))  # 收款人
+    currency: Mapped[str] = mapped_column(String(10), default="CNY")  # 币种: CNY/USD/EUR
     credit_limit: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     # 客户专用字段
     logistics_info: Mapped[Optional[str]] = mapped_column(Text)  # 物流信息
@@ -227,6 +263,7 @@ class ImportInvoice(Base, TimestampMixin):
     processing_plant_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
     fish_farm_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"))
     exporter_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)  # 供应商/收款方
     
     total_amount_usd: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     total_boxes: Mapped[int] = mapped_column(Integer, default=0)
@@ -262,6 +299,7 @@ class ImportInvoice(Base, TimestampMixin):
     processing_plant: Mapped["Company"] = relationship("Company", foreign_keys=[processing_plant_id])
     fish_farm: Mapped["Company"] = relationship("Company", foreign_keys=[fish_farm_id])
     exporter: Mapped["Company"] = relationship("Company", foreign_keys=[exporter_id])
+    supplier: Mapped["Company"] = relationship("Company", foreign_keys=[supplier_id])
     products: Mapped[List["InvoiceProduct"]] = relationship("InvoiceProduct", back_populates="invoice", lazy="raise", uselist=True, cascade="all, delete-orphan")
     # 主从关系
     parent_invoice: Mapped[Optional["ImportInvoice"]] = relationship("ImportInvoice", remote_side=[id], foreign_keys=[parent_invoice_id], lazy="raise")
@@ -417,6 +455,7 @@ class Batch(Base, TimestampMixin):
     total_amount_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
     total_boxes: Mapped[int] = mapped_column(Integer, default=0)
     total_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
     batch_invoices: Mapped[List["BatchInvoice"]] = relationship("BatchInvoice", back_populates="batch", lazy="raise", cascade="all, delete-orphan")
@@ -475,6 +514,8 @@ class ClearanceCost(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     invoice_id: Mapped[int] = mapped_column(ForeignKey("import_invoices.id"), nullable=False)
     cost_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    customs_broker_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"), nullable=True)  # 报关行ID
+    customs_broker: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # 报关行名称（冗余）
     clearance_fee: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     freight_fee: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     inspection_fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), default=Decimal("0"))
@@ -482,6 +523,8 @@ class ClearanceCost(Base, TimestampMixin):
     other_costs: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     total_cost: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    customs_broker_company: Mapped[Optional["Company"]] = relationship("Company", foreign_keys=[customs_broker_id], lazy="raise")
 
 
 # ==================== 销售层 ====================

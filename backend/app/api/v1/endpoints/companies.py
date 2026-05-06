@@ -10,18 +10,21 @@ from app.schemas.company import (
     CompanyUpdate,
     CompanyResponse,
     CompanyListResponse,
+    get_business_role,
 )
 from app.services.company_service import CompanyService
 
 router = APIRouter()
 
 
-async def _build_company_response(db: AsyncSession, company) -> CompanyResponse:
-    """构建主体响应（含业务员名称）"""
+async def _build_company_response(db: AsyncSession, company, payables: dict = None) -> CompanyResponse:
+    """构建主体响应（含业务员名称、应付款）"""
     salesperson_name = None
     if company.salesperson_id:
         r = await db.execute(select(User.full_name).where(User.id == company.salesperson_id))
         salesperson_name = r.scalar()
+    
+    payable = payables.get(company.id) if payables else None
     
     data = {
         "id": company.id,
@@ -43,6 +46,8 @@ async def _build_company_response(db: AsyncSession, company) -> CompanyResponse:
         "website": company.website,
         "bank_name": company.bank_name,
         "bank_account": company.bank_account,
+        "payee": company.payee,
+        "currency": company.currency,
         "credit_limit": company.credit_limit,
         "logistics_info": company.logistics_info,
         "salesperson_id": company.salesperson_id,
@@ -50,6 +55,9 @@ async def _build_company_response(db: AsyncSession, company) -> CompanyResponse:
         "is_active": company.is_active,
         "notes": company.notes,
         "salesperson_name": salesperson_name,
+        "business_role": get_business_role(company.type.value if hasattr(company.type, 'value') else str(company.type)),
+        "payable_usd": payable["payable_usd"] if payable else None,
+        "payable_cny": payable["payable_cny"] if payable else None,
         "created_at": company.created_at,
         "updated_at": company.updated_at,
     }
@@ -59,7 +67,8 @@ async def _build_company_response(db: AsyncSession, company) -> CompanyResponse:
 @router.get("/", response_model=CompanyListResponse)
 async def list_companies(
     type: Optional[CompanyType] = Query(None, description="主体类型"),
-    exclude_type: Optional[CompanyType] = Query(None, description="排除类型"),
+    exclude_type: List[CompanyType] = Query([], description="排除类型（可传多个，如 customer,supplier）"),
+    business_role: Optional[str] = Query(None, description="业务角色筛选：upstream(上游溯源) / business_partner(业务往来)"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     is_active: Optional[bool] = Query(True, description="是否启用"),
     skip: int = Query(0, ge=0, description="跳过数量"),
@@ -69,7 +78,8 @@ async def list_companies(
     """主体列表
     
     - **type**: 按类型筛选（加工厂/渔场/出口商/供应商/客户等）
-    - **exclude_type**: 排除指定类型（如排除 customer）
+    - **exclude_type**: 排除指定类型列表（如排除 customer,supplier）
+    - **business_role**: 按业务角色筛选（upstream=上游溯源，business_partner=业务往来）
     - **search**: 按名称/编码/联系人搜索
     - **is_active**: 是否只显示启用中的主体
     """
@@ -77,15 +87,20 @@ async def list_companies(
         db=db,
         type=type,
         exclude_type=exclude_type,
+        business_role=business_role,
         search=search,
         is_active=is_active,
         skip=skip,
         limit=limit,
     )
     
+    # 批量获取应付款（仅供应商）
+    supplier_ids = [item.id for item in items if str(item.type) == "supplier"]
+    payables = await CompanyService.get_supplier_payables(db, supplier_ids)
+    
     result_items = []
     for item in items:
-        result_items.append(await _build_company_response(db, item))
+        result_items.append(await _build_company_response(db, item, payables))
     
     return CompanyListResponse(total=total, items=result_items, skip=skip, limit=limit)
 

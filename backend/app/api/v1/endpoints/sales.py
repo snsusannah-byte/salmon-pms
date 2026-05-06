@@ -7,7 +7,7 @@ from typing import List, Optional
 from datetime import date, datetime
 
 from app.core.database import get_db
-from app.models import SalesStatus, WholeFishSale, SalesReceipt, AftersalesRecord, Company, Batch, User
+from app.models import SalesStatus, WholeFishSale, SalesReceipt, AftersalesRecord, Company, Batch, User, BatchInvoice
 from app.schemas.sales import (
     WholeFishSaleCreate,
     WholeFishSaleUpdate,
@@ -25,6 +25,26 @@ from app.schemas.sales import (
 from app.services.sales_service import SalesService
 
 router = APIRouter()
+
+
+# ==================== 批次锁定检查 ====================
+
+async def _check_batch_locked(db: AsyncSession, batch_id: Optional[int] = None, invoice_id: Optional[int] = None):
+    """检查批次是否已锁定，如果锁定则抛出403"""
+    if batch_id:
+        batch = await db.get(Batch, batch_id)
+        if batch and batch.is_locked:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该批次已锁定，禁止修改")
+    elif invoice_id:
+        # 通过发票找到批次
+        bi = await db.execute(
+            select(BatchInvoice).where(BatchInvoice.invoice_id == invoice_id)
+        )
+        row = bi.scalar_one_or_none()
+        if row:
+            batch = await db.get(Batch, row.batch_id)
+            if batch and batch.is_locked:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该批次已锁定，禁止修改")
 
 
 async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFishSaleResponse:
@@ -140,6 +160,7 @@ async def create_whole_fish_sale(
     db: AsyncSession = Depends(get_db),
 ):
     """创建整鱼销售"""
+    await _check_batch_locked(db, batch_id=data.batch_id)
     payload = data.model_dump()
     payload["sale_no"] = await _generate_sale_no(db, str(data.sale_date))
     sale = await SalesService.create_sale(db, payload)
@@ -168,6 +189,7 @@ async def update_whole_fish_sale(
     sale = await SalesService.get_sale_by_id(db, sale_id)
     if not sale:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    await _check_batch_locked(db, batch_id=sale.batch_id)
     update_data = data.model_dump(exclude_unset=True)
     updated = await SalesService.update_sale(db, sale, update_data)
     return await _build_sale_response(db, updated)
@@ -182,6 +204,7 @@ async def delete_whole_fish_sale(
     sale = await SalesService.get_sale_by_id(db, sale_id)
     if not sale:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    await _check_batch_locked(db, batch_id=sale.batch_id)
     await SalesService.delete_sale(db, sale)
     return None
 
@@ -232,6 +255,10 @@ async def create_sale_receipt(
     db: AsyncSession = Depends(get_db),
 ):
     """创建收款记录"""
+    sale = await SalesService.get_sale_by_id(db, sale_id)
+    if not sale:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    await _check_batch_locked(db, batch_id=sale.batch_id)
     receipt = await SalesService.add_receipt(db, sale_id, data.model_dump())
     return SalesReceiptResponse.model_validate(receipt)
 
@@ -243,6 +270,10 @@ async def delete_sale_receipt(
     db: AsyncSession = Depends(get_db),
 ):
     """删除收款记录"""
+    sale = await SalesService.get_sale_by_id(db, sale_id)
+    if not sale:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    await _check_batch_locked(db, batch_id=sale.batch_id)
     await SalesService.delete_receipt(db, receipt_id)
     return None
 
@@ -268,6 +299,10 @@ async def create_aftersales(
     db: AsyncSession = Depends(get_db),
 ):
     """创建售后记录"""
+    sale = await SalesService.get_sale_by_id(db, sale_id)
+    if not sale:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    await _check_batch_locked(db, batch_id=sale.batch_id)
     record = await SalesService.add_aftersales(db, sale_id, data.model_dump())
     return AftersalesRecordResponse.model_validate(record)
 
@@ -280,6 +315,10 @@ async def update_aftersales(
     db: AsyncSession = Depends(get_db),
 ):
     """更新售后记录"""
+    sale = await SalesService.get_sale_by_id(db, sale_id)
+    if not sale:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    await _check_batch_locked(db, batch_id=sale.batch_id)
     result = await db.execute(select(AftersalesRecord).where(AftersalesRecord.id == record_id, AftersalesRecord.sale_id == sale_id))
     record = result.scalar_one_or_none()
     if not record:
@@ -296,6 +335,10 @@ async def delete_aftersales(
     db: AsyncSession = Depends(get_db),
 ):
     """删除售后记录"""
+    sale = await SalesService.get_sale_by_id(db, sale_id)
+    if not sale:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    await _check_batch_locked(db, batch_id=sale.batch_id)
     await SalesService.delete_aftersales(db, record_id)
     return None
 

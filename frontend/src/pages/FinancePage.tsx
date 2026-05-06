@@ -21,6 +21,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -82,20 +90,42 @@ const transactionTypeMap: Record<string, string> = {
 };
 
 const transactionCategoryMap: Record<string, string> = {
-  sales_income: "销售收款",
-  investment: "投资款",
-  loan: "借款",
-  interest: "利息收入",
-  online_operation: "线上运营",
-  rent: "场地租赁",
-  fixed_asset: "固定资产",
-  salary: "工资",
-  travel: "差旅",
+  // 收入
+  main_business_revenue: "主营业务收入",
+  other_business_revenue: "其他业务收入",
+  non_business_revenue: "营业外收入",
+  fund_pooling: "资金归集",
+
+  // 支出-销售费用
+  marketing_fee: "市场推广费",
+  packaging_consumables: "包装物及低值易耗品",
+  gift_fee: "赠品费用",
   scan_fee: "扫码手续费",
-  tax: "税费",
-  logistics_cost: "物流费",
-  clearance_cost: "清关费",
-  other: "其他",
+  transport_fee: "运输装卸费",
+  sales_commission: "销售佣金",
+
+  // 支出-管理费用
+  staff_salary: "职工薪酬",
+  rent_fee: "租赁费",
+  office_fee: "办公费",
+  travel_fee: "差旅费",
+  agency_fee: "中介服务费",
+  depreciation: "固定资产折旧",
+  maintenance_fee: "维修维护费",
+  insurance_fee: "保险费",
+  entertainment_fee: "业务招待费",
+  training_fee: "培训费",
+
+  // 支出-财务费用
+  interest_expense: "利息支出",
+  exchange_loss: "汇兑损益",
+  bank_fee: "银行手续费",
+
+  // 支出-成本支出
+  goods_payment: "货款支付",
+  tax_payment: "税费支付",
+  clearance_payment: "清关费支付",
+  international_freight: "国际运费支付",
 };
 
 interface InvoiceOpt {
@@ -141,6 +171,8 @@ interface ImportFeeItem {
   invoice_id: number;
   invoice_no: string;
   expense_date: string;
+  customs_broker_id: number | null;
+  customs_broker_name: string | null;
   import_duty: number;
   import_vat: number;
   tax_total: number;
@@ -267,6 +299,7 @@ function ImportFeesTab() {
   // Form state
   const [invoiceId, setInvoiceId] = useState("");
   const [expenseDate, setExpenseDate] = useState("");
+  const [customsBrokerId, setCustomsBrokerId] = useState<number | null>(15);
   const [grossWeight, setGrossWeight] = useState("");
   const [importDuty, setImportDuty] = useState("");
   const [importVat, setImportVat] = useState("");
@@ -278,11 +311,12 @@ function ImportFeesTab() {
   const [hasYard, setHasYard] = useState(false);
   const [hasCold, setHasCold] = useState(false);
 
-  // Reset on open
+  // Reset on open (only for new record, not edit)
   useEffect(() => {
-    if (formOpen) {
+    if (formOpen && !editingItem) {
       setInvoiceId("");
       setExpenseDate("");
+      setCustomsBrokerId(15);
       setGrossWeight("");
       setImportDuty("");
       setImportVat("");
@@ -306,6 +340,17 @@ function ImportFeesTab() {
   });
 
   const invoices: InvoiceOpt[] = invoicesData || [];
+
+  // Fetch companies (customs brokers)
+  const { data: companiesData } = useQuery<{ items: { id: number; name: string; company_full_name: string | null }[] }>({
+    queryKey: ["companies", "business_partner"],
+    queryFn: async () => {
+      const res = await api.get("/v1/companies?business_role=business_partner&limit=500");
+      return res.data;
+    },
+  });
+
+  const brokers = companiesData?.items || [];
 
   // Fetch import fees list
   const { data: importFeesData, isLoading } = useQuery<{ items: ImportFeeItem[]; total: number }>({
@@ -369,6 +414,7 @@ function ImportFeesTab() {
       await api.post("/v1/finance/import-fees", {
         invoice_id: Number(invoiceId),
         expense_date: expenseDate,
+        customs_broker_id: customsBrokerId,
         import_duty: Number(importDuty) || 0,
         import_vat: Number(importVat) || 0,
         pickup_fee: Number(pickupFee) || 0,
@@ -386,13 +432,18 @@ function ImportFeesTab() {
     }
   };
 
-  const handleDelete = async (invoiceId: number) => {
-    if (!confirm("确定删除此发票的进口费用？")) return;
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteInvoiceId, setDeleteInvoiceId] = useState<number | null>(null);
+
+  const handleDelete = async () => {
+    if (!deleteInvoiceId) return;
     try {
-      await api.delete(`/v1/finance/import-fees/${invoiceId}`);
+      await api.delete(`/v1/finance/import-fees/${deleteInvoiceId}`);
       toast.success("已删除");
       queryClient.invalidateQueries({ queryKey: ["import-fees"] });
       queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
+      setDeleteOpen(false);
+      setDeleteInvoiceId(null);
     } catch (error: any) {
       toast.error(error.response?.data?.detail ?? "删除失败");
     }
@@ -403,45 +454,95 @@ function ImportFeesTab() {
     setDetailOpen(true);
   };
 
+  const [editingItem, setEditingItem] = useState<ImportFeeItem | null>(null);
+
+  const handleOpenEdit = (item: ImportFeeItem) => {
+    setEditingItem(item);
+    setInvoiceId(String(item.invoice_id || ""));
+    setExpenseDate(item.expense_date || "");
+    setCustomsBrokerId(item.customs_broker_id || 15);
+    setImportDuty(String(item.import_duty ?? ""));
+    setImportVat(String(item.import_vat ?? ""));
+    setPickupFee(String(item.pickup_fee ?? ""));
+    setFreight(String(item.freight ?? ""));
+    setYardFee(String(item.yard_fee ?? ""));
+    setColdStorageFee(String(item.cold_storage_fee ?? ""));
+    setClearanceServiceFee(String(item.clearance_service_fee ?? ""));
+    setHasYard(!!item.yard_fee);
+    setHasCold(!!item.cold_storage_fee);
+    setFormOpen(true);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem) return;
+    try {
+      await api.put(`/v1/finance/import-fees/${editingItem.invoice_id}`, {
+        expense_date: expenseDate,
+        customs_broker_id: customsBrokerId,
+        import_duty: Number(importDuty) || 0,
+        import_vat: Number(importVat) || 0,
+        pickup_fee: Number(pickupFee) || 0,
+        freight: Number(freight) || 0,
+        yard_fee: Number(yardFee) || 0,
+        cold_storage_fee: Number(coldStorageFee) || 0,
+        clearance_service_fee: Number(clearanceServiceFee) || 0,
+      });
+      toast.success("进口费用更新成功");
+      queryClient.invalidateQueries({ queryKey: ["import-fees"] });
+      queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
+      setFormOpen(false);
+      setEditingItem(null);
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail ?? "更新失败");
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => { setEditingTransaction(null); setFormOpen(true); }}>
+        <Button size="sm" onClick={() => { setEditingItem(null); setFormOpen(true); }}>
           <Plus className="h-4 w-4 mr-1" />
           新增进口费用
         </Button>
       </div>
 
-      {/* 新增弹窗 */}
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+      {/* 新增/编辑弹窗 */}
+      <Dialog open={formOpen} onOpenChange={(v) => { if (!v) { setFormOpen(false); setEditingItem(null); } }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Ship className="w-5 h-5" />
-              新增进口费用
+              {editingItem ? "编辑进口费用" : "新增进口费用"}
             </DialogTitle>
           </DialogHeader>
 
-          <form onSubmit={handleSubmit} className="space-y-4 py-2">
+          <form onSubmit={editingItem ? handleEditSubmit : handleSubmit} className="space-y-4 py-2">
             {/* 发票号 */}
             <div className="grid gap-2">
               <Label className="text-sm font-medium">
                 关联发票 <span className="text-red-500">*</span>
               </Label>
-              <Select value={invoiceId} onValueChange={(v) => onSelectInvoice(v ?? "")}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="请选择发票" />
-                </SelectTrigger>
-                <SelectContent className="min-w-[480px]">
-                  {invoices.map((i) => (
-                    <SelectItem key={i.id} value={String(i.id)}>
-                      <span className="font-mono">{i.invoice_no}</span>
-                      {i.processing_plant_name ? <span className="ml-2 text-muted-foreground">{i.processing_plant_name}</span> : ""}
-                      {i.gross_weight_kg ? <span className="ml-2 text-blue-600">毛重{i.gross_weight_kg}kg</span> : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {editingItem ? (
+                <div className="bg-muted px-3 py-2 rounded-md text-sm">
+                  {editingItem.invoice_no || "-"}
+                </div>
+              ) : (
+                <Select value={invoiceId} onValueChange={(v) => onSelectInvoice(v ?? "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="请选择发票" />
+                  </SelectTrigger>
+                  <SelectContent className="min-w-[480px]">
+                    {invoices.map((i) => (
+                      <SelectItem key={i.id} value={String(i.id)}>
+                        <span className="font-mono">{i.invoice_no}</span>
+                        {i.processing_plant_name ? <span className="ml-2 text-muted-foreground">{i.processing_plant_name}</span> : ""}
+                        {i.gross_weight_kg ? <span className="ml-2 text-blue-600">毛重{i.gross_weight_kg}kg</span> : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             {/* 海关税费 */}
@@ -475,10 +576,27 @@ function ImportFeesTab() {
               </div>
             </div>
 
-            {/* 费用日期 */}
-            <div className="grid gap-2">
-              <Label>费用日期 <span className="text-red-500">*</span></Label>
-              <Input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} />
+            {/* 费用日期 + 报关行 */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label>费用日期 <span className="text-red-500">*</span></Label>
+                <Input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label>报关行</Label>
+                <Select value={customsBrokerId ? String(customsBrokerId) : "15"} onValueChange={(v) => setCustomsBrokerId(Number(v))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {brokers.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.company_full_name || c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* 清关费用 */}
@@ -645,12 +763,12 @@ function ImportFeesTab() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>
+              <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingItem(null); }}>
                 取消
               </Button>
               <Button type="submit">
                 <CheckCircle className="w-4 h-4 mr-1" />
-                保存
+                {editingItem ? "更新" : "保存"}
               </Button>
             </DialogFooter>
           </form>
@@ -678,6 +796,12 @@ function ImportFeesTab() {
                   <div className="font-medium">{detailItem.expense_date || "-"}</div>
                 </div>
               </div>
+              {detailItem.customs_broker_name && (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">报关行</Label>
+                  <div className="font-medium">{detailItem.customs_broker_name}</div>
+                </div>
+              )}
 
               <div className="border rounded-lg p-3 space-y-2">
                 <div className="text-sm font-medium text-gray-700">海关税费</div>
@@ -727,6 +851,7 @@ function ImportFeesTab() {
             <TableRow>
               <TableHead>发票号</TableHead>
               <TableHead>费用日期</TableHead>
+              <TableHead>报关行</TableHead>
               <TableHead>关税</TableHead>
               <TableHead>增值税</TableHead>
               <TableHead>清关费用</TableHead>
@@ -737,13 +862,13 @@ function ImportFeesTab() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={8} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : !importFees.length ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -753,6 +878,7 @@ function ImportFeesTab() {
                   <TableRow key={f.invoice_id}>
                   <TableCell className="font-medium">{f.invoice_no}</TableCell>
                   <TableCell>{f.expense_date || "-"}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{f.customs_broker_name || "-"}</TableCell>
                   <TableCell>{fmt(f.import_duty)}</TableCell>
                   <TableCell>{fmt(f.import_vat)}</TableCell>
                   <TableCell>{fmt(f.clearance_total)}</TableCell>
@@ -771,8 +897,17 @@ function ImportFeesTab() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="h-7 w-7 text-blue-500"
+                        onClick={() => handleOpenEdit(f)}
+                        title="编辑"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="h-7 w-7 text-red-500"
-                        onClick={() => handleDelete(f.invoice_id)}
+                        onClick={() => { setDeleteInvoiceId(f.invoice_id); setDeleteOpen(true); }}
                         title="删除"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -784,7 +919,7 @@ function ImportFeesTab() {
               {/* 页汇总行 */}
               {importFees.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">
-                  <TableCell colSpan={2} className="text-right">本页合计:</TableCell>
+                  <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
                   <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.import_duty || 0), 0))}</TableCell>
                   <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.import_vat || 0), 0))}</TableCell>
                   <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.clearance_total || 0), 0))}</TableCell>
@@ -797,6 +932,28 @@ function ImportFeesTab() {
           </TableBody>
         </Table>
       </div>
+      {/* 删除确认弹窗 */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除此发票的进口费用吗？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="outline" onClick={() => { setDeleteOpen(false); setDeleteInvoiceId(null); }}
+            >
+              取消
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}
+            >
+              删除
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -811,16 +968,20 @@ function ExchangeTab() {
 
   // Form state
   const [batchId, setBatchId] = useState("");
+  const [batchTotalUSD, setBatchTotalUSD] = useState(0);
+  const [batchExchangedUSD, setBatchExchangedUSD] = useState(0);
+  const [batchRemainingUSD, setBatchRemainingUSD] = useState(0);
+  const [batchInvoices, setBatchInvoices] = useState<any[]>([]);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
   const [exchangeDate, setExchangeDate] = useState("");
   const [amountUsd, setAmountUsd] = useState("");
   const [exchangeRate, setExchangeRate] = useState("");
   const [amountCny, setAmountCny] = useState("");
   const [feeCny, setFeeCny] = useState("");
-  const [batchTotalUSD, setBatchTotalUSD] = useState(0);
 
-  // Reset on open
+  // Reset on open (only for new record, not edit)
   useEffect(() => {
-    if (formOpen) {
+    if (formOpen && !editingRecord) {
       setBatchId("");
       setExchangeDate("");
       setAmountUsd("");
@@ -828,6 +989,10 @@ function ExchangeTab() {
       setAmountCny("");
       setFeeCny("");
       setBatchTotalUSD(0);
+      setBatchExchangedUSD(0);
+      setBatchRemainingUSD(0);
+      setBatchInvoices([]);
+      setSelectedInvoiceId("");
     }
   }, [formOpen]);
 
@@ -862,18 +1027,27 @@ function ExchangeTab() {
     }
   }, [amountUsd, exchangeRate]);
 
-  // Fetch batch purchase total when batch selected
+  // Fetch batch purchase total + invoices when batch selected
   const onSelectBatch = async (bid: string) => {
     setBatchId(bid);
     setAmountUsd("");
     setBatchTotalUSD(0);
+    setBatchExchangedUSD(0);
+    setBatchRemainingUSD(0);
+    setBatchInvoices([]);
+    setSelectedInvoiceId("");
     if (!bid) return;
     try {
       const res = await api.get(`/v1/finance/batch-purchase-total?batch_id=${bid}`);
       if (res.data?.success && res.data?.data) {
         const total = Number(res.data.data.total_usd) || 0;
+        const exchanged = Number(res.data.data.exchanged_usd) || 0;
+        const remaining = Number(res.data.data.remaining_usd) || 0;
         setBatchTotalUSD(total);
-        setAmountUsd(String(total));
+        setBatchExchangedUSD(exchanged);
+        setBatchRemainingUSD(remaining);
+        setBatchInvoices(res.data.data.invoices || []);
+        setSelectedInvoiceId("__batch__");
       }
     } catch (err: any) {
       toast.error(err.response?.data?.detail ?? "获取采购总额失败");
@@ -893,12 +1067,12 @@ function ExchangeTab() {
     try {
       await api.post("/v1/finance/exchange", {
         batch_id: Number(batchId),
+        invoice_id: selectedInvoiceId && selectedInvoiceId !== "__batch__" ? Number(selectedInvoiceId) : null,
         exchange_date: exchangeDate,
         amount_usd: Number(amountUsd),
         exchange_rate: Number(exchangeRate),
         amount_cny: Number(amountCny),
         fee_cny: Number(feeCny) || 0,
-        invoice_id: null,
         bank_account_id: null,
       });
       toast.success("购汇记录创建成功");
@@ -910,68 +1084,162 @@ function ExchangeTab() {
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("确定删除此购汇记录？")) return;
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteRecordId, setDeleteRecordId] = useState<number | null>(null);
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteRecordId) return;
     try {
-      await api.delete(`/v1/finance/exchange/${id}`);
+      await api.delete(`/v1/finance/exchange/${deleteRecordId}`);
       toast.success("已删除");
       queryClient.invalidateQueries({ queryKey: ["exchange-records"] });
       queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
+      setDeleteOpen(false);
+      setDeleteRecordId(null);
     } catch (error: any) {
       toast.error(error.response?.data?.detail ?? "删除失败");
     }
   };
+
+  const [editingRecord, setEditingRecord] = useState<ExchangeRecord | null>(null);
 
   const handleOpenDetail = (record: ExchangeRecord) => {
     setDetailRecord(record);
     setDetailOpen(true);
   };
 
+  const handleOpenEdit = (record: ExchangeRecord) => {
+    setEditingRecord(record);
+    setBatchId(String(record.batch_id || ""));
+    setExchangeDate(record.exchange_date);
+    setAmountUsd(String(record.amount_usd ?? ""));
+    setExchangeRate(String(record.exchange_rate ?? ""));
+    setAmountCny(String(record.amount_cny ?? ""));
+    setFeeCny(String(record.fee_cny ?? ""));
+    setBatchTotalUSD(0);
+    setBatchExchangedUSD(0);
+    setBatchRemainingUSD(0);
+    setBatchInvoices([]);
+    setSelectedInvoiceId("");
+    setFormOpen(true);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRecord) return;
+    try {
+      await api.put(`/v1/finance/exchange/${editingRecord.id}`, {
+        exchange_date: exchangeDate,
+        amount_usd: Number(amountUsd),
+        exchange_rate: Number(exchangeRate),
+        amount_cny: Number(amountCny),
+        fee_cny: Number(feeCny) || 0,
+      });
+      toast.success("购汇记录更新成功");
+      queryClient.invalidateQueries({ queryKey: ["exchange-records"] });
+      queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
+      setFormOpen(false);
+      setEditingRecord(null);
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail ?? "更新失败");
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
-        <Button size="sm" onClick={() => { setEditingTransaction(null); setFormOpen(true); }}>
+        <Button size="sm" onClick={() => setFormOpen(true)}>
           <Plus className="h-4 w-4 mr-1" />
           新增购汇
         </Button>
       </div>
 
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+      <Dialog open={formOpen} onOpenChange={(v) => { if (!v) { setFormOpen(false); setEditingRecord(null); }}}>
         <DialogContent className="max-w-[640px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <DollarSign className="w-5 h-5" />
-              新增购汇登记
+              {editingRecord ? "编辑购汇登记" : "新增购汇登记"}
             </DialogTitle>
           </DialogHeader>
 
-          <form onSubmit={handleSubmit} className="space-y-5 py-2">
+          <form onSubmit={editingRecord ? handleEditSubmit : handleSubmit} className="space-y-5 py-2">
             {/* 关联批次 */}
             <div className="grid gap-2">
               <Label className="text-sm font-medium">
                 关联批次 <span className="text-red-500">*</span>
               </Label>
-              <Select value={String(batchId)} onValueChange={(v) => onSelectBatch(v ?? "")}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="请选择批次" />
-                </SelectTrigger>
-                <SelectContent className="min-w-[400px]">
-                  {batches.map((b) => (
-                    <SelectItem key={b.id} value={String(b.id)}>
-                      <span className="font-mono">{b.batch_code}</span>
-                      {b.batch_name ? <span className="ml-2 text-muted-foreground">{b.batch_name}</span> : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {editingRecord ? (
+                <div className="bg-muted px-3 py-2 rounded-md text-sm">
+                  {batches.find((b) => b.id === Number(editingRecord.batch_id))?.batch_code || editingRecord.batch_id || "-"}
+                </div>
+              ) : (
+                <Select value={String(batchId)} onValueChange={(v) => onSelectBatch(v ?? "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="请选择批次" />
+                  </SelectTrigger>
+                  <SelectContent className="min-w-[400px]">
+                    {batches.map((b) => (
+                      <SelectItem key={b.id} value={String(b.id)}>
+                        <span className="font-mono">{b.batch_code}</span>
+                        {b.batch_name ? <span className="ml-2 text-muted-foreground">{b.batch_name}</span> : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             {batchTotalUSD > 0 && (
-              <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg">
-                <div className="text-sm text-blue-700 font-medium">该批次采购总额</div>
-                <div className="text-2xl font-bold text-blue-600 mt-1">
-                  {fmtUSD(batchTotalUSD)}
+              <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-blue-700">采购总额</span>
+                  <span className="font-semibold">{fmtUSD(batchTotalUSD)}</span>
                 </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-blue-700">已购汇</span>
+                  <span className="font-semibold">{fmtUSD(batchExchangedUSD)}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t border-blue-200 pt-1">
+                  <span className="text-blue-700 font-medium">未购汇</span>
+                  <span className="font-bold text-blue-600">{fmtUSD(batchRemainingUSD)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* 发票选择 */}
+            {batchInvoices.length > 0 && (
+              <div className="grid gap-2">
+                <Label className="text-sm font-medium">选择发票</Label>
+                <Select value={selectedInvoiceId} onValueChange={(v) => {
+                  setSelectedInvoiceId(v ?? "");
+                  if (v && v !== "__batch__") {
+                    const inv = batchInvoices.find((i) => String(i.id) === v);
+                    if (inv?.remaining_usd) {
+                      setAmountUsd(String(Number(inv.remaining_usd).toFixed(2)));
+                    } else {
+                      setAmountUsd("");
+                    }
+                  } else if (v === "__batch__") {
+                    setAmountUsd(String(Number(batchRemainingUSD).toFixed(2)));
+                  }
+                }}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="请选择发票" />
+                  </SelectTrigger>
+                  <SelectContent className="min-w-[400px]">
+                    <SelectItem value="__batch__">
+                      <span className="font-medium">📦 全批次购汇</span>
+                      <span className="ml-2 text-muted-foreground">剩余 {fmtUSD(batchRemainingUSD)}</span>
+                    </SelectItem>
+                    {batchInvoices.map((inv) => (
+                      <SelectItem key={inv.id} value={String(inv.id)}>
+                        <span className="font-mono">{inv.invoice_no}</span>
+                        <span className="ml-2 text-blue-600">剩余 {fmtUSD(inv.remaining_usd)}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 
@@ -1042,12 +1310,12 @@ function ExchangeTab() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>
+              <Button type="button" variant="outline" onClick={() => { setFormOpen(false); setEditingRecord(null); }}>
                 取消
               </Button>
               <Button type="submit">
                 <CheckCircle className="w-4 h-4 mr-1" />
-                保存
+                {editingRecord ? "更新" : "保存"}
               </Button>
             </DialogFooter>
           </form>
@@ -1177,6 +1445,15 @@ function ExchangeTab() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="h-7 w-7 text-blue-500"
+                        onClick={() => handleOpenEdit(r)}
+                        title="编辑"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         className="h-7 w-7 text-red-500"
                         onClick={() => handleDelete(r.id)}
                         title="删除"
@@ -1204,6 +1481,25 @@ function ExchangeTab() {
           </TableBody>
         </Table>
       </div>
+      {/* 删除确认弹窗 */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除此购汇记录吗？此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="outline" onClick={() => { setDeleteOpen(false); setDeleteRecordId(null); }}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteConfirm}>
+              删除
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

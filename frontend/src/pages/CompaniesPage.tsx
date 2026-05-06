@@ -24,14 +24,14 @@ import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { Plus, Search, Building2, Fish, Ship, Store, User, Truck, HardHat, Home, Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { BatchImportButton } from "@/components/BatchImportButton";
 
-const typeMap: Record<string, { label: string; icon: React.ElementType; color: string }> = {
-  processing_plant: { label: "加工厂", icon: Building2, color: "bg-blue-100 text-blue-800" },
-  fish_farm: { label: "渔场", icon: Fish, color: "bg-cyan-100 text-cyan-800" },
-  exporter: { label: "出口商", icon: Ship, color: "bg-green-100 text-green-800" },
-  supplier: { label: "供应商", icon: Store, color: "bg-purple-100 text-purple-800" },
-  customs_broker: { label: "报关行", icon: HardHat, color: "bg-gray-100 text-gray-800" },
-  logistics: { label: "物流", icon: Truck, color: "bg-yellow-100 text-yellow-800" },
-  internal: { label: "内部", icon: Home, color: "bg-red-100 text-red-800" },
+const typeMap: Record<string, { label: string; icon: React.ElementType; color: string; role: string }> = {
+  processing_plant: { label: "加工厂", icon: Building2, color: "bg-blue-100 text-blue-800", role: "upstream" },
+  fish_farm: { label: "渔场", icon: Fish, color: "bg-cyan-100 text-cyan-800", role: "upstream" },
+  exporter: { label: "出口商", icon: Ship, color: "bg-green-100 text-green-800", role: "upstream" },
+  supplier: { label: "供应商", icon: Store, color: "bg-purple-100 text-purple-800", role: "business_partner" },
+  customs_broker: { label: "报关行", icon: HardHat, color: "bg-gray-100 text-gray-800", role: "business_partner" },
+  logistics: { label: "物流", icon: Truck, color: "bg-yellow-100 text-yellow-800", role: "business_partner" },
+  internal: { label: "内部", icon: Home, color: "bg-red-100 text-red-800", role: "business_partner" },
 };
 
 interface Company {
@@ -39,6 +39,7 @@ interface Company {
   name: string;
   chinese_name: string | null;
   type: string;
+  business_role?: string;
   code: string | null;
   contact_person: string | null;
   phone: string | null;
@@ -80,12 +81,12 @@ export function CompaniesPage() {
   const [deleteTarget, setDeleteTarget] = useState<Company | null>(null);
 
   const { data, isLoading } = useQuery<CompanyListResponse>({
-    queryKey: ["companies", search, type, page, "exclude_customer"],
+    queryKey: ["companies", search, type, page, "upstream"],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.append("search", search);
       if (type && type !== "all") params.append("type", type);
-      params.append("exclude_type", "customer,supplier");
+      params.append("business_role", "upstream");
       params.append("skip", String((page - 1) * PAGE_SIZE));
       params.append("limit", String(PAGE_SIZE));
       const res = await api.get(`/v1/companies/?${params.toString()}`);
@@ -133,9 +134,12 @@ export function CompaniesPage() {
       {/* 标题栏 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">主体管理</h1>
+          <h1 className="text-2xl font-bold">上游溯源管理</h1>
           <p className="text-sm text-muted-foreground">
-            共 {data?.total ?? 0} 个主体，第 {page}/{totalPages} 页
+            共 {data?.total ?? 0} 个主体，第 {page}/{totalPages} 页 · 仅管理加工厂/渔场/出口商溯源信息
+          </p>
+          <p className="text-xs text-blue-600 mt-1">
+            💡 业务往来方（供应商/客户/报关行等）请去对应的管理模块
           </p>
         </div>
         <div className="flex gap-2">
@@ -159,21 +163,39 @@ export function CompaniesPage() {
           />
         </div>
         <Select value={type} onValueChange={(v) => { setType(v ?? "all"); setPage(1); }}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-[220px]">
             <SelectValue placeholder="全部类型">
               {type === "all" ? "全部类型" : typeMap[type]?.label ?? type}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部类型</SelectItem>
-            {Object.entries(typeMap).map(([key, { label, icon: Icon }]) => (
-              <SelectItem key={key} value={key}>
-                <div className="flex items-center gap-2">
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </div>
-              </SelectItem>
-            ))}
+            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/50 mt-1">
+              上游溯源（不参与应收应付）
+            </div>
+            {Object.entries(typeMap)
+              .filter(([_, v]) => v.role === "upstream")
+              .map(([key, { label, icon: Icon }]) => (
+                <SelectItem key={key} value={key}>
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </div>
+                </SelectItem>
+              ))}
+            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/50 mt-1">
+              业务往来（参与应收应付）
+            </div>
+            {Object.entries(typeMap)
+              .filter(([_, v]) => v.role === "business_partner")
+              .map(([key, { label, icon: Icon }]) => (
+                <SelectItem key={key} value={key}>
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-4 w-4" />
+                    {label}
+                  </div>
+                </SelectItem>
+              ))}
           </SelectContent>
         </Select>
       </div>
@@ -217,7 +239,21 @@ export function CompaniesPage() {
                 const Icon = typeInfo?.icon ?? Building2;
                 return (
                   <TableRow key={company.id}>
-                    <TableCell className="font-medium">{company.name}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex flex-col gap-0.5">
+                        <span>{company.name}</span>
+                        {company.business_role === "upstream" && (
+                          <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit">
+                            上游溯源
+                          </span>
+                        )}
+                        {company.business_role === "business_partner" && (
+                          <span className="text-[10px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded w-fit">
+                            业务往来
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-sm">{company.chinese_name ?? "-"}</TableCell>
                     <TableCell>
                       <Badge variant="secondary" className={typeInfo?.color ?? ""}>
