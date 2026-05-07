@@ -162,6 +162,8 @@ interface Transaction {
   category: string;
   amount: string;
   currency: string;
+  from_account_id: number | null;
+  to_account_id: number | null;
   counterparty_name: string | null;
   reference_no: string | null;
   description: string | null;
@@ -1455,7 +1457,7 @@ function ExchangeTab() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7 text-red-500"
-                        onClick={() => handleDelete(r.id)}
+                        onClick={() => { setDeleteRecordId(r.id); setDeleteOpen(true); }}
                         title="删除"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -1520,6 +1522,8 @@ function TransactionsTab() {
   const [bankAccountId, setBankAccountId] = useState("");
   const [selectedSaleId, setSelectedSaleId] = useState("");
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Reset on open
   useEffect(() => {
@@ -1565,13 +1569,20 @@ function TransactionsTab() {
   });
   const salesList = salesData || [];
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("确定删除？")) return;
+  const handleDeleteClick = (transaction: Transaction) => {
+    setDeleteTarget(transaction);
+    setDeleteOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await api.delete(`/v1/finance/transactions/${id}`);
+      await api.delete(`/v1/finance/transactions/${deleteTarget.id}`);
       toast.success("已删除");
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
+      setDeleteOpen(false);
+      setDeleteTarget(null);
     } catch (error: any) {
       toast.error(error.response?.data?.detail ?? "删除失败");
     }
@@ -1622,19 +1633,24 @@ function TransactionsTab() {
     setCounterparty(transaction.counterparty_name || "");
     setReferenceNo(transaction.reference_no || "");
     setDescription(transaction.description || "");
-    setBankAccountId("");
+    setBankAccountId(transaction.from_account_id ? String(transaction.from_account_id) : transaction.to_account_id ? String(transaction.to_account_id) : "");
     setSelectedSaleId("");
     setFormOpen(true);
   };
 
-  // Income categories
+  // 收入分类 key 列表（必须与 transactionCategoryMap 一致）
+  const incomeCategoryKeys = [
+    "main_business_revenue",
+    "other_business_revenue",
+    "non_business_revenue",
+    "fund_pooling",
+  ];
+
   const incomeCategories = Object.entries(transactionCategoryMap).filter(([k]) =>
-    ["sales_income", "investment", "loan", "interest"].includes(k)
+    incomeCategoryKeys.includes(k)
   );
-  // Expense categories
   const expenseCategories = Object.entries(transactionCategoryMap).filter(
-    ([k]) =>
-      !["sales_income", "investment", "loan", "interest"].includes(k)
+    ([k]) => !incomeCategoryKeys.includes(k)
   );
 
   return (
@@ -1660,7 +1676,7 @@ function TransactionsTab() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <Label>类型</Label>
-                <Select value={type} onValueChange={(v) => setType(v ?? "")}>
+                <Select value={type} onValueChange={(v) => { setType(v ?? ""); setCategory(""); }}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -1764,6 +1780,26 @@ function TransactionsTab() {
         </DialogContent>
       </Dialog>
 
+      {/* 删除确认 */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+          </DialogHeader>
+          <p className="py-4">
+            确定删除交易流水「{deleteTarget?.transaction_date} · {transactionTypeMap[deleteTarget?.type ?? ""]} · {transactionCategoryMap[deleteTarget?.category ?? ""]} · ¥{deleteTarget?.amount}」吗？
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDeleteOpen(false); setDeleteTarget(null); }}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmDelete}>
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="border rounded-lg">
         <Table>
           <TableHeader>
@@ -1832,7 +1868,7 @@ function TransactionsTab() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7 text-red-500"
-                        onClick={() => handleDelete(r.id)}
+                        onClick={() => handleDeleteClick(r)}
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>

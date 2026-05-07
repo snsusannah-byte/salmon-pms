@@ -714,8 +714,8 @@ class TransactionRecord(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     transaction_date: Mapped[Date] = mapped_column(Date, nullable=False)
-    type: Mapped[TransactionType] = mapped_column(Enum(TransactionType), nullable=False)
-    category: Mapped[TransactionCategory] = mapped_column(Enum(TransactionCategory), nullable=False)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="CNY")
     
