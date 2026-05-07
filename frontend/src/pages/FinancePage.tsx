@@ -1522,6 +1522,7 @@ function TransactionsTab() {
   const [currency, setCurrency] = useState("CNY");
   const [bankAccountId, setBankAccountId] = useState("");
   const [selectedSaleIds, setSelectedSaleIds] = useState<number[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1544,14 +1545,29 @@ function TransactionsTab() {
   });
   const bankAccounts = bankAccountsData || [];
 
-  // Fetch sales for counterparty auto-fill
-  const { data: salesData } = useQuery({
-    queryKey: ["sales-for-transaction"],
+  // Fetch customers
+  const { data: customersData } = useQuery({
+    queryKey: ["customers-for-transaction"],
     queryFn: async () => {
-      const res = await api.get("/v1/sales/whole-fish?limit=500");
+      const res = await api.get("/v1/companies?type=customer");
       return res.data?.items || [];
     },
-    enabled: type === "income" && formOpen,
+    enabled: category === "main_business_revenue" && formOpen,
+  });
+  const customersList = customersData || [];
+
+  // Fetch sales for counterparty auto-fill (按客户筛选)
+  const { data: salesData } = useQuery({
+    queryKey: ["sales-for-transaction", selectedCustomerId],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (selectedCustomerId) params.set("customer_id", selectedCustomerId);
+      params.set("status", "pending,partial_paid");
+      params.set("limit", "500");
+      const res = await api.get(`/v1/sales/whole-fish?${params.toString()}`);
+      return res.data?.items || [];
+    },
+    enabled: type === "income" && category === "main_business_revenue" && formOpen,
   });
   const salesList = (salesData || []).filter((s: any) => {
     const remaining = Number(s.net_amount ?? 0) - Number(s.paid_amount ?? 0);
@@ -1742,41 +1758,65 @@ function TransactionsTab() {
                 </Select>
               </div>
             </div>
-            {type === "income" && (
-              <div>
-                <Label>关联销售单（可多选）</Label>
-                <div className="border rounded-md p-2 space-y-1 max-h-[200px] overflow-y-auto">
-                  {salesList.length === 0 && (
-                    <p className="text-xs text-muted-foreground py-2">暂无未付款销售单</p>
-                  )}
-                  {salesList.map((s: any) => {
-                    const remaining = Number(s.net_amount ?? 0) - Number(s.paid_amount ?? 0);
-                    const isSelected = selectedSaleIds.includes(s.id);
-                    return (
-                      <div key={s.id} className="flex items-center gap-2 py-1">
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedSaleIds((prev) => [...prev, s.id]);
-                              if (s.customer_name && !counterparty) setCounterparty(s.customer_name);
-                            } else {
-                              setSelectedSaleIds((prev) => prev.filter((id) => id !== s.id));
-                            }
-                          }}
-                        />
-                        <div className="flex-1 text-xs">
-                          <span className="font-medium">{s.sale_no ?? `#${s.id}`}</span>
-                          <span className="text-muted-foreground"> · {s.customer_name ?? "-"} · 待付 ¥{remaining.toFixed(0)}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
+            {type === "income" && category === "main_business_revenue" && (
+              <div className="space-y-3">
+                <div>
+                  <Label>选择客户</Label>
+                  <Select value={selectedCustomerId} onValueChange={(v) => {
+                    setSelectedCustomerId(v ?? "");
+                    setSelectedSaleIds([]); // 切换客户时清空已选销售单
+                    if (v) {
+                      const customer = customersList.find((c: any) => String(c.id) === v);
+                      if (customer && customer.name) setCounterparty(customer.name);
+                    }
+                  }}>
+                    <SelectTrigger><SelectValue placeholder="选择客户" /></SelectTrigger>
+                    <SelectContent>
+                      {customersList.map((c: any) => (
+                        <SelectItem key={c.id} value={String(c.id)} className="text-xs">
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                {selectedSaleIds.length > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    已选 {selectedSaleIds.length} 单，自动按各单剩余金额分配
-                  </p>
+                
+                {selectedCustomerId && (
+                  <div>
+                    <Label>关联销售单（可多选）</Label>
+                    <div className="border rounded-md p-2 space-y-1 max-h-[200px] overflow-y-auto">
+                      {salesList.length === 0 && (
+                        <p className="text-xs text-muted-foreground py-2">该客户暂无未付款销售单</p>
+                      )}
+                      {salesList.map((s: any) => {
+                        const remaining = Number(s.net_amount ?? 0) - Number(s.paid_amount ?? 0);
+                        const isSelected = selectedSaleIds.includes(s.id);
+                        return (
+                          <div key={s.id} className="flex items-center gap-2 py-1">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedSaleIds((prev) => [...prev, s.id]);
+                                } else {
+                                  setSelectedSaleIds((prev) => prev.filter((id) => id !== s.id));
+                                }
+                              }}
+                            />
+                            <div className="flex-1 text-xs">
+                              <span className="font-medium">{s.sale_no ?? `#${s.id}`}</span>
+                              <span className="text-muted-foreground"> · 待付 ¥{remaining.toFixed(0)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {selectedSaleIds.length > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        已选 {selectedSaleIds.length} 单，自动按各单剩余金额分配
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             )}
