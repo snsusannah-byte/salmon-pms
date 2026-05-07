@@ -56,6 +56,16 @@ async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
             total_weight_kg=inv.total_weight_kg,
         ))
 
+    # 计算已售箱数
+    from app.models import WholeFishSale
+    from sqlalchemy import func as sa_func
+    sold_result = await db.execute(
+        select(sa_func.coalesce(sa_func.sum(WholeFishSale.box_count), 0))
+        .where(WholeFishSale.batch_id == batch.id)
+    )
+    sold_boxes = sold_result.scalar() or 0
+    remaining_boxes = max(0, (batch.total_boxes or 0) - sold_boxes)
+
     return BatchResponse(
         id=batch.id,
         batch_code=batch.batch_code,
@@ -66,6 +76,7 @@ async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
         total_amount_usd=batch.total_amount_usd,
         total_boxes=batch.total_boxes,
         total_weight_kg=batch.total_weight_kg,
+        remaining_boxes=remaining_boxes,
         notes=batch.notes,
         created_at=batch.created_at,
         updated_at=batch.updated_at,

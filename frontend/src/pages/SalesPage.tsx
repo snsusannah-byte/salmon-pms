@@ -716,6 +716,7 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
   const { data: batchesData } = useQuery({
     queryKey: ["batches-for-sale"], queryFn: async () => { const res = await api.get("/v1/batches/?status=open&limit=500"); return res.data; }, enabled: open,
   });
+  const availableBatches = (batchesData?.items || []).filter((b: any) => (b.remaining_boxes || 0) > 0);
   const { data: customersData } = useQuery({
     queryKey: ["customers-for-sale"], queryFn: async () => { const res = await api.get("/v1/companies/?type=customer&limit=500"); return res.data; }, enabled: open,
   });
@@ -819,7 +820,7 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
                     {batchesData?.items?.find((b: any) => String(b.id) === batchId)?.batch_name ?? <span className="text-muted-foreground">选择批号</span>}
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent>{batchesData?.items?.map((b: any) => <SelectItem key={b.id} value={String(b.id)}>{b.batch_name} <span className="text-muted-foreground text-xs">({b.batch_code})</span></SelectItem>)}</SelectContent>
+                <SelectContent>{availableBatches.map((b: any) => <SelectItem key={b.id} value={String(b.id)}>{b.batch_name} <span className="text-muted-foreground text-xs">({b.batch_code})</span></SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>

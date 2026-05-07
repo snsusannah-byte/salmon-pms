@@ -53,6 +53,7 @@ class BatchResponse(BatchBase):
     total_amount_usd: Optional[Decimal] = None
     total_boxes: int = 0
     total_weight_kg: Optional[Decimal] = None
+    remaining_boxes: int = 0  # 剩余可用箱数（入库 - 已售）
     invoice_nos: str = ""  # 关联发票号，如 8353&8468
     invoice_count: int = 0
     invoices: List[BatchInvoiceInfo] = []
