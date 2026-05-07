@@ -1575,6 +1575,10 @@ function TransactionsTab() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!date || !type || !category || !amount || Number(amount) <= 0) {
+      toast.error("请填写完整信息，金额必须大于0");
+      return;
+    }
     try {
       const payload: any = {
         transaction_date: date,
@@ -1604,7 +1608,11 @@ function TransactionsTab() {
       setFormOpen(false);
       setEditingTransaction(null);
     } catch (error: any) {
-      toast.error(error.response?.data?.detail ?? (editingTransaction ? "更新失败" : "创建失败"));
+      const detail = error.response?.data?.detail;
+      const msg = Array.isArray(detail)
+        ? detail.map((d: any) => d.msg).join("; ")
+        : (detail ?? (editingTransaction ? "更新失败" : "创建失败"));
+      toast.error(msg);
     }
   };
 
