@@ -410,6 +410,46 @@ function BatchReportsTab() {
                       <td style="text-align:right">${fmt$(detailData.total_sales_net)}</td>
                     </tr>
                   ` : '';
+                  const purchaseRows = (detailData.invoices || []).map((inv: any) => {
+                    const prodRows = (inv.products || []).map((p: any) => `
+                      <tr>
+                        <td>${p.product_spec || '-'}</td>
+                        <td style="text-align:right">${p.box_count || 0}</td>
+                        <td style="text-align:right">${Number(p.net_weight_kg || 0).toLocaleString()}</td>
+                        <td style="text-align:right">$${Number(p.unit_price || 0).toFixed(2)}</td>
+                        <td style="text-align:right">$${Number(p.total_amount || 0).toLocaleString()}</td>
+                      </tr>
+                    `).join('');
+                    const prodSummary = inv.products && inv.products.length > 0 ? `
+                      <tr style="font-weight:bold;background:#f5f5f5">
+                        <td style="text-align:left">${isEn ? 'Total' : '合计'}</td>
+                        <td style="text-align:right">${inv.total_boxes || 0}</td>
+                        <td style="text-align:right">${Number(inv.total_weight_kg || 0).toLocaleString()}</td>
+                        <td style="text-align:right">—</td>
+                        <td style="text-align:right">$${Number(inv.total_amount_usd || 0).toLocaleString()}</td>
+                      </tr>
+                    ` : '';
+                    return `
+                      <div style="margin-bottom:6pt">
+                        <div style="font-size:8.5pt;font-weight:600;margin-bottom:2pt">${inv.invoice_no}${inv.products && inv.products.length > 0 ? ' · ' + inv.products[0].product_name : ''}</div>
+                        <table style="width:100%;border-collapse:collapse;font-size:8pt">
+                          <thead>
+                            <tr style="background:#f5f5f5">
+                              <th style="text-align:left;border:1px solid #ddd;padding:1pt 3pt">${isEn ? 'Spec' : '规格'}</th>
+                              <th style="text-align:right;border:1px solid #ddd;padding:1pt 3pt">${isEn ? 'Boxes' : '箱数'}</th>
+                              <th style="text-align:right;border:1px solid #ddd;padding:1pt 3pt">${isEn ? 'Weight(kg)' : '重量(kg)'}</th>
+                              <th style="text-align:right;border:1px solid #ddd;padding:1pt 3pt">${isEn ? 'Price' : '单价'}</th>
+                              <th style="text-align:right;border:1px solid #ddd;padding:1pt 3pt">${isEn ? 'Amount' : '金额'}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            ${prodRows}
+                            ${prodSummary}
+                          </tbody>
+                        </table>
+                      </div>
+                    `;
+                  }).join('');
                   const cb = detailData.clearance_breakdown || {};
                   const hasClearance = Number(cb.clearance_fee || 0) > 0 || Number(cb.freight_fee || 0) > 0 || Number(cb.other_costs || 0) > 0 || Number(cb.inspection_fee || 0) > 0 || Number(cb.quarantine_fee || 0) > 0;
                   let clearanceRows = '';
@@ -467,9 +507,15 @@ function BatchReportsTab() {
   <div class="grid-2">
     <div class="section">
       <div class="section-title blue">📦 ${t.purchaseInfo}</div>
-      <div class="row"><span>金额(USD)</span><span>$${Number(detailData.total_purchase_usd || 0).toLocaleString()}</span></div>
-      <div class="row"><span>重量</span><span>${Number(detailData.total_weight_kg || 0).toLocaleString()} kg</span></div>
-      <div class="row"><span>箱数</span><span>${detailData.total_boxes || 0}</span></div>
+      ${purchaseRows}
+      <div class="row bold" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt">
+        <span>${isEn ? 'Batch Total' : '批次采购合计'}</span>
+        <span>$${Number(detailData.total_purchase_usd || 0).toLocaleString()}</span>
+      </div>
+      <div class="row" style="font-size:8pt">
+        <span>${isEn ? 'Total Weight / Boxes' : '总重量 / 箱数'}</span>
+        <span>${Number(detailData.total_weight_kg || 0).toLocaleString()} kg / ${detailData.total_boxes || 0} ${isEn ? 'boxes' : '箱'}</span>
+      </div>
     </div>
     <div class="section">
       <div class="section-title green">💱 ${t.exchange}</div>
@@ -560,11 +606,72 @@ function BatchReportsTab() {
 
               {/* === 第二行：采购信息 + 购汇登记 === */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="border rounded-lg p-2.5 space-y-1.5">
+                <div className="border rounded-lg p-2.5 space-y-2">
                   <p className="text-xs font-semibold text-blue-600">{detailLang === "zh" ? "采购信息" : "Purchase Info"}</p>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "金额(USD)" : "Amount(USD)"}</span><span>${Number(detailData.total_purchase_usd || 0).toLocaleString()}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "重量" : "Weight"}</span><span>{Number(detailData.total_weight_kg || 0).toLocaleString()} kg</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "箱数" : "Boxes"}</span><span>{detailData.total_boxes || 0}</span></div>
+                  {detailData.invoices && detailData.invoices.length > 0 ? (
+                    <div className="space-y-2">
+                      {detailData.invoices.map((inv: any, idx: number) => (
+                        <div key={idx} className={idx > 0 ? "pt-2 border-t" : ""}>
+                          {/* 发票号 + 产品名称 */}
+                          <div className="text-xs font-medium text-slate-700 mb-1">
+                            {inv.invoice_no}
+                            {inv.products && inv.products.length === 1 && (
+                              <span className="text-muted-foreground font-normal ml-1">· {inv.products[0].product_name}</span>
+                            )}
+                            {inv.products && inv.products.length > 1 && (
+                              <span className="text-muted-foreground font-normal ml-1">· {inv.products[0].product_name} 等</span>
+                            )}
+                          </div>
+                          {/* 产品表格 */}
+                          {inv.products && inv.products.length > 0 ? (
+                            <table className="w-full text-xs border-collapse">
+                              <thead>
+                                <tr className="bg-slate-50">
+                                  <th className="text-left px-1 py-0.5 font-medium text-muted-foreground border">{detailLang === "zh" ? "规格" : "Spec"}</th>
+                                  <th className="text-right px-1 py-0.5 font-medium text-muted-foreground border">{detailLang === "zh" ? "箱数" : "Boxes"}</th>
+                                  <th className="text-right px-1 py-0.5 font-medium text-muted-foreground border">{detailLang === "zh" ? "重量(kg)" : "Weight"}</th>
+                                  <th className="text-right px-1 py-0.5 font-medium text-muted-foreground border">{detailLang === "zh" ? "单价" : "Price"}</th>
+                                  <th className="text-right px-1 py-0.5 font-medium text-muted-foreground border">{detailLang === "zh" ? "金额" : "Amount"}</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {inv.products.map((p: any, pidx: number) => (
+                                  <tr key={pidx} className="hover:bg-slate-50/50">
+                                    <td className="text-left px-1 py-0.5 border">{p.product_spec || "-"}</td>
+                                    <td className="text-right px-1 py-0.5 border">{p.box_count || 0}</td>
+                                    <td className="text-right px-1 py-0.5 border">{Number(p.net_weight_kg || 0).toLocaleString()}</td>
+                                    <td className="text-right px-1 py-0.5 border">${Number(p.unit_price || 0).toFixed(2)}</td>
+                                    <td className="text-right px-1 py-0.5 border font-medium">${Number(p.total_amount || 0).toLocaleString()}</td>
+                                  </tr>
+                                ))}
+                                {/* 发票合计行 */}
+                                <tr className="font-semibold bg-slate-50">
+                                  <td className="text-left px-1 py-0.5 border">{detailLang === "zh" ? "合计" : "Total"}</td>
+                                  <td className="text-right px-1 py-0.5 border">{inv.total_boxes || 0}</td>
+                                  <td className="text-right px-1 py-0.5 border">{Number(inv.total_weight_kg || 0).toLocaleString()}</td>
+                                  <td className="text-right px-1 py-0.5 border">—</td>
+                                  <td className="text-right px-1 py-0.5 border">${Number(inv.total_amount_usd || 0).toLocaleString()}</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          ) : (
+                            <div className="text-xs text-muted-foreground py-1">{detailLang === "zh" ? "无产品明细" : "No product details"}</div>
+                          )}
+                        </div>
+                      ))}
+                      {/* 批次采购汇总 */}
+                      <div className="flex justify-between text-xs font-semibold border-t pt-1.5 mt-1">
+                        <span className="text-slate-700">{detailLang === "zh" ? "批次采购合计" : "Batch Total"}</span>
+                        <span>${Number(detailData.total_purchase_usd || 0).toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>{detailLang === "zh" ? "总重量" : "Total Weight"}</span>
+                        <span>{Number(detailData.total_weight_kg || 0).toLocaleString()} kg · {detailData.total_boxes || 0} {detailLang === "zh" ? "箱" : "boxes"}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">{detailLang === "zh" ? "无采购数据" : "No purchase data"}</div>
+                  )}
                 </div>
                 <div className="border rounded-lg p-2.5 space-y-1.5">
                   <p className="text-xs font-semibold text-green-600">{detailLang === "zh" ? "购汇登记" : "Exchange"}</p>

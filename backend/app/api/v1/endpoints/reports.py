@@ -669,6 +669,19 @@ async def get_batch_report(
         ff = await db.execute(select(Company).where(Company.id == inv.fish_farm_id))
         ff_company = ff.scalar_one_or_none()
 
+        # 组装产品明细
+        product_items = [
+            {
+                "product_name": p.product_name,
+                "product_spec": p.product_spec,
+                "box_count": p.box_count or 0,
+                "net_weight_kg": round(_to_decimal(p.net_weight_kg), 3),
+                "unit_price": round(_to_decimal(p.unit_price), 4),
+                "total_amount": round(_to_decimal(p.total_amount), 2),
+            }
+            for p in prods
+        ]
+
         invoice_details.append(BatchReportInvoiceDetail(
             invoice_id=inv.id,
             invoice_no=inv.invoice_no,
@@ -695,6 +708,7 @@ async def get_batch_report(
             sales_weight=round(inv_sales_weight, 3),
             shrinkage=inv_shrinkage,
             net_profit=round(inv_net_profit, 2),
+            products=product_items,
         ))
 
     # 默认汇率

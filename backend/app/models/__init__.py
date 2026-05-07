@@ -193,7 +193,7 @@ class Salesperson(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     phone: Mapped[Optional[str]] = mapped_column(String(50))
     email: Mapped[Optional[str]] = mapped_column(String(100))
-    commission_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("0"))  # 默认提成比例 %
+    commission_rate: Mapped[Decimal] = mapped_column(Numeric(8, 2), default=Decimal("0"))  # 默认提成单价 元/kg
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
@@ -207,8 +207,9 @@ class CommissionRecord(Base, TimestampMixin):
     sale_id: Mapped[int] = mapped_column(ForeignKey("whole_fish_sales.id"), nullable=False)
     sale_date: Mapped[Date] = mapped_column(Date, nullable=False)
     sale_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 销售金额
-    commission_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)  # 实际提成比例
-    commission_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 提成金额
+    weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False, default=Decimal("0"))  # 销售重量(kg)
+    commission_rate: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)  # 实际提成单价 元/kg
+    commission_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 提成金额 = weight_kg * rate
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending / paid
     paid_date: Mapped[Optional[Date]] = mapped_column(Date)
     notes: Mapped[Optional[str]] = mapped_column(Text)

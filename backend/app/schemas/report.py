@@ -67,6 +67,17 @@ class BatchReportListResponse(BaseModel):
     limit: int
 
 
+class InvoiceProductItem(BaseModel):
+    """发票产品明细项"""
+    model_config = ConfigDict(from_attributes=True)
+    product_name: str
+    product_spec: str
+    box_count: int
+    net_weight_kg: Decimal
+    unit_price: Decimal
+    total_amount: Decimal
+
+
 class BatchReportInvoiceDetail(BaseModel):
     """批次财报中发票明细"""
     model_config = ConfigDict(from_attributes=True)
@@ -95,6 +106,7 @@ class BatchReportInvoiceDetail(BaseModel):
     sales_weight: Decimal = Decimal("0")
     shrinkage: Decimal = Decimal("0")
     net_profit: Decimal = Decimal("0")
+    products: List[InvoiceProductItem] = []
 
 
 class BatchReportDetail(BaseModel):

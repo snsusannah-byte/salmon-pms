@@ -135,6 +135,9 @@ class SalesService:
                 )
                 db.add(item)
         
+        # 自动生成提成记录
+        await SalesService._sync_commission_record(db, sale)
+        
         await db.commit()
         await db.refresh(sale)
         return sale
@@ -195,6 +198,9 @@ class SalesService:
                 sale.box_count = total_box_count
                 sale.unit_price = total_amount / total_weight
         
+        # 同步提成记录
+        await SalesService._sync_commission_record(db, sale)
+        
         await db.commit()
         await db.refresh(sale)
         return sale
@@ -206,6 +212,44 @@ class SalesService:
             raise HTTPException(status_code=400, detail="销售记录已锁定，不能删除")
         await db.delete(sale)
         await db.commit()
+
+    @staticmethod
+    async def _sync_commission_record(db: AsyncSession, sale: WholeFishSale):
+        """同步/更新销售对应的提成记录（按元/kg计算）"""
+        from sqlalchemy import delete
+        from app.models import CommissionRecord, Salesperson
+        
+        # 删除旧的提成记录
+        await db.execute(
+            delete(CommissionRecord).where(CommissionRecord.sale_id == sale.id)
+        )
+        
+        # 如果没有业务员，不生成提成记录
+        if not sale.salesperson_id:
+            return
+        
+        # 获取业务员提成单价
+        result = await db.execute(select(Salesperson).where(Salesperson.id == sale.salesperson_id))
+        sp = result.scalar_one_or_none()
+        if not sp or not sp.is_active:
+            return
+        
+        rate = Decimal(str(sp.commission_rate or 0))
+        weight = Decimal(str(sale.weight_kg or 0))
+        commission_amount = (weight * rate).quantize(Decimal("0.01"))
+        
+        record = CommissionRecord(
+            salesperson_id=sale.salesperson_id,
+            sale_id=sale.id,
+            sale_date=sale.sale_date,
+            sale_amount=sale.net_amount,
+            weight_kg=weight,
+            commission_rate=rate,
+            commission_amount=commission_amount,
+            status="pending",
+        )
+        db.add(record)
+        await db.flush()
 
     # ============== 收款记录 ==============
 

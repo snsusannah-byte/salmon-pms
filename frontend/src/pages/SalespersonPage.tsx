@@ -28,7 +28,7 @@ interface Salesperson {
   name: string;
   phone: string | null;
   email: string | null;
-  commission_rate: number; // 提成比例 %
+  commission_rate: number; // 提成单价 元/kg
   is_active: boolean;
   notes: string | null;
   created_at: string;
@@ -172,7 +172,7 @@ export function SalespersonPage() {
               <TableHead>姓名</TableHead>
               <TableHead>电话</TableHead>
               <TableHead>邮箱</TableHead>
-              <TableHead>提成比例</TableHead>
+              <TableHead>提成单价</TableHead>
               <TableHead>状态</TableHead>
               <TableHead>备注</TableHead>
               <TableHead className="w-[120px]">操作</TableHead>
@@ -202,7 +202,7 @@ export function SalespersonPage() {
                   </TableCell>
                   <TableCell className="text-sm">{sp.phone ?? "-"}</TableCell>
                   <TableCell className="text-sm">{sp.email ?? "-"}</TableCell>
-                  <TableCell className="text-sm font-medium">{sp.commission_rate}%</TableCell>
+                  <TableCell className="text-sm font-medium">¥{sp.commission_rate}/kg</TableCell>
                   <TableCell>
                     {sp.is_active ? (
                       <Badge variant="secondary" className="bg-green-100 text-green-800">在职</Badge>
@@ -250,8 +250,8 @@ export function SalespersonPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>默认提成比例 (%)</Label>
-              <Input type="number" step="0.01" value={formRate} onChange={(e) => setFormRate(e.target.value)} placeholder="如: 2.5" />
+              <Label>默认提成单价 (元/kg)</Label>
+              <Input type="number" step="0.01" value={formRate} onChange={(e) => setFormRate(e.target.value)} placeholder="如: 0.5" />
             </div>
             <div className="space-y-2">
               <Label>备注</Label>

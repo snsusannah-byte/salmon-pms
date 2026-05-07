@@ -211,6 +211,7 @@ async def list_commissions(
                 "sale_date": r.sale_date.isoformat() if r.sale_date else None,
                 "customer_name": "-",  # TODO: 关联销售记录获取客户名称
                 "sale_amount": float(r.sale_amount),
+                "weight_kg": float(r.weight_kg),
                 "commission_rate": float(r.commission_rate),
                 "commission_amount": float(r.commission_amount),
                 "status": r.status,

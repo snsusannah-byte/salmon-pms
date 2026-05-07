@@ -34,7 +34,8 @@ interface CommissionRecord {
   sale_date: string;
   customer_name: string;
   sale_amount: number;
-  commission_rate: number;
+  weight_kg: number;
+  commission_rate: number; // 元/kg
   commission_amount: number;
   status: string;
   paid_date: string | null;
@@ -208,8 +209,9 @@ export function CommissionPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>业务员</TableHead>
-                  <TableHead>默认提成比例</TableHead>
+                  <TableHead>默认提成单价</TableHead>
                   <TableHead>本月销售额</TableHead>
+                  <TableHead>本月销售重量</TableHead>
                   <TableHead>本月提成</TableHead>
                   <TableHead>待发放</TableHead>
                   <TableHead>已发放</TableHead>
@@ -220,6 +222,7 @@ export function CommissionPage() {
                 {salespersons?.map((sp) => {
                   const spRecords = records?.items.filter((r) => r.salesperson_id === sp.id) ?? [];
                   const totalSale = spRecords.reduce((sum, r) => sum + r.sale_amount, 0);
+                  const totalWeight = spRecords.reduce((sum, r) => sum + r.weight_kg, 0);
                   const totalCommission = spRecords.reduce((sum, r) => sum + r.commission_amount, 0);
                   const pending = spRecords
                     .filter((r) => r.status === "pending")
@@ -235,8 +238,9 @@ export function CommissionPage() {
                           {sp.name}
                         </div>
                       </TableCell>
-                      <TableCell>{sp.commission_rate}%</TableCell>
+                      <TableCell>¥{sp.commission_rate}/kg</TableCell>
                       <TableCell>¥{totalSale.toLocaleString()}</TableCell>
+                      <TableCell>{totalWeight.toFixed(1)} kg</TableCell>
                       <TableCell className="font-medium">
                         ¥{totalCommission.toLocaleString()}
                       </TableCell>
@@ -304,8 +308,8 @@ export function CommissionPage() {
                   <TableHead>日期</TableHead>
                   <TableHead>业务员</TableHead>
                   <TableHead>客户</TableHead>
-                  <TableHead>销售金额</TableHead>
-                  <TableHead>提成比例</TableHead>
+                  <TableHead>销售重量</TableHead>
+                  <TableHead>提成单价</TableHead>
                   <TableHead>提成金额</TableHead>
                   <TableHead>状态</TableHead>
                 </TableRow>
@@ -337,8 +341,8 @@ export function CommissionPage() {
                       <TableCell className="text-sm">{r.sale_date}</TableCell>
                       <TableCell className="font-medium">{r.salesperson_name}</TableCell>
                       <TableCell>{r.customer_name}</TableCell>
-                      <TableCell>¥{r.sale_amount.toLocaleString()}</TableCell>
-                      <TableCell>{r.commission_rate}%</TableCell>
+                      <TableCell>{r.weight_kg?.toFixed(1) ?? 0} kg</TableCell>
+                      <TableCell>¥{r.commission_rate}/kg</TableCell>
                       <TableCell className="font-medium">
                         ¥{r.commission_amount.toLocaleString()}
                       </TableCell>

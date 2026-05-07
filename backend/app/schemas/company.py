@@ -129,7 +129,7 @@ class SalespersonBase(BaseModel):
     name: str = Field(..., max_length=100, description="姓名")
     phone: Optional[str] = Field(None, max_length=50, description="电话")
     email: Optional[str] = Field(None, max_length=100, description="邮箱")
-    commission_rate: Decimal = Field(0, ge=0, description="默认提成比例 %")
+    commission_rate: Decimal = Field(Decimal("0"), ge=0, description="默认提成单价 元/kg")
     is_active: bool = Field(True, description="是否在职")
     notes: Optional[str] = Field(None, description="备注")
 
@@ -144,7 +144,7 @@ class SalespersonUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100)
     phone: Optional[str] = Field(None, max_length=50)
     email: Optional[str] = Field(None, max_length=100)
-    commission_rate: Optional[Decimal] = Field(None, ge=0)
+    commission_rate: Optional[Decimal] = Field(None, ge=0, description="提成单价 元/kg")
     is_active: Optional[bool] = None
     notes: Optional[str] = None
 
@@ -166,6 +166,7 @@ class CommissionResponse(BaseModel):
     sale_date: Optional[str] = None
     customer_name: Optional[str] = None
     sale_amount: float
+    weight_kg: float
     commission_rate: float
     commission_amount: float
     status: str
