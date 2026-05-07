@@ -1525,21 +1525,6 @@ function TransactionsTab() {
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  // Reset on open
-  useEffect(() => {
-    if (formOpen && !editingTransaction) {
-      setDate("");
-      setAmount("");
-      setCounterparty("");
-      setDescription("");
-      setReferenceNo("");
-      setCurrency("CNY");
-      setBankAccountId("");
-      setSelectedSaleId("");
-      setEditingTransaction(null);
-    }
-  }, [formOpen, editingTransaction]);
-
   const { data, isLoading } = useQuery<Transaction[]>({
     queryKey: ["transactions"],
     queryFn: async () => {
@@ -1656,7 +1641,20 @@ function TransactionsTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end gap-2">
-        <Button size="sm" onClick={() => { setEditingTransaction(null); setFormOpen(true); }}>
+        <Button size="sm" onClick={() => {
+          setEditingTransaction(null);
+          setDate("");
+          setType("expense");
+          setCategory("");
+          setAmount("");
+          setCounterparty("");
+          setDescription("");
+          setReferenceNo("");
+          setCurrency("CNY");
+          setBankAccountId("");
+          setSelectedSaleId("");
+          setFormOpen(true);
+        }}>
           <Plus className="h-4 w-4 mr-1" />
           新增流水
         </Button>
@@ -1811,19 +1809,20 @@ function TransactionsTab() {
               <TableHead>币种</TableHead>
               <TableHead>对方</TableHead>
               <TableHead>参考号</TableHead>
+              <TableHead>描述</TableHead>
               <TableHead className="w-[60px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={9} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : !data?.length ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -1853,6 +1852,9 @@ function TransactionsTab() {
                   <TableCell>{r.counterparty_name ?? "-"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {r.reference_no ?? "-"}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground max-w-[150px] truncate">
+                    {r.description ?? "-"}
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
