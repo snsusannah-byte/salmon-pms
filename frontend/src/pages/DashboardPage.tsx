@@ -20,31 +20,64 @@ import {
   Package,
   BarChart3,
 } from "lucide-react";
+import {
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 
-const customsStatusMap: Record<string, { label: string; color: string }> = {
-  PENDING_SHIPMENT: { label: "未报关", color: "bg-gray-100 text-gray-800" },
-  IN_TRANSIT: { label: "运输中", color: "bg-blue-100 text-blue-800" },
-  PENDING_CUSTOMS: { label: "待报关", color: "bg-yellow-100 text-yellow-800" },
-  CUSTOMS_PROCESSING: { label: "报关中", color: "bg-orange-100 text-orange-800" },
-  CLEARED: { label: "已清关", color: "bg-green-100 text-green-800" },
-  PICKED_UP: { label: "已提货", color: "bg-purple-100 text-purple-800" },
-  // 兼容旧数据
-  pending_shipment: { label: "未报关", color: "bg-gray-100 text-gray-800" },
-  in_transit: { label: "运输中", color: "bg-blue-100 text-blue-800" },
-  pending_customs: { label: "待报关", color: "bg-yellow-100 text-yellow-800" },
-  customs_processing: { label: "报关中", color: "bg-orange-100 text-orange-800" },
-  cleared: { label: "已清关", color: "bg-green-100 text-green-800" },
-  picked_up: { label: "已提货", color: "bg-purple-100 text-purple-800" },
+const customsStatusMap: Record<string, { label: string; color: string; chartColor: string }> = {
+  PENDING_SHIPMENT: { label: "未报关", color: "bg-gray-100 text-gray-800", chartColor: "#6b7280" },
+  IN_TRANSIT: { label: "运输中", color: "bg-blue-100 text-blue-800", chartColor: "#3b82f6" },
+  PENDING_CUSTOMS: { label: "待报关", color: "bg-yellow-100 text-yellow-800", chartColor: "#eab308" },
+  CUSTOMS_PROCESSING: { label: "报关中", color: "bg-orange-100 text-orange-800", chartColor: "#f97316" },
+  CLEARED: { label: "已清关", color: "bg-green-100 text-green-800", chartColor: "#22c55e" },
+  PICKED_UP: { label: "已提货", color: "bg-purple-100 text-purple-800", chartColor: "#a855f7" },
+  pending_shipment: { label: "未报关", color: "bg-gray-100 text-gray-800", chartColor: "#6b7280" },
+  in_transit: { label: "运输中", color: "bg-blue-100 text-blue-800", chartColor: "#3b82f6" },
+  pending_customs: { label: "待报关", color: "bg-yellow-100 text-yellow-800", chartColor: "#eab308" },
+  customs_processing: { label: "报关中", color: "bg-orange-100 text-orange-800", chartColor: "#f97316" },
+  cleared: { label: "已清关", color: "bg-green-100 text-green-800", chartColor: "#22c55e" },
+  picked_up: { label: "已提货", color: "bg-purple-100 text-purple-800", chartColor: "#a855f7" },
 };
 
-const batchStatusMap: Record<string, { label: string; color: string }> = {
-  OPEN: { label: "开放", color: "bg-green-100 text-green-800" },
-  LOCKED: { label: "已锁定", color: "bg-orange-100 text-orange-800" },
-  SETTLED: { label: "已结算", color: "bg-blue-100 text-blue-800" },
-  // 兼容旧数据
-  open: { label: "开放", color: "bg-green-100 text-green-800" },
-  locked: { label: "已锁定", color: "bg-orange-100 text-orange-800" },
-  settled: { label: "已结算", color: "bg-blue-100 text-blue-800" },
+const batchStatusMap: Record<string, { label: string; color: string; chartColor: string }> = {
+  OPEN: { label: "开放", color: "bg-green-100 text-green-800", chartColor: "#22c55e" },
+  LOCKED: { label: "已锁定", color: "bg-orange-100 text-orange-800", chartColor: "#f97316" },
+  SETTLED: { label: "已结算", color: "bg-blue-100 text-blue-800", chartColor: "#3b82f6" },
+  open: { label: "开放", color: "bg-green-100 text-green-800", chartColor: "#22c55e" },
+  locked: { label: "已锁定", color: "bg-orange-100 text-orange-800", chartColor: "#f97316" },
+  settled: { label: "已结算", color: "bg-blue-100 text-blue-800", chartColor: "#3b82f6" },
+};
+
+const companyColors: Record<string, string> = {
+  processing_plant: "#3b82f6",
+  fish_farm: "#22c55e",
+  exporter: "#a855f7",
+  supplier: "#f97316",
+  customer: "#06b6d4",
+  customs_broker: "#ec4899",
+  logistics: "#6366f1",
+  internal: "#8b5cf6",
+};
+
+const companyLabels: Record<string, string> = {
+  processing_plant: "加工厂",
+  fish_farm: "渔场",
+  exporter: "出口商",
+  supplier: "供应商",
+  customer: "客户",
+  customs_broker: "报关行",
+  logistics: "物流",
+  internal: "内部",
 };
 
 export function DashboardPage() {
@@ -79,6 +112,43 @@ export function DashboardPage() {
       return res.data;
     },
   });
+
+  const { data: monthlyTrend } = useQuery({
+    queryKey: ["dashboard-monthly-trend"],
+    queryFn: async () => {
+      const res = await api.get("/v1/dashboard/invoice-monthly-trend?months=6");
+      return res.data;
+    },
+  });
+
+  // 报关状态饼图数据
+  const customsPieData =
+    customsBreakdown?.map((item: any) => ({
+      name: customsStatusMap[item.status]?.label || item.status,
+      value: item.count,
+      color: customsStatusMap[item.status]?.chartColor || "#6b7280",
+    })) || [];
+
+  // 批次状态饼图数据
+  const batchPieData = summary?.batches
+    ? [
+        { name: "开放", value: summary.batches.open || 0, color: "#22c55e" },
+        { name: "已锁定", value: summary.batches.locked || 0, color: "#f97316" },
+        { name: "已结算", value: summary.batches.settled || 0, color: "#3b82f6" },
+      ].filter((d) => d.value > 0)
+    : [];
+
+  // 主体类型柱状图数据
+  const companyBarData = summary?.companies?.breakdown
+    ? Object.entries(summary.companies.breakdown).map(([type, count]) => ({
+        name: companyLabels[type] || type,
+        count: count as number,
+        color: companyColors[type] || "#6b7280",
+      }))
+    : [];
+
+  const totalCustoms = customsPieData.reduce((sum: number, d: any) => sum + d.value, 0) || 1;
+  const totalBatches = batchPieData.reduce((sum: number, d: any) => sum + d.value, 0) || 1;
 
   return (
     <div className="space-y-6">
@@ -158,61 +228,184 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {/* 第二行：主体分布 + 报关状态 */}
+      {/* 第二行：月度趋势 + 报关状态饼图 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* 主体类型分布 */}
+        {/* 发票月度趋势 */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">主体类型分布</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-sm font-medium">发票月度趋势</CardTitle>
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-2">
-              {summary?.companies?.breakdown && Object.entries(summary.companies.breakdown).map(([type, count]) => {
-                const labels: Record<string, string> = {
-                  processing_plant: "加工厂",
-                  fish_farm: "渔场",
-                  exporter: "出口商",
-                  supplier: "供应商",
-                  customer: "客户",
-                  customs_broker: "报关行",
-                  logistics: "物流",
-                  internal: "内部",
-                };
-                return (
-                  <div key={type} className="flex items-center justify-between p-2 bg-muted/50 rounded-md">
-                    <span className="text-sm text-muted-foreground">{labels[type] ?? type}</span>
-                    <span className="text-sm font-semibold">{count as number}</span>
-                  </div>
-                );
-              })}
-            </div>
+          <CardContent className="h-[260px]">
+            {monthlyTrend?.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis
+                    dataKey="month"
+                    tick={{ fontSize: 12 }}
+                    stroke="#6b7280"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 12 }}
+                    stroke="#6b7280"
+                    tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                  />
+                  <Tooltip
+                    formatter={(value: any) => [`$${Number(value).toLocaleString()}`, "金额"]}
+                    contentStyle={{ borderRadius: "8px", fontSize: "12px" }}
+                  />
+                  <Bar dataKey="amount" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                暂无月度数据
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* 报关状态分布 */}
+        {/* 报关状态饼图 */}
         <Card>
           <CardHeader>
             <CardTitle className="text-sm font-medium">报关状态分布</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {customsBreakdown?.map((item: any) => {
-                const info = customsStatusMap[item.status] ?? { label: item.status, color: "" };
-                return (
-                  <div key={item.status} className="flex items-center justify-between">
-                    <Badge variant="secondary" className={info.color}>
-                      {info.label}
-                    </Badge>
-                    <span className="text-sm font-semibold">{item.count}</span>
-                  </div>
-                );
-              })}
-            </div>
+          <CardContent className="h-[260px]">
+            {customsPieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={customsPieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {customsPieData.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value: any, name: any) => [
+                      `${value} 张 (${((value / totalCustoms) * 100).toFixed(1)}%)`,
+                      name,
+                    ]}
+                    contentStyle={{ borderRadius: "8px", fontSize: "12px" }}
+                  />
+                  <Legend
+                    verticalAlign="bottom"
+                    height={36}
+                    iconType="circle"
+                    formatter={(value: any) => (
+                      <span className="text-xs text-muted-foreground">{value}</span>
+                    )}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                暂无报关数据
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* 第三行：最近发票 + 最近批次 */}
+      {/* 第三行：批次状态 + 主体分布 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* 批次状态饼图 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">批次状态分布</CardTitle>
+          </CardHeader>
+          <CardContent className="h-[260px]">
+            {batchPieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={batchPieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {batchPieData.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value: any, name: any) => [
+                      `${value} 个 (${((value / totalBatches) * 100).toFixed(1)}%)`,
+                      name,
+                    ]}
+                    contentStyle={{ borderRadius: "8px", fontSize: "12px" }}
+                  />
+                  <Legend
+                    verticalAlign="bottom"
+                    height={36}
+                    iconType="circle"
+                    formatter={(value: any) => (
+                      <span className="text-xs text-muted-foreground">{value}</span>
+                    )}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                暂无批次数据
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 主体类型柱状图 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">主体类型分布</CardTitle>
+          </CardHeader>
+          <CardContent className="h-[260px]">
+            {companyBarData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={companyBarData}
+                  layout="vertical"
+                  margin={{ top: 10, right: 10, left: 10, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 12 }} stroke="#6b7280" />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    tick={{ fontSize: 12 }}
+                    stroke="#6b7280"
+                    width={70}
+                  />
+                  <Tooltip
+                    formatter={(value: any) => [value, "数量"]}
+                    contentStyle={{ borderRadius: "8px", fontSize: "12px" }}
+                  />
+                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                    {companyBarData.map((entry: any, index: number) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+                暂无主体数据
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 第四行：最近发票 + 最近批次 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* 最近发票 */}
         <Card>
@@ -254,9 +447,7 @@ export function DashboardPage() {
                 </Table>
               </div>
             ) : (
-              <div className="text-sm text-muted-foreground text-center py-4">
-                暂无发票
-              </div>
+              <div className="text-sm text-muted-foreground text-center py-4">暂无发票</div>
             )}
           </CardContent>
         </Card>
@@ -299,9 +490,7 @@ export function DashboardPage() {
                 </Table>
               </div>
             ) : (
-              <div className="text-sm text-muted-foreground text-center py-4">
-                暂无批次
-              </div>
+              <div className="text-sm text-muted-foreground text-center py-4">暂无批次</div>
             )}
           </CardContent>
         </Card>

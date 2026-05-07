@@ -159,3 +159,37 @@ async def get_customs_status_breakdown(db: AsyncSession = Depends(get_db)):
         {"status": row[0].value if hasattr(row[0], "value") else row[0], "count": row[1]}
         for row in result.all()
     ]
+
+
+@router.get("/invoice-monthly-trend")
+async def get_invoice_monthly_trend(
+    months: int = 12,
+    db: AsyncSession = Depends(get_db),
+):
+    """发票月度趋势（金额 + 数量）"""
+    now = datetime.now()
+    data = []
+    for i in range(months - 1, -1, -1):
+        month_date = date(now.year, now.month, 1) - timedelta(days=i * 30)
+        month_start = date(month_date.year, month_date.month, 1)
+        if month_date.month == 12:
+            month_end = date(month_date.year + 1, 1, 1)
+        else:
+            month_end = date(month_date.year, month_date.month + 1, 1)
+
+        result = await db.execute(
+            select(
+                func.count(ImportInvoice.id),
+                func.sum(ImportInvoice.total_amount_usd),
+            ).where(
+                ImportInvoice.invoice_date >= month_start,
+                ImportInvoice.invoice_date < month_end,
+            )
+        )
+        count, amount = result.one()
+        data.append({
+            "month": f"{month_date.year}-{str(month_date.month).zfill(2)}",
+            "count": count or 0,
+            "amount": float(amount or 0),
+        })
+    return data
