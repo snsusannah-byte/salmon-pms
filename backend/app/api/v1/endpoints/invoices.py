@@ -387,6 +387,24 @@ async def get_invoice(
     return result
 
 
+async def _check_invoice_batch_locked(db: AsyncSession, invoice_id: int):
+    """检查发票关联的批次是否已锁定"""
+    from sqlalchemy import select as sa_select
+    from app.models import BatchInvoice, Batch, BatchStatus
+    bi_result = await db.execute(
+        sa_select(BatchInvoice, Batch)
+        .join(Batch, BatchInvoice.batch_id == Batch.id)
+        .where(BatchInvoice.invoice_id == invoice_id)
+    )
+    for row in bi_result.all():
+        batch = row[1]
+        if batch.status == BatchStatus.LOCKED or batch.is_locked:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="该发票所属批次已锁定，禁止操作",
+            )
+
+
 @router.put("/{invoice_id}", response_model=InvoiceResponse)
 async def update_invoice(
     invoice_id: int,
@@ -401,6 +419,12 @@ async def update_invoice(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"发票 ID={invoice_id} 不存在",
             )
+        
+        # 检查发票自身锁定和批次锁定
+        if invoice.is_locked:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="发票已锁定，不能编辑")
+        
+        await _check_invoice_batch_locked(db, invoice_id)
         
         updated = await InvoiceService.update(db, invoice, data)
         
@@ -514,6 +538,10 @@ async def delete_invoice(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"发票 ID={invoice_id} 不存在",
         )
+    if invoice.is_locked:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="发票已锁定，不能删除")
+    
+    await _check_invoice_batch_locked(db, invoice_id)
     
     await InvoiceService.delete(db, invoice)
     return None
@@ -568,6 +596,12 @@ async def add_invoice_product(
     db: AsyncSession = Depends(get_db),
 ):
     """添加产品明细"""
+    # 检查发票锁定状态
+    invoice = await InvoiceService.get_by_id(db, invoice_id)
+    if invoice and invoice.is_locked:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="发票已锁定，不能编辑")
+    await _check_invoice_batch_locked(db, invoice_id)
+    
     product = await InvoiceService.add_product(db, invoice_id, data)
     return InvoiceProductResponse.model_validate(product)
 
@@ -582,6 +616,12 @@ async def update_invoice_product(
     """更新产品明细"""
     from sqlalchemy import select
     from app.models import InvoiceProduct
+    
+    # 检查发票锁定状态
+    invoice = await InvoiceService.get_by_id(db, invoice_id)
+    if invoice and invoice.is_locked:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="发票已锁定，不能编辑")
+    await _check_invoice_batch_locked(db, invoice_id)
     
     result = await db.execute(
         select(InvoiceProduct).where(
@@ -610,6 +650,12 @@ async def delete_invoice_product(
     """删除产品明细"""
     from sqlalchemy import select
     from app.models import InvoiceProduct
+    
+    # 检查发票锁定状态
+    invoice = await InvoiceService.get_by_id(db, invoice_id)
+    if invoice and invoice.is_locked:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="发票已锁定，不能删除")
+    await _check_invoice_batch_locked(db, invoice_id)
     
     result = await db.execute(
         select(InvoiceProduct).where(

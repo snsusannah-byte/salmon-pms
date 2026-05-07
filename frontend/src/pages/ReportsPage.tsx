@@ -508,14 +508,6 @@ function BatchReportsTab() {
     <div class="section">
       <div class="section-title blue">📦 ${t.purchaseInfo}</div>
       ${purchaseRows}
-      <div class="row bold" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt">
-        <span>${isEn ? 'Batch Total' : '批次采购合计'}</span>
-        <span>$${Number(detailData.total_purchase_usd || 0).toLocaleString()}</span>
-      </div>
-      <div class="row" style="font-size:8pt">
-        <span>${isEn ? 'Total Weight / Boxes' : '总重量 / 箱数'}</span>
-        <span>${Number(detailData.total_weight_kg || 0).toLocaleString()} kg / ${detailData.total_boxes || 0} ${isEn ? 'boxes' : '箱'}</span>
-      </div>
     </div>
     <div class="section">
       <div class="section-title green">💱 ${t.exchange}</div>
@@ -659,15 +651,6 @@ function BatchReportsTab() {
                           )}
                         </div>
                       ))}
-                      {/* 批次采购汇总 */}
-                      <div className="flex justify-between text-xs font-semibold border-t pt-1.5 mt-1">
-                        <span className="text-slate-700">{detailLang === "zh" ? "批次采购合计" : "Batch Total"}</span>
-                        <span>${Number(detailData.total_purchase_usd || 0).toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>{detailLang === "zh" ? "总重量" : "Total Weight"}</span>
-                        <span>{Number(detailData.total_weight_kg || 0).toLocaleString()} kg · {detailData.total_boxes || 0} {detailLang === "zh" ? "箱" : "boxes"}</span>
-                      </div>
                     </div>
                   ) : (
                     <div className="text-xs text-muted-foreground">{detailLang === "zh" ? "无采购数据" : "No purchase data"}</div>

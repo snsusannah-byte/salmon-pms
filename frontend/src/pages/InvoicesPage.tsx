@@ -409,19 +409,23 @@ export function InvoicesPage() {
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleView(invoice)} title="查看">
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(invoice)} title={invoice.is_locked ? "已锁定" : "编辑"} disabled={invoice.is_locked}>
-                          <Pencil className={cn("h-4 w-4", invoice.is_locked && "text-muted-foreground")} />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleLockToggle(invoice)} title={invoice.is_locked ? "解锁" : "锁定"}>
-                          {invoice.is_locked ? <Unlock className="h-4 w-4 text-orange-500" /> : <Lock className="h-4 w-4 text-muted-foreground" />}
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleDelete(invoice)} title="删除" disabled={invoice.is_locked}>
-                          <Trash2 className={cn("h-4 w-4", invoice.is_locked && "text-muted-foreground")} />
-                        </Button>
-                        {((invoice.is_master === true || invoice.is_master === null) || invoice.parent_invoice_id) && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500" onClick={() => handleAllocate(invoice)} title="费用分摊">
-                            <DollarSign className="h-4 w-4" />
-                          </Button>
+                        {!invoice.is_locked && (
+                          <>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(invoice)} title="编辑">
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleLockToggle(invoice)} title={invoice.is_locked ? "解锁" : "锁定"}>
+                              {invoice.is_locked ? <Unlock className="h-4 w-4 text-orange-500" /> : <Lock className="h-4 w-4 text-muted-foreground" />}
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleDelete(invoice)} title="删除">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                            {((invoice.is_master === true || invoice.is_master === null) || invoice.parent_invoice_id) && (
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500" onClick={() => handleAllocate(invoice)} title="费用分摊">
+                                <DollarSign className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </>
                         )}
                       </div>
                     </TableCell>

@@ -487,13 +487,25 @@ async def lock_batch(
     batch_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """锁定/解锁批次 - 锁定后禁止修改批次相关所有数据"""
+    """锁定/解锁批次 - 锁定后禁止修改批次相关所有数据，并级联锁定关联发票"""
     batch_result = await db.execute(select(Batch).where(Batch.id == batch_id))
     batch = batch_result.scalar_one_or_none()
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="批次不存在")
     
     batch.is_locked = not batch.is_locked
+    
+    # 级联锁定/解锁关联的发票
+    from app.models import ImportInvoice
+    batch_invoice_result = await db.execute(
+        select(ImportInvoice)
+        .join(BatchInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
+        .where(BatchInvoice.batch_id == batch_id)
+    )
+    associated_invoices = batch_invoice_result.scalars().all()
+    for inv in associated_invoices:
+        inv.is_locked = batch.is_locked
+    
     await db.commit()
     
     return {

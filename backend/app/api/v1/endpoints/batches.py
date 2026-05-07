@@ -161,11 +161,24 @@ async def lock_batch(
     batch_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """锁定批次"""
+    """锁定批次（级联锁定关联发票）"""
     batch = await BatchService.get_by_id(db, batch_id)
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="批次不存在")
     batch.status = BatchStatus.LOCKED
+    batch.is_locked = True
+    
+    # 级联锁定关联的发票
+    from app.models import ImportInvoice, BatchInvoice
+    from sqlalchemy import select as sa_select
+    batch_invoice_result = await db.execute(
+        sa_select(ImportInvoice)
+        .join(BatchInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
+        .where(BatchInvoice.batch_id == batch_id)
+    )
+    for inv in batch_invoice_result.scalars().all():
+        inv.is_locked = True
+    
     await db.commit()
     await db.refresh(batch)
     return await _build_batch_response(db, batch)
@@ -176,11 +189,24 @@ async def unlock_batch(
     batch_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """解锁批次"""
+    """解锁批次（级联解锁关联发票）"""
     batch = await BatchService.get_by_id(db, batch_id)
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="批次不存在")
     batch.status = BatchStatus.OPEN
+    batch.is_locked = False
+    
+    # 级联解锁关联的发票
+    from app.models import ImportInvoice, BatchInvoice
+    from sqlalchemy import select as sa_select
+    batch_invoice_result = await db.execute(
+        sa_select(ImportInvoice)
+        .join(BatchInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
+        .where(BatchInvoice.batch_id == batch_id)
+    )
+    for inv in batch_invoice_result.scalars().all():
+        inv.is_locked = False
+    
     await db.commit()
     await db.refresh(batch)
     return await _build_batch_response(db, batch)
