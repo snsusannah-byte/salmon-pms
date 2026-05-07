@@ -10,7 +10,7 @@ class InvoiceNotificationService:
     """进口单证通知服务"""
     
     @staticmethod
-    def generate_arrival_notification(invoice: ImportInvoice, products: list[InvoiceProduct]) -> str:
+    def generate_arrival_notification(invoice: ImportInvoice, products: list[InvoiceProduct], processing_plant_name: str = None) -> str:
         """生成预计到货通知（纯文本，微信适用）"""
         # 从 ETA 获取到货日期时间（年月日时分）
         if invoice.eta:
@@ -35,6 +35,7 @@ class InvoiceNotificationService:
             "",
             f"到货日期：{arrival_datetime}",
             f"宰杀日期：{invoice.kill_date or '-'}",
+            f"加工厂：{processing_plant_name or '-'}",
             "",
             "规格箱数：",
         ]
@@ -60,10 +61,13 @@ class InvoiceNotificationService:
     async def create_notifications(db: AsyncSession, invoice_id: int, user_id: int = 1) -> list[Notification]:
         """为新单证创建通知"""
         # 查询发票和产品明细
-        from app.models import ImportInvoice, InvoiceProduct
+        from app.models import ImportInvoice, InvoiceProduct, Company
+        from sqlalchemy.orm import selectinload
         
         invoice_result = await db.execute(
-            select(ImportInvoice).where(ImportInvoice.id == invoice_id)
+            select(ImportInvoice)
+            .options(selectinload(ImportInvoice.processing_plant))
+            .where(ImportInvoice.id == invoice_id)
         )
         invoice = invoice_result.scalar_one_or_none()
         if not invoice:
@@ -77,8 +81,21 @@ class InvoiceNotificationService:
         notifications = []
         now = datetime.now()
         
+        # 获取加工厂名称
+        processing_plant_name = None
+        if invoice.processing_plant:
+            processing_plant_name = invoice.processing_plant.name
+        elif invoice.processing_plant_id:
+            # 如果关系没加载，直接查询
+            company_result = await db.execute(
+                select(Company.name).where(Company.id == invoice.processing_plant_id)
+            )
+            processing_plant_name = company_result.scalar()
+        
         # 1. 预计到货通知
-        arrival_text = InvoiceNotificationService.generate_arrival_notification(invoice, products)
+        arrival_text = InvoiceNotificationService.generate_arrival_notification(
+            invoice, products, processing_plant_name
+        )
         arrival_notification = Notification(
             user_id=user_id,
             title="预计到货通知",
