@@ -53,8 +53,10 @@ import {
   Eye,
   ArrowUpDown,
   Coins,
+  FileDown,
 } from "lucide-react";
 import { toast } from "sonner";
+import { exportExcel } from "@/lib/export";
 
 /* ─────────────── 清关费用系数 ─────────────── */
 const RATES = {
@@ -1683,6 +1685,35 @@ function TransactionsTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            if (!data || data.length === 0) {
+              toast.info("暂无数据可导出");
+              return;
+            }
+            const ok = exportExcel(
+              data,
+              [
+                { header: "日期", key: "transaction_date" },
+                { header: "类型", key: "type", format: (v) => transactionTypeMap[v] || v },
+                { header: "分类", key: "category", format: (v) => transactionCategoryMap[v] || v },
+                { header: "金额", key: "amount" },
+                { header: "币种", key: "currency" },
+                { header: "银行账号", key: "from_account_id", format: (v) => getBankAccountName(v || data.find((r: any) => r.from_account_id === v)?.to_account_id) },
+                { header: "对方", key: "counterparty_name" },
+                { header: "参考号", key: "reference_no" },
+                { header: "描述", key: "description" },
+              ],
+              "交易流水"
+            );
+            if (ok) toast.success("导出成功");
+          }}
+        >
+          <FileDown className="h-4 w-4 mr-1" />
+          导出 Excel
+        </Button>
         <Button size="sm" onClick={() => {
           setEditingTransaction(null);
           setDate("");
