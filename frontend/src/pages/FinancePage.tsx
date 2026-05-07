@@ -1554,6 +1554,13 @@ function TransactionsTab() {
   });
   const salesList = salesData || [];
 
+  const getBankAccountName = (accountId: number | null) => {
+    if (!accountId) return "-";
+    const account = bankAccounts.find((b: any) => b.id === accountId);
+    if (!account) return "-";
+    return `${account.bank_name} ${account.account_number?.slice(-4) || ""}`;
+  };
+
   const handleDeleteClick = (transaction: Transaction) => {
     setDeleteTarget(transaction);
     setDeleteOpen(true);
@@ -1815,6 +1822,7 @@ function TransactionsTab() {
               <TableHead>分类</TableHead>
               <TableHead className="text-right">金额</TableHead>
               <TableHead>币种</TableHead>
+              <TableHead>银行账号</TableHead>
               <TableHead>对方</TableHead>
               <TableHead>参考号</TableHead>
               <TableHead>描述</TableHead>
@@ -1824,13 +1832,13 @@ function TransactionsTab() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8">
+                <TableCell colSpan={10} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : !data?.length ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -1857,6 +1865,9 @@ function TransactionsTab() {
                     {Number(r.amount).toLocaleString()}
                   </TableCell>
                   <TableCell>{r.currency}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {getBankAccountName(r.from_account_id || r.to_account_id)}
+                  </TableCell>
                   <TableCell>{r.counterparty_name ?? "-"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {r.reference_no ?? "-"}
