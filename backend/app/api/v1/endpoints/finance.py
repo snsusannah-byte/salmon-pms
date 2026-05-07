@@ -1,3 +1,4 @@
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
@@ -46,13 +47,38 @@ async def _check_batch_locked(db: AsyncSession, batch_id: int):
 async def list_bank_accounts(
     db: AsyncSession = Depends(get_db),
 ):
-    """银行账户列表"""
-    from sqlalchemy import select
-    from app.models import BankAccount, Company
+    """银行账户列表 - 余额根据交易流水实时计算"""
+    from sqlalchemy import select, func
+    from app.models import BankAccount, Company, TransactionRecord
+    
     result = await db.execute(
         select(BankAccount).where(BankAccount.is_active == True).order_by(BankAccount.bank_name)
     )
     accounts = result.scalars().all()
+    
+    # 实时计算每个账户的余额
+    for account in accounts:
+        # 转入金额 (to_account_id)
+        income_result = await db.execute(
+            select(func.sum(TransactionRecord.amount)).where(
+                TransactionRecord.to_account_id == account.id,
+                TransactionRecord.is_confirmed == True,
+            )
+        )
+        total_income = income_result.scalar() or 0
+        
+        # 转出金额 (from_account_id)
+        expense_result = await db.execute(
+            select(func.sum(TransactionRecord.amount)).where(
+                TransactionRecord.from_account_id == account.id,
+                TransactionRecord.is_confirmed == True,
+            )
+        )
+        total_expense = expense_result.scalar() or 0
+        
+        # 余额 = 期初余额 + 转入 - 转出
+        actual_balance = Decimal(str(account.opening_balance or 0)) + Decimal(str(total_income)) - Decimal(str(total_expense))
+        account.current_balance = actual_balance
     
     # Fetch company names
     company_ids = [a.company_id for a in accounts if a.company_id]
