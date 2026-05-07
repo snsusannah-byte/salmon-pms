@@ -134,6 +134,7 @@ class TransactionRecordBase(BaseModel):
 
 
 class TransactionRecordCreate(TransactionRecordBase):
+    related_sale_ids: Optional[List[int]] = Field(None, description="关联销售单ID列表（合并收款时）")
     pass
 
 
@@ -151,6 +152,7 @@ class TransactionRecordUpdate(BaseModel):
     description: Optional[str] = None
     related_invoice_id: Optional[int] = None
     related_batch_id: Optional[int] = None
+    related_sale_ids: Optional[List[int]] = None
     is_confirmed: Optional[bool] = None
     notes: Optional[str] = None
 

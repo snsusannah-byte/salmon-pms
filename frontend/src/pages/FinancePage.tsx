@@ -167,6 +167,7 @@ interface Transaction {
   counterparty_name: string | null;
   reference_no: string | null;
   description: string | null;
+  related_sale_ids: number[];
 }
 
 interface ImportFeeItem {
@@ -1520,7 +1521,7 @@ function TransactionsTab() {
   const [referenceNo, setReferenceNo] = useState("");
   const [currency, setCurrency] = useState("CNY");
   const [bankAccountId, setBankAccountId] = useState("");
-  const [selectedSaleId, setSelectedSaleId] = useState("");
+  const [selectedSaleIds, setSelectedSaleIds] = useState<number[]>([]);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1550,9 +1551,12 @@ function TransactionsTab() {
       const res = await api.get("/v1/sales/whole-fish?limit=500");
       return res.data?.items || [];
     },
-    enabled: category === "sales_income" && formOpen,
+    enabled: type === "income" && formOpen,
   });
-  const salesList = salesData || [];
+  const salesList = (salesData || []).filter((s: any) => {
+    const remaining = Number(s.net_amount ?? 0) - Number(s.paid_amount ?? 0);
+    return remaining > 0;
+  });
 
   const getBankAccountName = (accountId: number | null) => {
     if (!accountId) return "-";
@@ -1602,6 +1606,9 @@ function TransactionsTab() {
       } else if (type === "expense" && bankAccountId) {
         payload.from_account_id = Number(bankAccountId);
       }
+      if (selectedSaleIds.length > 0) {
+        payload.related_sale_ids = selectedSaleIds;
+      }
 
       if (editingTransaction) {
         await api.put(`/v1/finance/transactions/${editingTransaction.id}`, payload);
@@ -1634,7 +1641,7 @@ function TransactionsTab() {
     setReferenceNo(transaction.reference_no || "");
     setDescription(transaction.description || "");
     setBankAccountId(transaction.from_account_id ? String(transaction.from_account_id) : transaction.to_account_id ? String(transaction.to_account_id) : "");
-    setSelectedSaleId("");
+    setSelectedSaleIds(transaction.related_sale_ids ?? []);
     setFormOpen(true);
   };
 
@@ -1667,7 +1674,7 @@ function TransactionsTab() {
           setReferenceNo("");
           setCurrency("CNY");
           setBankAccountId("");
-          setSelectedSaleId("");
+          setSelectedSaleIds([]);
           setFormOpen(true);
         }}>
           <Plus className="h-4 w-4 mr-1" />
@@ -1735,25 +1742,42 @@ function TransactionsTab() {
                 </Select>
               </div>
             </div>
-            {category === "sales_income" && (
+            {type === "income" && (
               <div>
-                <Label>关联销售单</Label>
-                <Select value={selectedSaleId} onValueChange={(v) => {
-                  setSelectedSaleId(v ?? "");
-                  if (v) {
-                    const sale = salesList.find((s: any) => String(s.id) === v);
-                    if (sale && sale.customer_name) setCounterparty(sale.customer_name);
-                  }
-                }}>
-                  <SelectTrigger><SelectValue placeholder="选择销售单（可选）" /></SelectTrigger>
-                  <SelectContent>
-                    {salesList.map((s: any) => (
-                      <SelectItem key={s.id} value={String(s.id)} className="text-xs">
-                        {s.sale_no ?? `#${s.id}`} · {s.customer_name ?? "-"} · ${Number(s.net_amount).toFixed(0)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>关联销售单（可多选）</Label>
+                <div className="border rounded-md p-2 space-y-1 max-h-[200px] overflow-y-auto">
+                  {salesList.length === 0 && (
+                    <p className="text-xs text-muted-foreground py-2">暂无未付款销售单</p>
+                  )}
+                  {salesList.map((s: any) => {
+                    const remaining = Number(s.net_amount ?? 0) - Number(s.paid_amount ?? 0);
+                    const isSelected = selectedSaleIds.includes(s.id);
+                    return (
+                      <div key={s.id} className="flex items-center gap-2 py-1">
+                        <Checkbox
+                          checked={isSelected}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedSaleIds((prev) => [...prev, s.id]);
+                              if (s.customer_name && !counterparty) setCounterparty(s.customer_name);
+                            } else {
+                              setSelectedSaleIds((prev) => prev.filter((id) => id !== s.id));
+                            }
+                          }}
+                        />
+                        <div className="flex-1 text-xs">
+                          <span className="font-medium">{s.sale_no ?? `#${s.id}`}</span>
+                          <span className="text-muted-foreground"> · {s.customer_name ?? "-"} · 待付 ¥{remaining.toFixed(0)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {selectedSaleIds.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    已选 {selectedSaleIds.length} 单，自动按各单剩余金额分配
+                  </p>
+                )}
               </div>
             )}
 
@@ -1773,7 +1797,7 @@ function TransactionsTab() {
 
             <div>
               <Label>对方名称</Label>
-              <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder={category === "sales_income" ? "选择销售单后自动填充" : "可选"} />
+              <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder={type === "income" ? "选择销售单后自动填充" : "可选"} />
             </div>
             <div>
               <Label>参考号</Label>

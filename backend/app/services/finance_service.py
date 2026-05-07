@@ -543,8 +543,55 @@ class FinanceService:
 
     @staticmethod
     async def create_transaction(db: AsyncSession, data: dict) -> TransactionRecord:
+        # 提取关联销售单列表（合并收款或多笔付款支持多选）
+        related_sale_ids = data.pop("related_sale_ids", None)
+        
         record = TransactionRecord(**data)
         db.add(record)
+        await db.flush()  # 获取 record.id
+        
+        # 如果关联了销售单，自动创建收款记录
+        if related_sale_ids:
+            from app.models import SalesReceipt, WholeFishSale
+            from app.services.sales_service import SalesService
+            
+            remaining_amount = Decimal(str(data.get("amount", 0)))
+            
+            for sale_id in related_sale_ids:
+                if remaining_amount <= 0:
+                    break
+                    
+                sale_result = await db.execute(
+                    select(WholeFishSale).where(WholeFishSale.id == sale_id)
+                )
+                sale = sale_result.scalar_one_or_none()
+                if not sale:
+                    continue
+                
+                # 计算该销售单的剩余未付金额
+                sale_remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
+                if sale_remaining <= 0:
+                    continue
+                
+                # 分配金额：取剩余金额和交易流水剩余金额的较小值
+                allocate = min(sale_remaining, remaining_amount)
+                
+                receipt = SalesReceipt(
+                    sale_id=sale.id,
+                    receipt_date=data.get("transaction_date"),
+                    amount=allocate,
+                    payment_method="transfer",
+                    bank_account_id=data.get("to_account_id") or data.get("from_account_id"),
+                    reference_no=data.get("reference_no"),
+                    notes=data.get("notes"),
+                    transaction_id=record.id,
+                )
+                db.add(receipt)
+                await db.flush()
+                await SalesService._update_paid_amount(db, sale)
+                
+                remaining_amount -= allocate
+        
         await db.commit()
         await db.refresh(record)
         return record
@@ -569,12 +616,16 @@ class FinanceService:
             result = await db.execute(
                 select(SalesReceipt).where(SalesReceipt.transaction_id == record.id)
             )
-            receipt = result.scalar_one_or_none()
-            if receipt:
-                sale_id = receipt.sale_id
+            receipts = result.scalars().all()
+            affected_sale_ids = set()
+            for receipt in receipts:
+                affected_sale_ids.add(receipt.sale_id)
                 await db.delete(receipt)
-                await db.flush()
-                # 重新计算对应销售单的收款状态
+            
+            await db.flush()
+            
+            # 重新计算对应销售单的收款状态
+            for sale_id in affected_sale_ids:
                 sale_result = await db.execute(
                     select(WholeFishSale).where(WholeFishSale.id == sale_id)
                 )
