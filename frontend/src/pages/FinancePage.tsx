@@ -1562,7 +1562,6 @@ function TransactionsTab() {
     queryFn: async () => {
       const params = new URLSearchParams();
       if (selectedCustomerId) params.set("customer_id", selectedCustomerId);
-      params.set("status", "pending,partial_paid");
       params.set("limit", "500");
       const res = await api.get(`/v1/sales/whole-fish?${params.toString()}`);
       return res.data?.items || [];
