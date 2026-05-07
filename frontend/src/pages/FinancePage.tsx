@@ -1574,6 +1574,11 @@ function TransactionsTab() {
     return remaining > 0;
   });
 
+  // 计算已选销售单合计待收金额
+  const selectedTotal = salesList
+    .filter((s: any) => selectedSaleIds.includes(s.id))
+    .reduce((sum: number, s: any) => sum + (Number(s.net_amount ?? 0) - Number(s.paid_amount ?? 0)), 0);
+
   const getBankAccountName = (accountId: number | null) => {
     if (!accountId) return "-";
     const account = bankAccounts.find((b: any) => b.id === accountId);
@@ -1812,9 +1817,14 @@ function TransactionsTab() {
                       })}
                     </div>
                     {selectedSaleIds.length > 0 && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        已选 {selectedSaleIds.length} 单，自动按各单剩余金额分配
-                      </p>
+                      <div className="text-xs mt-2 space-y-1">
+                        <p className="text-muted-foreground">
+                          已选 {selectedSaleIds.length} 单
+                        </p>
+                        <p className="font-medium text-orange-600">
+                          合计待收: ¥{selectedTotal.toLocaleString()}
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}
