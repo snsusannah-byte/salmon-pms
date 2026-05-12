@@ -142,7 +142,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
     queryKey: ["companies"],
     queryFn: async () => {
       const res = await api.get("/v1/companies/");
-      return res.data as { items: { id: number; name: string; type: string }[] };
+      return res.data as { items: { id: number; name: string; type: string; code?: string | null }[] };
     },
     enabled: open,
   });
@@ -386,17 +386,22 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
               <div className="space-y-1">
                 <Label htmlFor="processing_plant_id" className="text-xs">加工厂 *</Label>
                 <Select
-                  value={form.watch("processing_plant_id") ? String(form.watch("processing_plant_id")) : undefined}
+                  value={form.watch("processing_plant_id") ? String(form.watch("processing_plant_id")) : ""}
                   onValueChange={(v) => form.setValue("processing_plant_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger className="w-full h-7 text-xs">
                     <SelectValue placeholder="选择加工厂">
-                      {processingPlants.find(c => c.id === form.watch("processing_plant_id"))?.name || "选择加工厂"}
+                      {(() => {
+                        const p = processingPlants.find(c => c.id === form.watch("processing_plant_id"));
+                        return p ? `${p.code ? `(${p.code})` : ""}${p.name}` : "选择加工厂";
+                      })()}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {processingPlants.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)} className="text-xs">{c.name}</SelectItem>
+                      <SelectItem key={c.id} value={String(c.id)} className="text-xs">
+                        {c.code ? `(${c.code})` : ""}{c.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -405,7 +410,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
               <div className="space-y-1">
                 <Label htmlFor="fish_farm_id" className="text-xs">渔场</Label>
                 <Select
-                  value={form.watch("fish_farm_id") ? String(form.watch("fish_farm_id")) : undefined}
+                  value={form.watch("fish_farm_id") ? String(form.watch("fish_farm_id")) : ""}
                   onValueChange={(v) => form.setValue("fish_farm_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger className="w-full h-7 text-xs">
@@ -424,7 +429,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
               <div className="space-y-1">
                 <Label htmlFor="exporter_id" className="text-xs">出口商 *</Label>
                 <Select
-                  value={form.watch("exporter_id") ? String(form.watch("exporter_id")) : undefined}
+                  value={form.watch("exporter_id") ? String(form.watch("exporter_id")) : ""}
                   onValueChange={(v) => form.setValue("exporter_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger className="w-full h-7 text-xs">
@@ -443,7 +448,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
               <div>
                 <Label htmlFor="supplier_id" className="text-xs">供应商 *</Label>
                 <Select
-                  value={form.watch("supplier_id") ? String(form.watch("supplier_id")) : undefined}
+                  value={form.watch("supplier_id") ? String(form.watch("supplier_id")) : ""}
                   onValueChange={(v) => form.setValue("supplier_id", parseInt(v || "0"))}
                 >
                   <SelectTrigger id="supplier_id">
@@ -494,7 +499,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                 <div className="space-y-1">
                   <Label htmlFor="parent_invoice_id">关联主票 *</Label>
                   <Select
-                    value={form.watch("parent_invoice_id") ? String(form.watch("parent_invoice_id")) : undefined}
+                    value={form.watch("parent_invoice_id") ? String(form.watch("parent_invoice_id")) : ""}
                     onValueChange={(v) => {
                       const parentId = parseInt(v || "0");
                       form.setValue("parent_invoice_id", parentId);
@@ -592,7 +597,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                     {productName || <span className="text-muted-foreground text-xs">产品名称</span>}
                   </div>
                   <Select
-                    value={form.watch(`products.${index}.product_spec`) || undefined}
+                    value={form.watch(`products.${index}.product_spec`) || ""}
                     onValueChange={(v) => {
                       const spec = v || "";
                       form.setValue(`products.${index}.product_spec`, spec);

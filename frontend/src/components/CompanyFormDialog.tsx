@@ -102,8 +102,14 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
   // 获取用户列表（用于业务员选择）
   useEffect(() => {
     if (open) {
-      api.get("/v1/auth/users")
-        .then(res => setUsers(res.data || []))
+      api.get("/v1/auth/users", { validateStatus: () => true })  // 不触发全局 401 拦截
+        .then(res => {
+          if (res.status === 401) {
+            toast.error("登录已过期，请重新登录");
+            return;
+          }
+          setUsers(res.data || []);
+        })
         .catch(() => setUsers([]));
     }
   }, [open]);

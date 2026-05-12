@@ -33,6 +33,7 @@ interface CommissionRecord {
   sale_id: number;
   sale_date: string;
   customer_name: string;
+  batch_name: string;
   sale_amount: number;
   weight_kg: number;
   commission_rate: number; // 元/kg
@@ -55,16 +56,18 @@ export function CommissionPage() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   });
+  const [batchId, setBatchId] = useState<string>("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [payDialogOpen, setPayDialogOpen] = useState(false);
   const [payTargetSp, setPayTargetSp] = useState<{ id: number; name: string } | null>(null);
 
   const { data: records, isLoading } = useQuery({
-    queryKey: ["commissions", month, search],
+    queryKey: ["commissions", month, search, batchId],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set("month", month);
       if (search) params.set("search", search);
+      if (batchId) params.set("batch_id", batchId);
       const res = await api.get(`/v1/salespersons/commissions/?${params.toString()}`);
       return res.data as { items: CommissionRecord[]; summary: CommissionSummary };
     },
@@ -75,6 +78,14 @@ export function CommissionPage() {
     queryFn: async () => {
       const res = await api.get("/v1/salespersons/");
       return res.data.items as { id: number; name: string; commission_rate: number }[];
+    },
+  });
+  
+  const { data: batches } = useQuery({
+    queryKey: ["batches"],
+    queryFn: async () => {
+      const res = await api.get("/v1/batches/");
+      return res.data.items as { id: number; batch_code: string; batch_name: string }[];
     },
   });
 
@@ -201,6 +212,21 @@ export function CommissionPage() {
                 className="w-40"
               />
             </div>
+            <div className="space-y-2">
+              <Label className="text-xs">批次</Label>
+              <select
+                value={batchId}
+                onChange={(e) => setBatchId(e.target.value)}
+                className="h-10 w-40 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">全部批次</option>
+                {batches?.map((b) => (
+                  <option key={b.id} value={String(b.id)}>
+                    {b.batch_name || b.batch_code}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* 业务员提成概览 */}
@@ -290,6 +316,21 @@ export function CommissionPage() {
                 className="w-40"
               />
             </div>
+            <div className="space-y-2">
+              <Label className="text-xs">批次</Label>
+              <select
+                value={batchId}
+                onChange={(e) => setBatchId(e.target.value)}
+                className="h-10 w-40 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">全部批次</option>
+                {batches?.map((b) => (
+                  <option key={b.id} value={String(b.id)}>
+                    {b.batch_name || b.batch_code}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* 明细表格 */}
@@ -308,6 +349,7 @@ export function CommissionPage() {
                   <TableHead>日期</TableHead>
                   <TableHead>业务员</TableHead>
                   <TableHead>客户</TableHead>
+                  <TableHead>批次</TableHead>
                   <TableHead>销售重量</TableHead>
                   <TableHead>提成单价</TableHead>
                   <TableHead>提成金额</TableHead>
@@ -317,13 +359,13 @@ export function CommissionPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8">
+                    <TableCell colSpan={9} className="text-center py-8">
                       加载中...
                     </TableCell>
                   </TableRow>
                 ) : records?.items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                       暂无提成记录
                     </TableCell>
                   </TableRow>
@@ -341,6 +383,7 @@ export function CommissionPage() {
                       <TableCell className="text-sm">{r.sale_date}</TableCell>
                       <TableCell className="font-medium">{r.salesperson_name}</TableCell>
                       <TableCell>{r.customer_name}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{r.batch_name}</TableCell>
                       <TableCell>{r.weight_kg?.toFixed(1) ?? 0} kg</TableCell>
                       <TableCell>¥{r.commission_rate}/kg</TableCell>
                       <TableCell className="font-medium">

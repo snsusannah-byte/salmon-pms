@@ -46,6 +46,7 @@ class InvoiceService:
         end_date: Optional[date] = None,
         search: Optional[str] = None,
         exclude_assigned: bool = False,
+        exclude_with_fees: bool = False,
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[List[ImportInvoice], int]:
@@ -75,12 +76,69 @@ class InvoiceService:
             subquery = select(BatchInvoice.invoice_id)
             filters.append(ImportInvoice.id.not_in(subquery))
         
+        if exclude_with_fees:
+            # 排除已有进口费用记录的发票（税费或清关费用）
+            # 规则：
+            # 1. 自身有税费或清关费用的发票排除
+            # 2. 从票的主票有费用记录的也排除
+            from app.models import ImportTax, ClearanceCost
+
+            # 找到所有有费用记录的发票ID
+            tax_ids = select(ImportTax.invoice_id)
+            clearance_ids = select(ClearanceCost.invoice_id)
+
+            # 找到所有有费用记录的发票（包括主票和从票）
+            from sqlalchemy import union, text
+            has_fees_ids = union(tax_ids, clearance_ids).subquery()
+
+            # 1. 排除自身有费用记录的发票
+            filters.append(ImportInvoice.id.not_in(has_fees_ids))
+
+            # 2. 排除从票（parent_invoice_id 不为空且主票有费用记录）
+            # 找到有费用记录的主票ID
+            parent_with_fees = select(ImportInvoice.id).where(
+                ImportInvoice.id.in_(has_fees_ids),
+                ImportInvoice.is_master == True
+            ).subquery()
+
+            # 排除这些主票下的所有从票
+            # 逻辑：parent_invoice_id 为空（主票） 或 不在有费用的主票列表中
+            # 注意：NOT IN 对 NULL 返回 UNKNOWN，必须用 IS NULL OR NOT IN
+            filters.append(
+                ImportInvoice.parent_invoice_id.is_(None) |
+                ~ImportInvoice.parent_invoice_id.in_(parent_with_fees)
+            )
+        
         if filters:
             query = query.where(and_(*filters))
             count_query = count_query.where(and_(*filters))
         
-        # 排序（发票日期降序）
-        query = query.order_by(ImportInvoice.invoice_date.desc())
+        # 子查询：获取主票排序字段，用于从票继承主票的排序位置
+        parent_sq = (
+            select(
+                ImportInvoice.id.label("pid"),
+                ImportInvoice.invoice_date.label("p_date"),
+                ImportInvoice.created_at.label("p_created"),
+            )
+            .where(ImportInvoice.parent_invoice_id.is_(None))
+            .subquery()
+        )
+        query = query.outerjoin(
+            parent_sq,
+            ImportInvoice.parent_invoice_id == parent_sq.c.pid
+        )
+        
+        # 排序：
+        # 1. 按组排序：从票继承主票的日期+创建时间（确保同组聚在一起）
+        # 2. 组内主票在前
+        # 3. 组内按创建日期、发票号降序
+        query = query.order_by(
+            func.coalesce(parent_sq.c.p_date, ImportInvoice.invoice_date).desc(),
+            func.coalesce(parent_sq.c.p_created, ImportInvoice.created_at).desc(),
+            ImportInvoice.parent_invoice_id.is_(None).desc(),
+            ImportInvoice.created_at.desc(),
+            ImportInvoice.invoice_no.desc(),
+        )
         
         # 分页
         query = query.offset(skip).limit(limit)
@@ -254,19 +312,59 @@ class InvoiceService:
     
     @staticmethod
     async def delete(db: AsyncSession, invoice: ImportInvoice) -> None:
-        """删除发票（级联删除产品明细）"""
+        """删除发票（级联删除所有关联数据）"""
+        from fastapi import HTTPException
         if invoice.is_locked:
-            from fastapi import HTTPException
             raise HTTPException(
                 status_code=400,
                 detail=f"发票 {invoice.invoice_no} 已锁定，不能删除"
             )
         
-        # 手动删除关联的产品明细（避免外键约束问题）
+        # 1. 主票检查：如果有从票，禁止删除（需先删除从票）
+        if invoice.is_master:
+            from sqlalchemy import select as sa_select
+            from app.models import ImportInvoice as ImportInvoiceModel
+            sub_result = await db.execute(
+                sa_select(ImportInvoiceModel).where(ImportInvoiceModel.parent_invoice_id == invoice.id)
+            )
+            subs = sub_result.scalars().all()
+            if subs:
+                sub_nos = ", ".join([s.invoice_no or f"#{s.id}" for s in subs])
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"发票 {invoice.invoice_no} 存在 {len(subs)} 条从票（{sub_nos}），请先删除从票后再删除主票。"
+                )
+        
+        # 2. 级联删除关联的进口税费
+        from app.models import ImportTax
+        await db.execute(
+            delete(ImportTax).where(ImportTax.invoice_id == invoice.id)
+        )
+        
+        # 3. 级联删除关联的清关费用
+        from app.models import ClearanceCost
+        await db.execute(
+            delete(ClearanceCost).where(ClearanceCost.invoice_id == invoice.id)
+        )
+        
+        # 4. 级联删除关联的购汇记录
+        from app.models import ExchangeRecord
+        await db.execute(
+            delete(ExchangeRecord).where(ExchangeRecord.invoice_id == invoice.id)
+        )
+        
+        # 5. 级联删除批次关联
+        from app.models import BatchInvoice
+        await db.execute(
+            delete(BatchInvoice).where(BatchInvoice.invoice_id == invoice.id)
+        )
+        
+        # 6. 删除关联的产品明细
         await db.execute(
             delete(InvoiceProduct).where(InvoiceProduct.invoice_id == invoice.id)
         )
         
+        # 7. 删除发票本身
         await db.delete(invoice)
         await db.commit()
     

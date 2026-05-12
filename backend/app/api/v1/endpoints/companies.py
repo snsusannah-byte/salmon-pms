@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.models import CompanyType, User
+from app.models import CompanyType, User, SupplierCategory
 from app.schemas.company import (
     CompanyCreate,
     CompanyUpdate,
@@ -52,6 +52,7 @@ async def _build_company_response(db: AsyncSession, company, payables: dict = No
         "logistics_info": company.logistics_info,
         "salesperson_id": company.salesperson_id,
         "customer_category": company.customer_category.value if company.customer_category else None,
+        "supplier_category": company.supplier_category if company.supplier_category else None,
         "is_active": company.is_active,
         "notes": company.notes,
         "salesperson_name": salesperson_name,
@@ -69,6 +70,7 @@ async def list_companies(
     type: Optional[CompanyType] = Query(None, description="主体类型"),
     exclude_type: List[CompanyType] = Query([], description="排除类型（可传多个，如 customer,supplier）"),
     business_role: Optional[str] = Query(None, description="业务角色筛选：upstream(上游溯源) / business_partner(业务往来)"),
+    supplier_category: Optional[SupplierCategory] = Query(None, description="供应商分类筛选：raw_material/material_supply/customs_broker/service_provider"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     is_active: Optional[bool] = Query(True, description="是否启用"),
     skip: int = Query(0, ge=0, description="跳过数量"),
@@ -80,6 +82,7 @@ async def list_companies(
     - **type**: 按类型筛选（加工厂/渔场/出口商/供应商/客户等）
     - **exclude_type**: 排除指定类型列表（如排除 customer,supplier）
     - **business_role**: 按业务角色筛选（upstream=上游溯源，business_partner=业务往来）
+    - **supplier_category**: 按供应商分类筛选（raw_material/material_supply/customs_broker/service_provider）
     - **search**: 按名称/编码/联系人搜索
     - **is_active**: 是否只显示启用中的主体
     """
@@ -88,6 +91,7 @@ async def list_companies(
         type=type,
         exclude_type=exclude_type,
         business_role=business_role,
+        supplier_category=supplier_category,
         search=search,
         is_active=is_active,
         skip=skip,

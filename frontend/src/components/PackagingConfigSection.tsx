@@ -3,20 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2 } from "lucide-react";
 
 interface PackagingItem {
@@ -24,6 +16,8 @@ interface PackagingItem {
   level: string;
   material_id: number;
   material_name?: string;
+  brand_id?: number;
+  brand_name?: string;
   quantity: number;
   unit: string;
   notes?: string;
@@ -34,15 +28,24 @@ interface MaterialOption {
   name: string;
   code: string;
   unit: string;
+  spec?: string | null;
+  suppliers?: { supplier_name: string | null; unit_price: number | null }[];
+}
+
+interface BrandOption {
+  id: number;
+  name: string;
+  is_oem: boolean;
 }
 
 interface PackagingConfigSectionProps {
   materials: MaterialOption[];
+  brands: BrandOption[];
   packagings: PackagingItem[];
   onChange: (items: PackagingItem[]) => void;
 }
 
-export function PackagingConfigSection({ materials, packagings, onChange }: PackagingConfigSectionProps) {
+export function PackagingConfigSection({ materials, brands, packagings, onChange }: PackagingConfigSectionProps) {
   const addItem = (level: string) => {
     onChange([
       ...packagings,
@@ -61,6 +64,10 @@ export function PackagingConfigSection({ materials, packagings, onChange }: Pack
       if (field === "material_id") {
         const mat = materials.find((m) => m.id === Number(value));
         return { ...item, material_id: Number(value), material_name: mat?.name, unit: mat?.unit ?? "个" };
+      }
+      if (field === "brand_id") {
+        const brand = brands.find((b) => b.id === Number(value));
+        return { ...item, brand_id: Number(value) || undefined, brand_name: brand?.name };
       }
       return { ...item, [field]: value };
     });
@@ -84,9 +91,10 @@ export function PackagingConfigSection({ materials, packagings, onChange }: Pack
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="text-xs w-[200px]">物料</TableHead>
-              <TableHead className="text-xs w-[80px]">数量</TableHead>
-              <TableHead className="text-xs w-[60px]">单位</TableHead>
+              <TableHead className="text-xs w-[160px]">物料</TableHead>
+              <TableHead className="text-xs w-[100px]">品牌</TableHead>
+              <TableHead className="text-xs w-[60px]">数量</TableHead>
+              <TableHead className="text-xs w-[50px]">单位</TableHead>
               <TableHead className="text-xs">备注</TableHead>
               <TableHead className="text-xs w-[40px]"></TableHead>
             </TableRow>
@@ -109,7 +117,41 @@ export function PackagingConfigSection({ materials, packagings, onChange }: Pack
                       <SelectContent>
                         {materials.map((m) => (
                           <SelectItem key={m.id} value={String(m.id)} className="text-xs">
-                            {m.name} ({m.code})
+                            <div className="flex flex-col">
+                              <span>{m.name} ({m.code})</span>
+                              {m.suppliers && m.suppliers.length > 0 && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  {m.suppliers[0].supplier_name} ¥{m.suppliers[0].unit_price?.toFixed(2) ?? '-'}
+                                </span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={item.brand_id ? String(item.brand_id) : ""}
+                      onValueChange={(v) => updateItem(globalIdx, "brand_id", v ? Number(v) : undefined)}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="通用">
+                          {(() => {
+                            if (!item.brand_id) return "通用";
+                            const brand = brands.find((b) => b.id === item.brand_id);
+                            return brand ? brand.name : `品牌${item.brand_id}`;
+                          })()}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="" className="text-xs">通用（所有品牌）</SelectItem>
+                        {brands.map((b) => (
+                          <SelectItem key={b.id} value={String(b.id)} className="text-xs">
+                            <div className="flex items-center gap-1">
+                              {b.name}
+                              {b.is_oem && <Badge variant="secondary" className="text-[10px] bg-purple-100 text-purple-700">OEM</Badge>}
+                            </div>
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -148,7 +190,14 @@ export function PackagingConfigSection({ materials, packagings, onChange }: Pack
 
   return (
     <div className="space-y-4 border rounded-lg p-4 bg-muted/30">
-      <h4 className="text-sm font-semibold">包装物配置</h4>
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-semibold">包装物配置</h4>
+        {brands.length > 0 && (
+          <span className="text-xs text-muted-foreground">
+            支持按品牌配置不同包装物
+          </span>
+        )}
+      </div>
       {renderTable(boxItems, "盒级包装（每盒）", "box")}
       {renderTable(portionItems, "份级包装（每份 = 份内盒数 × 盒级 + 外箱）", "portion")}
     </div>

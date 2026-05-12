@@ -19,6 +19,7 @@ import {
   Scissors,
   Layers,
   Store,
+  Tag,
 } from "lucide-react";
 
 const navItems = [
@@ -41,6 +42,8 @@ const finishedProductItems = [
 
 const bottomNavItems = [
   { icon: Package, label: "产品管理", path: "/products" },
+  { icon: Tag, label: "品牌管理", path: "/brands" },
+  { icon: Layers, label: "成品定义", path: "/finished-products" },
   { icon: Layers, label: "物料管理", path: "/materials" },
   { icon: Building2, label: "主体管理", path: "/companies" },
   { icon: Users, label: "客户管理", path: "/customers" },

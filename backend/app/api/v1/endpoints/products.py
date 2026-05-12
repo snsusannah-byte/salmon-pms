@@ -1,9 +1,10 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import ProductCategory
+from app.models import ProductCategory, Brand
 from app.schemas.product import (
     ProductCreate,
     ProductUpdate,
@@ -19,6 +20,39 @@ from app.schemas.product import (
     ProductAccessoryResponse,
 )
 from app.services.product_service import ProductService
+
+
+async def _build_product_response(db, product):
+    """构建产品响应（带品牌名称）"""
+    brand_name = None
+    if product.brand_id:
+        brand = await db.get(Brand, product.brand_id)
+        brand_name = brand.name if brand else None
+    return ProductResponse(
+        id=product.id,
+        category=product.category,
+        code=product.code,
+        name=product.name,
+        spec=product.spec,
+        unit=product.unit,
+        unit_weight_kg=product.unit_weight_kg,
+        series_code=product.series_code,
+        series_name=product.series_name,
+        portion_weight_g=product.portion_weight_g,
+        portion_boxes=product.portion_boxes,
+        is_active=product.is_active,
+        notes=product.notes,
+        cost_price=product.cost_price,
+        suggested_retail_price=product.suggested_retail_price,
+        wholesale_price=product.wholesale_price,
+        min_price=product.min_price,
+        stock_quantity=product.stock_quantity,
+        safety_stock=product.safety_stock,
+        brand_id=product.brand_id,
+        brand_name=brand_name,
+        created_at=product.created_at,
+        updated_at=product.updated_at,
+    )
 
 router = APIRouter()
 
@@ -39,18 +73,18 @@ async def list_products(
     if categories:
         cat_enums = []
         for cat in categories.split(","):
-            cat_upper = cat.strip().upper()
+            cat_lower = cat.strip().lower()
             try:
-                cat_enums.append(ProductCategory(cat_upper))
+                cat_enums.append(ProductCategory(cat_lower))
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"无效的产品分类: {cat}",
                 )
     elif category:
-        cat_upper = category.strip().upper()
+        cat_lower = category.strip().lower()
         try:
-            cat_enum = ProductCategory(cat_upper)
+            cat_enum = ProductCategory(cat_lower)
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -60,34 +94,11 @@ async def list_products(
     items, total = await ProductService.list_products(
         db, category=cat_enum, categories=cat_enums, search=search, is_active=is_active, skip=skip, limit=limit
     )
-    
+
     result_items = []
     for item in items:
-        item_dict = {
-            "id": item.id,
-            "category": item.category,
-            "code": item.code,
-            "name": item.name,
-            "spec": item.spec,
-            "unit": item.unit,
-            "unit_weight_kg": item.unit_weight_kg,
-            "series_code": item.series_code,
-            "series_name": item.series_name,
-            "portion_weight_g": item.portion_weight_g,
-            "portion_boxes": item.portion_boxes,
-            "is_active": item.is_active,
-            "notes": item.notes,
-            "cost_price": item.cost_price,
-            "suggested_retail_price": item.suggested_retail_price,
-            "wholesale_price": item.wholesale_price,
-            "min_price": item.min_price,
-            "stock_quantity": item.stock_quantity,
-            "safety_stock": item.safety_stock,
-            "created_at": item.created_at,
-            "updated_at": item.updated_at,
-        }
-        result_items.append(ProductResponse(**item_dict))
-    
+        result_items.append(await _build_product_response(db, item))
+
     return ProductListResponse(total=total, items=result_items, skip=skip, limit=limit)
 
 
@@ -98,30 +109,7 @@ async def create_product(
 ):
     """创建产品"""
     product = await ProductService.create(db, data)
-    
-    return ProductResponse(
-        id=product.id,
-        category=product.category,
-        code=product.code,
-        name=product.name,
-        spec=product.spec,
-        unit=product.unit,
-        unit_weight_kg=product.unit_weight_kg,
-        series_code=product.series_code,
-        series_name=product.series_name,
-        portion_weight_g=product.portion_weight_g,
-        portion_boxes=product.portion_boxes,
-        is_active=product.is_active,
-        notes=product.notes,
-        cost_price=product.cost_price,
-        suggested_retail_price=product.suggested_retail_price,
-        wholesale_price=product.wholesale_price,
-        min_price=product.min_price,
-        stock_quantity=product.stock_quantity,
-        safety_stock=product.safety_stock,
-        created_at=product.created_at,
-        updated_at=product.updated_at,
-    )
+    return await _build_product_response(db, product)
 
 
 @router.get("/{product_id}", response_model=ProductResponse)
@@ -136,30 +124,7 @@ async def get_product(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"产品 ID={product_id} 不存在",
         )
-    
-    return ProductResponse(
-        id=product.id,
-        category=product.category,
-        code=product.code,
-        name=product.name,
-        spec=product.spec,
-        unit=product.unit,
-        unit_weight_kg=product.unit_weight_kg,
-        series_code=product.series_code,
-        series_name=product.series_name,
-        portion_weight_g=product.portion_weight_g,
-        portion_boxes=product.portion_boxes,
-        is_active=product.is_active,
-        notes=product.notes,
-        cost_price=product.cost_price,
-        suggested_retail_price=product.suggested_retail_price,
-        wholesale_price=product.wholesale_price,
-        min_price=product.min_price,
-        stock_quantity=product.stock_quantity,
-        safety_stock=product.safety_stock,
-        created_at=product.created_at,
-        updated_at=product.updated_at,
-    )
+    return await _build_product_response(db, product)
 
 
 @router.put("/{product_id}", response_model=ProductResponse)
@@ -175,30 +140,7 @@ async def update_product(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"产品 ID={product_id} 不存在",
         )
-    
-    return ProductResponse(
-        id=product.id,
-        category=product.category,
-        code=product.code,
-        name=product.name,
-        spec=product.spec,
-        unit=product.unit,
-        unit_weight_kg=product.unit_weight_kg,
-        series_code=product.series_code,
-        series_name=product.series_name,
-        portion_weight_g=product.portion_weight_g,
-        portion_boxes=product.portion_boxes,
-        is_active=product.is_active,
-        notes=product.notes,
-        cost_price=product.cost_price,
-        suggested_retail_price=product.suggested_retail_price,
-        wholesale_price=product.wholesale_price,
-        min_price=product.min_price,
-        stock_quantity=product.stock_quantity,
-        safety_stock=product.safety_stock,
-        created_at=product.created_at,
-        updated_at=product.updated_at,
-    )
+    return await _build_product_response(db, product)
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -351,9 +293,15 @@ async def delete_product_bom(
 @router.get("/{product_id}/packagings", response_model=List[ProductPackagingResponse])
 async def get_product_packagings(
     product_id: int,
+    brand_id: Optional[int] = Query(None, description="品牌变体ID，筛选特定品牌的包装物"),
     db: AsyncSession = Depends(get_db),
 ):
-    """获取成品包装物清单"""
+    """获取成品包装物清单
+    
+    支持按 brand_id 筛选：
+    - brand_id=1: 返回品牌1的包装物 + 通用包装物(brand_id=NULL)
+    - brand_id=NULL: 返回所有包装物
+    """
     product = await ProductService.get_by_id(db, product_id)
     if not product:
         raise HTTPException(
@@ -361,7 +309,17 @@ async def get_product_packagings(
             detail=f"产品 ID={product_id} 不存在",
         )
     
-    packagings = await ProductService.get_packagings(db, product_id)
+    packagings = await ProductService.get_packagings(db, product_id, brand_id=brand_id)
+    
+    # 获取品牌名称
+    brand_ids = [p.brand_id for p in packagings if p.brand_id]
+    brand_names = {}
+    if brand_ids:
+        from app.models import Brand
+        brand_result = await db.execute(
+            select(Brand).where(Brand.id.in_(brand_ids))
+        )
+        brand_names = {b.id: b.name for b in brand_result.scalars().all()}
     
     result = []
     for p in packagings:
@@ -374,7 +332,9 @@ async def get_product_packagings(
             product_id=p.product_id,
             level=p.level,
             material_id=p.material_id,
+            brand_id=p.brand_id,
             material_name=material_name,
+            brand_name=brand_names.get(p.brand_id) if p.brand_id else None,
             quantity=p.quantity,
             unit=p.unit,
             notes=p.notes,
@@ -597,3 +557,120 @@ async def delete_product_accessory(
             detail=f"配套产品 ID={accessory_id} 不存在",
         )
     return None
+
+
+# ==================== 跨品牌产品统计 ====================
+
+class ProductNameStatItem(BaseModel):
+    """按产品名称统计的单个品牌变体"""
+    model_config = ConfigDict(from_attributes=True)
+    product_id: int
+    brand_id: Optional[int] = None
+    brand_name: Optional[str] = None
+    code: str
+    is_oem: bool = False
+    stock_quantity: int
+    safety_stock: int
+    cost_price: Optional[float] = None
+    suggested_retail_price: Optional[float] = None
+
+
+class ProductNameAggregate(BaseModel):
+    """按产品名称聚合统计"""
+    model_config = ConfigDict(from_attributes=True)
+    product_name: str
+    spec: Optional[str] = None
+    category: str
+    unit: str
+    total_stock: int
+    total_safety_stock: int
+    brand_variants: int
+    items: List[ProductNameStatItem]
+
+
+@router.get("/stats/by-name", response_model=List[ProductNameAggregate])
+async def stats_by_product_name(
+    category: Optional[str] = Query(None, description="产品分类: finished_product"),
+    search: Optional[str] = Query(None, description="搜索产品名称"),
+    db: AsyncSession = Depends(get_db),
+):
+    """按产品名称聚合统计（跨品牌）
+    
+    用于查看同一规格产品在不同品牌下的分布：
+    - 鱼腩200g+中段200g:
+      - 林深见鹿: 库存 100, 成本 ¥45
+      - XX公司(OEM): 库存 50, 成本 ¥42
+      - 总计: 库存 150
+    """
+    from app.models import Brand
+    from sqlalchemy import func
+    
+    # 1. 查询所有成品
+    query = select(Product)
+    if category:
+        cat_enum = ProductCategory(category.lower())
+        query = query.where(Product.category == cat_enum)
+    else:
+        query = query.where(Product.category == ProductCategory.FINISHED_PRODUCT)
+    
+    if search:
+        query = query.where(Product.name.ilike(f"%{search}%"))
+    
+    query = query.where(Product.is_active == True)
+    query = query.order_by(Product.name, Product.brand_id)
+    
+    result = await db.execute(query)
+    products = result.scalars().all()
+    
+    if not products:
+        return []
+    
+    # 2. 获取品牌名称
+    brand_ids = [p.brand_id for p in products if p.brand_id]
+    brand_map = {}
+    if brand_ids:
+        brand_result = await db.execute(
+            select(Brand).where(Brand.id.in_(brand_ids))
+        )
+        brand_map = {b.id: b for b in brand_result.scalars().all()}
+    
+    # 3. 按名称分组聚合
+    from collections import defaultdict
+    name_groups = defaultdict(list)
+    for p in products:
+        name_groups[p.name].append(p)
+    
+    aggregates = []
+    for name, items in name_groups.items():
+        total_stock = sum(p.stock_quantity or 0 for p in items)
+        total_safety = sum(p.safety_stock or 0 for p in items)
+        
+        variants = []
+        for p in items:
+            brand = brand_map.get(p.brand_id) if p.brand_id else None
+            variants.append(ProductNameStatItem(
+                product_id=p.id,
+                brand_id=p.brand_id,
+                brand_name=brand.name if brand else None,
+                code=p.code,
+                is_oem=brand.is_oem if brand else False,
+                stock_quantity=p.stock_quantity or 0,
+                safety_stock=p.safety_stock or 0,
+                cost_price=float(p.cost_price) if p.cost_price else None,
+                suggested_retail_price=float(p.suggested_retail_price) if p.suggested_retail_price else None,
+            ))
+        
+        aggregates.append(ProductNameAggregate(
+            product_name=name,
+            spec=items[0].spec,
+            category=items[0].category,
+            unit=items[0].unit,
+            total_stock=total_stock,
+            total_safety_stock=total_safety,
+            brand_variants=len(items),
+            items=variants,
+        ))
+    
+    # 按总库存倒序
+    aggregates.sort(key=lambda x: x.total_stock, reverse=True)
+    return aggregates

@@ -11,6 +11,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle, Building2 } from "lucide-react";
 
+const SUPPLIER_CATEGORIES = [
+  { value: "raw_material", label: "原料供应" },
+  { value: "material_supply", label: "物料供应" },
+  { value: "customs_broker", label: "报关行" },
+  { value: "service_provider", label: "服务商" },
+];
+
 const formSchema = z.object({
   name: z.string().min(1, "供应商名称不能为空").max(200),
   company_full_name: z.string().max(200).optional().or(z.literal("")),
@@ -24,6 +31,7 @@ const formSchema = z.object({
   cooperation_date: z.string().optional().or(z.literal("")),
   logistics_info: z.string().optional().or(z.literal("")),
   currency: z.string().default("CNY"),
+  supplier_category: z.string().min(1, "请选择供应商分类"),
   notes: z.string().optional().or(z.literal("")),
 });
 
@@ -43,6 +51,7 @@ interface Supplier {
   cooperation_date: string | null;
   logistics_info: string | null;
   currency: string;
+  supplier_category: string | null;
   notes: string | null;
 }
 
@@ -71,6 +80,7 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
       cooperation_date: "",
       logistics_info: "",
       currency: "CNY",
+      supplier_category: "",
       notes: "",
     },
   });
@@ -91,6 +101,7 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
           cooperation_date: initialData.cooperation_date ?? "",
           logistics_info: initialData.logistics_info ?? "",
           currency: initialData.currency || "CNY",
+          supplier_category: initialData.supplier_category ?? "",
           notes: initialData.notes ?? "",
         });
       } else {
@@ -107,6 +118,7 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
           cooperation_date: "",
           logistics_info: "",
           currency: "CNY",
+          supplier_category: "",
           notes: "",
         });
       }
@@ -174,6 +186,25 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
                 {...form.register("company_full_name")}
                 placeholder="公司注册全称"
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="supplier_category" className="text-sm">
+                供应商分类 <span className="text-red-500">*</span>
+              </Label>
+              <select
+                id="supplier_category"
+                {...form.register("supplier_category")}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors"
+              >
+                <option value="">请选择分类</option>
+                {SUPPLIER_CATEGORIES.map((cat) => (
+                  <option key={cat.value} value={cat.value}>{cat.label}</option>
+                ))}
+              </select>
+              {form.formState.errors.supplier_category && (
+                <p className="text-xs text-red-500">{form.formState.errors.supplier_category.message}</p>
+              )}
             </div>
           </div>
 

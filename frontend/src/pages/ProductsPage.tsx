@@ -65,7 +65,8 @@ interface Product {
   min_price: string | null;
   stock_quantity: number;
   safety_stock: number;
-  brand: string | null;  // V3: 品牌
+  brand_id: number | null;  // V3: 品牌ID
+  brand_name: string | null; // V3: 品牌名称
 }
 
 interface BOMItem {
@@ -82,6 +83,8 @@ interface PackagingDetailItem {
   level: string;
   material_id: number;
   material_name: string | null;
+  brand_id: number | null;
+  brand_name: string | null;
   quantity: string;
   unit: string;
   notes: string | null;
@@ -110,6 +113,7 @@ const categoryLabels: Record<string, string> = {
 export default function ProductsPage() {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("whole_fish");
+  const [statsSearch, setStatsSearch] = useState("");
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -169,7 +173,7 @@ export default function ProductsPage() {
   ]);
 
   // V3: 品牌
-  const [formBrand, setFormBrand] = useState("");
+  const [formBrandId, setFormBrandId] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -207,17 +211,28 @@ export default function ProductsPage() {
     editingProduct,
   ]);
 
+  // V3: 获取品牌列表
+  const { data: brandsData } = useQuery({
+    queryKey: ["brands"],
+    queryFn: async () => {
+      const res = await api.get("/v1/brands/?limit=500");
+      return res.data.items as { id: number; name: string; code: string | null; is_oem: boolean }[];
+    },
+  });
+  const brands = brandsData || [];
+
+  // 获取物料管理中的物料（用于成品包装物/BOM选择）
   const { data: bomMaterials } = useQuery({
     queryKey: ["bom-materials"],
     queryFn: async () => {
-      const res = await api.get(
-        "/v1/products/?category=bom_material&limit=500"
-      );
+      const res = await api.get("/v1/materials/?limit=500");
       return res.data.items as {
         id: number;
         name: string;
         code: string;
         unit: string;
+        spec: string | null;
+        suppliers: { supplier_name: string | null; unit_price: number | null }[];
       }[];
     },
     enabled: dialogOpen && formCategory === "finished_product",
@@ -256,6 +271,38 @@ export default function ProductsPage() {
       const res = await api.get(`/v1/products/?${params.toString()}`);
       return res.data as { total: number; items: Product[] };
     },
+  });
+
+  // 跨品牌统计查询
+  const { data: statsData, isLoading: statsLoading } = useQuery({
+    queryKey: ["product-stats-by-name", statsSearch],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set("category", "finished_product");
+      if (statsSearch) params.set("search", statsSearch);
+      const res = await api.get(`/v1/products/stats/by-name?${params.toString()}`);
+      return res.data as {
+        product_name: string;
+        spec: string | null;
+        category: string;
+        unit: string;
+        total_stock: number;
+        total_safety_stock: number;
+        brand_variants: number;
+        items: {
+          product_id: number;
+          brand_id: number | null;
+          brand_name: string | null;
+          code: string;
+          is_oem: boolean;
+          stock_quantity: number;
+          safety_stock: number;
+          cost_price: number | null;
+          suggested_retail_price: number | null;
+        }[];
+      }[];
+    },
+    enabled: activeTab === "stats",
   });
 
   const { data: lowStockData } = useQuery({
@@ -352,7 +399,7 @@ export default function ProductsPage() {
     setFormPackagings([]);
     setFormAccessories([]);
     setFormNotes("");
-    setFormBrand("");
+    setFormBrandId("");
     setFormIsActive(true);
     setFormFishParts([
       { part_name: "鱼腩", weight_g: 200 },
@@ -379,7 +426,7 @@ export default function ProductsPage() {
     setFormPortionWeight(product.portion_weight_g?.toString() ?? "");
     setFormPortionBoxes(product.portion_boxes?.toString() ?? "");
     setFormNotes(product.notes ?? "");
-    setFormBrand(product.brand ?? "");
+    setFormBrandId(product.brand_id ? String(product.brand_id) : "");
     setFormIsActive(product.is_active);
     // V3: 加载部位数据（从名称中解析，或从 product.notes 或扩展字段）
     // 目前简单处理：默认重置
@@ -396,6 +443,8 @@ export default function ProductsPage() {
           level: p.level,
           material_id: p.material_id,
           material_name: p.material_name,
+          brand_id: p.brand_id,
+          brand_name: p.brand_name,
           quantity: p.quantity,
           unit: p.unit,
           notes: p.notes,
@@ -455,7 +504,7 @@ export default function ProductsPage() {
       payload.min_price = null;
       payload.stock_quantity = 0;
       payload.safety_stock = 0;
-      payload.brand = formBrand.trim() || null;  // V3: 品牌
+      payload.brand_id = formBrandId ? Number(formBrandId) : null;
       // 自动计算单盒重量(kg)
       if (payload.portion_weight_g && payload.portion_boxes) {
         payload.unit_weight_kg =
@@ -510,6 +559,7 @@ export default function ProductsPage() {
           await api.post(`/v1/products/${productId}/packagings`, {
             level: p.level,
             material_id: p.material_id,
+            brand_id: p.brand_id || null,
             quantity: p.quantity,
             unit: p.unit || "个",
             notes: p.notes || null,
@@ -702,8 +752,8 @@ export default function ProductsPage() {
           </TableCell>
           <TableCell>{product.name}</TableCell>
           <TableCell>
-            {product.brand ? (
-              <Badge variant="outline" className="text-xs">{product.brand}</Badge>
+            {product.brand_name ? (
+              <Badge variant="outline" className="text-xs">{product.brand_name}</Badge>
             ) : (
               <span className="text-xs text-muted-foreground">-</span>
             )}
@@ -904,10 +954,11 @@ export default function ProductsPage() {
           setFilterLowStock(false);
         }}
       >
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="whole_fish">进口规格</TabsTrigger>
           <TabsTrigger value="finished_product">成品定义</TabsTrigger>
           <TabsTrigger value="byproduct">副产品</TabsTrigger>
+          <TabsTrigger value="stats">跨品牌统计</TabsTrigger>
         </TabsList>
 
         {["whole_fish", "finished_product", "byproduct"].map(
@@ -1008,6 +1059,65 @@ export default function ProductsPage() {
             </TabsContent>
           )
         )}
+
+        {/* 跨品牌统计Tab */}
+        <TabsContent value="stats" className="space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索产品名称..."
+                value={statsSearch}
+                onChange={(e) => setStatsSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          </div>
+          {statsLoading ? (
+            <div className="text-center py-8">加载中...</div>
+          ) : !statsData || statsData.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              暂无数据，请先创建成品定义
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {statsData.map((stat) => (
+                <div key={stat.product_name} className="border rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-lg">{stat.product_name}</h3>
+                      {stat.spec && <p className="text-sm text-muted-foreground">{stat.spec}</p>}
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold">{stat.total_stock}</div>
+                      <div className="text-xs text-muted-foreground">总库存 {stat.unit}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {stat.items.map((item) => (
+                      <div key={item.product_id} className="bg-muted/50 rounded p-3 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{item.brand_name ?? "无品牌"}</span>
+                          {item.is_oem && (
+                            <Badge variant="secondary" className="text-[10px] bg-purple-100 text-purple-700">OEM</Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">{item.code}</div>
+                        <div className="flex justify-between text-sm">
+                          <span>库存: {item.stock_quantity}</span>
+                          <span>安全: {item.safety_stock}</span>
+                        </div>
+                        {item.cost_price && (
+                          <div className="text-xs text-muted-foreground">成本: ¥{item.cost_price.toFixed(2)}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
       </Tabs>
 
       {/* ==================== 新增/编辑弹窗 ==================== */}
@@ -1092,13 +1202,27 @@ export default function ProductsPage() {
                     <h4 className="text-sm font-semibold">🏷️ 品牌</h4>
                     <div className="space-y-2">
                       <Label>品牌名称</Label>
-                      <Input list="brand-list" value={formBrand} onChange={(e) => setFormBrand(e.target.value)} placeholder="选择或输入新品牌" />
-                      <datalist id="brand-list">
-                        <option value="无品牌" />
-                        <option value="中挪三文鱼" />
-                        <option value="海兴悦三文鱼" />
-                        <option value="北辰海选汇" />
-                      </datalist>
+                      <Select value={formBrandId} onValueChange={(v) => setFormBrandId(v ?? "")}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择品牌">
+                            {(() => {
+                              const selected = brands.find((b) => String(b.id) === formBrandId);
+                              return selected ? selected.name : "选择品牌";
+                            })()}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">无品牌</SelectItem>
+                          {brands.map((b) => (
+                            <SelectItem key={b.id} value={String(b.id)}>
+                              <div className="flex items-center gap-2">
+                                {b.name}
+                                {b.is_oem && <Badge variant="secondary" className="text-[10px] bg-purple-100 text-purple-700">OEM</Badge>}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <p className="text-xs text-muted-foreground">品牌关联公司名称，一个公司可有多个品牌</p>
                   </div>
@@ -1193,11 +1317,17 @@ export default function ProductsPage() {
                             <SelectValue placeholder="选择配套产品" />
                           </SelectTrigger>
                           <SelectContent>
-                            {allProducts
-                              .filter((p: any) => p.category === "bom_material" || p.category === "byproduct")
+                            {(bomMaterials ?? [])
                               .map((p: any) => (
                                 <SelectItem key={p.id} value={String(p.id)}>
-                                  {p.name} ({p.code})
+                                  <div className="flex flex-col">
+                                    <span>{p.name} ({p.code})</span>
+                                    {p.suppliers && p.suppliers.length > 0 && (
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {p.suppliers[0].supplier_name} ¥{p.suppliers[0].unit_price?.toFixed(2) ?? '-'}
+                                      </span>
+                                    )}
+                                  </div>
                                 </SelectItem>
                               ))}
                           </SelectContent>
@@ -1239,7 +1369,7 @@ export default function ProductsPage() {
                 </div>
 
                 {/* 包装物配置 */}
-                <PackagingConfigSection materials={bomMaterials ?? []} packagings={formPackagings} onChange={setFormPackagings} />
+                <PackagingConfigSection materials={bomMaterials ?? []} brands={brands} packagings={formPackagings} onChange={setFormPackagings} />
               </>
             ) : (
               <div className="grid grid-cols-2 gap-4">
@@ -1387,8 +1517,8 @@ export default function ProductsPage() {
                         <div>
                           <span className="text-muted-foreground">品牌:</span>{" "}
                           <span className="ml-1">
-                            {detailProduct.brand ? (
-                              <Badge variant="outline" className="text-xs">{detailProduct.brand}</Badge>
+                            {detailProduct.brand_name ? (
+                              <Badge variant="outline" className="text-xs">{detailProduct.brand_name}</Badge>
                             ) : "-"}
                           </span>
                         </div>

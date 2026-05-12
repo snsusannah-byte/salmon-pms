@@ -221,10 +221,10 @@ function BatchReportsTab() {
                 <TableHead className="text-xs">日期</TableHead>
                 <TableHead className="text-xs">状态</TableHead>
                 <TableHead className="text-xs text-center">锁定</TableHead>
-                <TableHead className="text-xs text-right">采购成本(CNY)</TableHead>
                 <TableHead className="text-xs text-right">销售净额(CNY)</TableHead>
-                <TableHead className="text-xs text-right">净利润(CNY)</TableHead>
-                <TableHead className="text-xs text-right">利润率</TableHead>
+                <TableHead className="text-xs text-right">期初净利润留存</TableHead>
+                <TableHead className="text-xs text-right">本期经营净利润</TableHead>
+                <TableHead className="text-xs text-right">累计净利润总额</TableHead>
                 <TableHead className="text-xs text-center">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -259,15 +259,13 @@ function BatchReportsTab() {
                         <span className="text-muted-foreground" title="未锁定">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-xs text-right">{fmt$(item.total_purchase_cny)}</TableCell>
                     <TableCell className="text-xs text-right">{fmt$(item.total_sales_net)}</TableCell>
+                    <TableCell className="text-xs text-right">{fmt$(Number(item.cumulative_profit || 0) - Number(item.net_profit || 0))}</TableCell>
                     <TableCell className={cn("text-xs text-right font-medium", clsProfit(Number(item.net_profit)))}>
                       {fmt$(item.net_profit)}
                     </TableCell>
-                    <TableCell className={cn("text-xs text-right", clsProfit(Number(item.profit_margin || 0)))}>
-                      {item.profit_margin !== null && item.profit_margin !== undefined
-                        ? `${Number(item.profit_margin).toFixed(1)}%`
-                        : "-"}
+                    <TableCell className={cn("text-xs text-right font-medium", clsProfit(Number(item.cumulative_profit || 0)))}>
+                      {fmt$(item.cumulative_profit)}
                     </TableCell>
                     <TableCell className="text-center">
                       <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => { setDetailId(item.batch_id); setDetailOpen(true); }}>
@@ -531,21 +529,22 @@ function BatchReportsTab() {
       <div class="section-title" style="color:#7c3aed">📈 ${t.profitLoss}</div>
       <div class="row"><span>销售毛额</span><span>${fmt$(detailData.total_sales_amount)}</span></div>
       <div class="row red"><span>抹零</span><span>-${fmt$(detailData.total_rounding)}</span></div>
-      <div class="row red"><span>售后</span><span>-${fmt$(detailData.total_after_sales)}</span></div>
-      <div class="row red"><span>提成</span><span>-${fmt$(detailData.total_commission)}</span></div>
+      <div class="row red"><span>售后调整</span><span>-${fmt$(detailData.total_after_sales)}</span></div>
       <div class="row red"><span>折扣</span><span>-${fmt$(detailData.total_discount)}</span></div>
       <div class="row bold"><span>销售净额</span><span class="bold">${fmt$(detailData.total_sales_net)}</span></div>
-      <div class="row"><span>支出合计</span><span>${fmt$(detailData.total_expenses)}</span></div>
-      <div class="row"><span>账面损耗</span><span>${fmt$(detailData.shrinkage)}</span></div>
+      <div class="row red"><span>业务员提成</span><span>-${fmt$(detailData.total_commission)}</span></div>
+      <div class="row red"><span>账面损耗</span><span>-${fmt$(detailData.shrinkage)}</span></div>
+      <div class="row red"><span>支出合计</span><span>-${fmt$(detailData.total_expenses)}</span></div>
+      <div style="font-size:8pt;color:#999;margin-top:2pt;text-align:right">${isEn ? 'Expenses = Import Costs + Exchange' : '支出合计 = 进口费用 + 购汇登记'}</div>
       <div class="row bold ${Number(detailData.net_profit) >= 0 ? 'green' : 'red'}" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt"><span>${t.netProfit}</span><span>${fmt$(detailData.net_profit)}</span></div>
     </div>
   </div>
 
   <!-- 利润汇总 -->
   <div class="profit-bar">
-    <div><div class="label">期初净利润留存</div><div class="value">${fmt$(0)}</div></div>
+    <div><div class="label">期初净利润留存</div><div class="value">${fmt$(Number(detailData.cumulative_profit || 0) - Number(detailData.net_profit || 0))}</div></div>
     <div><div class="label">本期经营净利润</div><div class="value ${Number(detailData.net_profit) >= 0 ? 'green' : 'red'}">${fmt$(detailData.net_profit)}</div></div>
-    <div><div class="label">累计净利润总额</div><div class="value">${fmt$(detailData.net_profit)}</div></div>
+    <div><div class="label">累计净利润总额</div><div class="value">${fmt$(detailData.cumulative_profit)}</div></div>
   </div>
 
   <!-- 销售明细 -->
@@ -689,26 +688,48 @@ function BatchReportsTab() {
                 </div>
                 <div className="border rounded-lg p-2.5 space-y-1.5">
                   <p className="text-xs font-semibold text-purple-600">{detailLang === "zh" ? "损益分析" : "Profit/Loss"}</p>
+                  
+                  {/* 第一步：销售毛额 */}
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "销售毛额" : "Gross Sales"}</span><span className="font-medium">{fmt$(detailData.total_sales_amount)}</span></div>
+                  
+                  {/* 第二步：扣减项 → 算出销售净额 */}
                   {Number(detailData.total_scan_fee || 0) !== 0 && (
-                    <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "扫码费" : "Scan Fee"}</span><span className="text-red-500">-{fmt$(detailData.total_scan_fee)}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "扫码费" : "Scan Fee"}</span><span className="text-red-500">-{fmt$(detailData.total_scan_fee)}</span></div>
                   )}
                   {Number(detailData.total_rounding || 0) !== 0 && (
-                    <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "抹零" : "Rounding"}</span><span className="text-red-500">-{fmt$(detailData.total_rounding)}</span></div>
-                  )}
-                  {Number(detailData.total_commission || 0) !== 0 && (
-                    <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "提成" : "Commission"}</span><span className="text-red-500">-{fmt$(detailData.total_commission)}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "抹零" : "Rounding"}</span><span className="text-red-500">-{fmt$(detailData.total_rounding)}</span></div>
                   )}
                   {Number(detailData.total_after_sales || 0) !== 0 && (
-                    <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "售后调整" : "After Sales"}</span><span className="text-red-500">-{fmt$(detailData.total_after_sales)}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "售后调整" : "After Sales"}</span><span className="text-red-500">-{fmt$(detailData.total_after_sales)}</span></div>
                   )}
                   {Number(detailData.total_discount || 0) !== 0 && (
-                    <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "折扣" : "Discount"}</span><span className="text-red-500">-{fmt$(detailData.total_discount)}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "折扣" : "Discount"}</span><span className="text-red-500">-{fmt$(detailData.total_discount)}</span></div>
                   )}
-                  <div className="flex justify-between text-xs font-medium border-t border-dashed pt-1"><span className="text-muted-foreground">{detailLang === "zh" ? "销售净额" : "Net Sales"}</span><span className="font-medium">{fmt$(detailData.total_sales_net)}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "支出合计" : "Total Expense"}</span><span>{fmt$(detailData.total_expenses)}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "账面损耗" : "Shrinkage"}</span><span>{fmt$(detailData.shrinkage)}</span></div>
-                  <div className="flex justify-between text-xs font-medium border-t pt-1"><span className={clsProfit(Number(detailData.net_profit))}>{detailLang === "zh" ? "净利润" : "Net Profit"}</span><span className={clsProfit(Number(detailData.net_profit))}>{fmt$(detailData.net_profit)}</span></div>
+                  <div className="flex justify-between text-xs font-medium border-t border-dashed pt-1">
+                    <span className="text-muted-foreground">{detailLang === "zh" ? "销售净额" : "Net Sales"}</span>
+                    <span className="font-medium">{fmt$(detailData.total_sales_net)}</span>
+                  </div>
+                  
+                  {/* 第三步：继续扣减 → 成本费用 */}
+                  {Number(detailData.total_commission || 0) !== 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "业务员提成" : "Commission"}</span><span className="text-red-500">-{fmt$(detailData.total_commission)}</span></div>
+                  )}
+                  {Number(detailData.shrinkage || 0) !== 0 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "账面损耗(采购重量-销售重量*汇率)" : "Shrinkage(Purchase-Sales*Rate)"}</span>
+                      <span className="text-red-500">-{fmt$(detailData.shrinkage)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "支出合计(进口费用+购汇登记)" : "Total Expense(Import+Exchange)"}</span>
+                    <span className="text-red-500">-{fmt$(detailData.total_expenses)}</span>
+                  </div>
+                  
+                  {/* 第四步：净利润 */}
+                  <div className="flex justify-between text-xs font-medium border-t pt-1">
+                    <span className={clsProfit(Number(detailData.net_profit))}>{detailLang === "zh" ? "净利润" : "Net Profit"}</span>
+                    <span className={clsProfit(Number(detailData.net_profit))}>{fmt$(detailData.net_profit)}</span>
+                  </div>
                 </div>
               </div>
 
@@ -1027,10 +1048,48 @@ function InvoiceReportsTab() {
                 </div>
                 <div className="border rounded-lg p-2.5 space-y-1.5">
                   <p className="text-xs font-semibold text-purple-600">{detailLang === "zh" ? "损益分析" : "Profit/Loss"}</p>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "销售净额" : "Net Sales"}</span><span className="font-medium">{fmt$(detailData.total_sales_net)}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "支出合计" : "Total Expense"}</span><span>{fmt$(detailData.total_expenses)}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "账面损耗" : "Shrinkage"}</span><span>{fmt$(detailData.shrinkage)}</span></div>
-                  <div className="flex justify-between text-xs font-medium border-t pt-1"><span className={clsProfit(Number(detailData.net_profit))}>{detailLang === "zh" ? "净利润" : "Net Profit"}</span><span className={clsProfit(Number(detailData.net_profit))}>{fmt$(detailData.net_profit)}</span></div>
+                  
+                  {/* 第一步：销售毛额 */}
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "销售毛额" : "Gross Sales"}</span><span className="font-medium">{fmt$(detailData.total_sales_amount)}</span></div>
+                  
+                  {/* 第二步：扣减项 → 算出销售净额 */}
+                  {Number(detailData.total_scan_fee || 0) !== 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "扫码手续费" : "Scan Fee"}</span><span className="text-red-500">-{fmt$(detailData.total_scan_fee)}</span></div>
+                  )}
+                  {Number(detailData.total_rounding || 0) !== 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "抹零" : "Rounding"}</span><span className="text-red-500">-{fmt$(detailData.total_rounding)}</span></div>
+                  )}
+                  {Number(detailData.total_after_sales || 0) !== 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "售后调整" : "After Sales"}</span><span className="text-red-500">-{fmt$(detailData.total_after_sales)}</span></div>
+                  )}
+                  {Number(detailData.total_discount || 0) !== 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "折扣" : "Discount"}</span><span className="text-red-500">-{fmt$(detailData.total_discount)}</span></div>
+                  )}
+                  <div className="flex justify-between text-xs font-medium border-t border-dashed pt-1">
+                    <span className="text-muted-foreground">{detailLang === "zh" ? "销售净额" : "Net Sales"}</span>
+                    <span className="font-medium">{fmt$(detailData.total_sales_net)}</span>
+                  </div>
+                  
+                  {/* 第三步：继续扣减 → 成本费用 */}
+                  {Number(detailData.total_commission || 0) !== 0 && (
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "业务员提成" : "Commission"}</span><span className="text-red-500">-{fmt$(detailData.total_commission)}</span></div>
+                  )}
+                  {Number(detailData.shrinkage || 0) !== 0 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "账面损耗(采购重量-销售重量*汇率)" : "Shrinkage(Purchase-Sales*Rate)"}</span>
+                      <span className="text-red-500">-{fmt$(detailData.shrinkage)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "支出合计(进口费用+购汇登记)" : "Total Expense(Import+Exchange)"}</span>
+                    <span className="text-red-500">-{fmt$(detailData.total_expenses)}</span>
+                  </div>
+                  
+                  {/* 第四步：净利润 */}
+                  <div className="flex justify-between text-xs font-medium border-t pt-1">
+                    <span className={clsProfit(Number(detailData.net_profit))}>{detailLang === "zh" ? "净利润" : "Net Profit"}</span>
+                    <span className={clsProfit(Number(detailData.net_profit))}>{fmt$(detailData.net_profit)}</span>
+                  </div>
                 </div>
               </div>
 
@@ -1040,7 +1099,7 @@ function InvoiceReportsTab() {
                 <div className="grid grid-cols-3 gap-4 text-xs">
                   <div className="text-center">
                     <div className="text-muted-foreground mb-0.5">{detailLang === "zh" ? "期初净利润留存" : "Opening Profit"}</div>
-                    <div className="font-semibold">{fmt$(0)}</div>
+                    <div className="font-semibold">{fmt$(Number(detailData.cumulative_profit || 0) - Number(detailData.net_profit || 0))}</div>
                   </div>
                   <div className="text-center">
                     <div className="text-muted-foreground mb-0.5">{detailLang === "zh" ? "本期经营净利润" : "Current Profit"}</div>
@@ -1048,7 +1107,7 @@ function InvoiceReportsTab() {
                   </div>
                   <div className="text-center">
                     <div className="text-muted-foreground mb-0.5">{detailLang === "zh" ? "累计净利润总额" : "Cumulative Profit"}</div>
-                    <div className="font-semibold">{fmt$(detailData.net_profit)}</div>
+                    <div className="font-semibold">{fmt$(detailData.cumulative_profit)}</div>
                   </div>
                 </div>
               </div>

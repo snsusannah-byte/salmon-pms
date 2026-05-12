@@ -18,7 +18,7 @@ class SalesReceiptBase(BaseModel):
 
 
 class SalesReceiptCreate(SalesReceiptBase):
-    pass
+    rounding_adjustment: Optional[Decimal] = Field(0, ge=0, description="抹零调整金额")
 
 
 class SalesReceiptUpdate(BaseModel):
@@ -35,6 +35,7 @@ class SalesReceiptResponse(SalesReceiptBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     sale_id: int
+    transaction_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

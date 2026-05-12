@@ -30,6 +30,7 @@ class SalesService:
         db: AsyncSession,
         batch_id: Optional[int] = None,
         customer_id: Optional[int] = None,
+        ids: Optional[List[int]] = None,
         status: Optional[SalesStatus] = None,
         search: Optional[str] = None,
         skip: int = 0,
@@ -50,6 +51,8 @@ class SalesService:
             filters.append(WholeFishSale.batch_id == batch_id)
         if customer_id:
             filters.append(WholeFishSale.customer_id == customer_id)
+        if ids:
+            filters.append(WholeFishSale.id.in_(ids))
         if status:
             filters.append(WholeFishSale.status == status)
 
@@ -68,7 +71,7 @@ class SalesService:
             query = query.where(and_(*filters))
             count_query = count_query.where(and_(*filters))
 
-        query = query.order_by(WholeFishSale.sale_date.desc())
+        query = query.order_by(WholeFishSale.sale_date.desc(), WholeFishSale.id.desc())
         query = query.offset(skip).limit(limit)
 
         result = await db.execute(query)
@@ -151,10 +154,36 @@ class SalesService:
         # 提取 items 数据
         items_data = data.pop("items", None)
 
+        # 日期字段需要正确转换
+        if "sale_date" in data and isinstance(data["sale_date"], str):
+            from datetime import date
+            data["sale_date"] = date.fromisoformat(data["sale_date"])
+
         # 更新主表字段
         for field, value in data.items():
-            if value is not None:
+            if value is not None or field == "salesperson_id":
                 setattr(sale, field, value)
+        
+        # 重新计算净金额（调整后）
+        def _dec(v):
+            return Decimal(str(v)) if v is not None else Decimal("0")
+        sale.net_amount = max(
+            Decimal("0"),
+            _dec(sale.gross_amount)
+            - _dec(sale.scan_fee)
+            - _dec(sale.rounding_adjustment)
+            - _dec(sale.after_sales_adjustment)
+            - _dec(sale.discount)
+            - _dec(sale.commission)
+        )
+        
+        # 同步更新收款状态
+        if Decimal(str(sale.paid_amount or 0)) >= sale.net_amount:
+            sale.status = SalesStatus.FULLY_PAID
+        elif Decimal(str(sale.paid_amount or 0)) > 0:
+            sale.status = SalesStatus.PARTIAL_PAID
+        else:
+            sale.status = SalesStatus.PENDING
         
         # 如果提供了 items，替换子项
         if items_data is not None:
@@ -194,9 +223,29 @@ class SalesService:
             if total_weight > 0:
                 sale.weight_kg = total_weight
                 sale.gross_amount = total_amount
-                sale.net_amount = total_amount
                 sale.box_count = total_box_count
                 sale.unit_price = total_amount / total_weight
+        
+        # 重新计算净金额（确保包含所有调整项）
+        def _dec(v):
+            return Decimal(str(v)) if v is not None else Decimal("0")
+        sale.net_amount = max(
+            Decimal("0"),
+            _dec(sale.gross_amount)
+            - _dec(sale.scan_fee)
+            - _dec(sale.rounding_adjustment)
+            - _dec(sale.after_sales_adjustment)
+            - _dec(sale.discount)
+            - _dec(sale.commission)
+        )
+        
+        # 同步更新收款状态
+        if Decimal(str(sale.paid_amount or 0)) >= sale.net_amount:
+            sale.status = SalesStatus.FULLY_PAID
+        elif Decimal(str(sale.paid_amount or 0)) > 0:
+            sale.status = SalesStatus.PARTIAL_PAID
+        else:
+            sale.status = SalesStatus.PENDING
         
         # 同步提成记录
         await SalesService._sync_commission_record(db, sale)
@@ -241,7 +290,7 @@ class SalesService:
         record = CommissionRecord(
             salesperson_id=sale.salesperson_id,
             sale_id=sale.id,
-            sale_date=sale.sale_date,
+            sale_date=sale.sale_date if isinstance(sale.sale_date, date) else date.fromisoformat(str(sale.sale_date)),
             sale_amount=sale.net_amount,
             weight_kg=weight,
             commission_rate=rate,
@@ -256,12 +305,36 @@ class SalesService:
     @staticmethod
     async def add_receipt(db: AsyncSession, sale_id: int, data: dict) -> SalesReceipt:
         from app.models import TransactionRecord, TransactionType, TransactionCategory, Company
+        from fastapi import HTTPException
         sale = await SalesService.get_sale_by_id(db, sale_id)
         if not sale:
-            from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="销售记录不存在")
         if sale.is_locked:
             raise HTTPException(status_code=400, detail="销售记录已锁定")
+
+        # 获取实收金额
+        received_amount = Decimal(str(data.get("amount", 0)))
+        if received_amount <= 0:
+            raise HTTPException(status_code=400, detail="收款金额必须大于0")
+
+        # 获取用户指定的抹零（默认0）
+        user_rounding = Decimal(str(data.pop("rounding_adjustment", 0) or 0))
+        if user_rounding > 0:
+            sale.rounding_adjustment = user_rounding
+            await db.flush()
+
+        # 检查是否还有未付余额
+        remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
+        if remaining <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"销售单 {sale.sale_no or f'#{sale.id}'} 已全额收款（净金额 ¥{sale.net_amount}，已收 ¥{sale.paid_amount}），无需再次收款。"
+            )
+        if received_amount > remaining:
+            raise HTTPException(
+                status_code=400,
+                detail=f"收款金额 ¥{received_amount} 超过未付余额 ¥{remaining}"
+            )
 
         receipt = SalesReceipt(sale_id=sale_id, **data)
         db.add(receipt)
@@ -292,6 +365,9 @@ class SalesService:
             notes=data.get("notes"),
             is_confirmed=True,
         )
+        # 设置关联销售单（JSON 数组）
+        import json
+        transaction.related_sale_ids = json.dumps([sale.id])
         db.add(transaction)
         await db.flush()
         
@@ -308,7 +384,6 @@ class SalesService:
 
     @staticmethod
     async def delete_receipt(db: AsyncSession, receipt_id: int) -> None:
-        from app.models import TransactionRecord
         result = await db.execute(select(SalesReceipt).where(SalesReceipt.id == receipt_id))
         receipt = result.scalar_one_or_none()
         if not receipt:
@@ -318,9 +393,10 @@ class SalesService:
         sale = await SalesService.get_sale_by_id(db, receipt.sale_id)
         if sale and sale.is_locked:
             raise HTTPException(status_code=400, detail="销售记录已锁定")
-        
-        # 同步删除关联的交易流水
+
+        # 同步删除关联的交易流水（如果存在）
         if receipt.transaction_id:
+            from app.models import TransactionRecord
             trans_result = await db.execute(
                 select(TransactionRecord).where(TransactionRecord.id == receipt.transaction_id)
             )
@@ -333,6 +409,10 @@ class SalesService:
 
         if sale:
             await SalesService._update_paid_amount(db, sale)
+            # 如果已全额清零，同步清零因收款产生的抹零
+            if Decimal(str(sale.paid_amount or 0)) == 0:
+                sale.rounding_adjustment = Decimal("0")
+                await db.commit()
 
     @staticmethod
     async def _update_paid_amount(db: AsyncSession, sale: WholeFishSale) -> None:
@@ -345,12 +425,12 @@ class SalesService:
         # 重新计算净金额（确保和各调整项一致）
         sale.net_amount = max(
             Decimal("0"),
-            sale.gross_amount
-            - (sale.scan_fee or Decimal("0"))
-            - (sale.rounding_adjustment or Decimal("0"))
-            - (sale.after_sales_adjustment or Decimal("0"))
-            - (sale.discount or Decimal("0"))
-            - (sale.commission or Decimal("0"))
+            Decimal(str(sale.gross_amount or 0))
+            - Decimal(str(sale.scan_fee or 0))
+            - Decimal(str(sale.rounding_adjustment or 0))
+            - Decimal(str(sale.after_sales_adjustment or 0))
+            - Decimal(str(sale.discount or 0))
+            - Decimal(str(sale.commission or 0))
         )
 
         # 更新状态

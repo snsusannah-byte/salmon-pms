@@ -19,7 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Plus, Search, Eye, Pencil, Trash2, X, DollarSign, Receipt, AlertTriangle, Trash,
+  Plus, Search, Eye, Pencil, Trash2, X, DollarSign, Receipt, AlertTriangle, Trash, Lock, Unlock, Banknote, SlidersHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BatchImportButton } from "@/components/BatchImportButton";
@@ -121,6 +121,12 @@ export function SalesPage() {
   const [deleteMutationPending, setDeleteMutationPending] = useState(false);
   const [adjustDialogOpen, setAdjustDialogOpen] = useState(false);
   const [adjustSale, setAdjustSale] = useState<Sale | null>(null);
+  const [receiptSale, setReceiptSale] = useState<Sale | null>(null);
+  const [receiptDialogOpen, setReceiptDialogOpen] = useState(false);
+  const [receiptAmount, setReceiptAmount] = useState("");
+  const [receiptRounding, setReceiptRounding] = useState("0");
+  const [receiptBankAccountId, setReceiptBankAccountId] = useState("");
+  const [receiptDate, setReceiptDate] = useState(new Date().toISOString().split("T")[0]);
   const [adjRounding, setAdjRounding] = useState("0");
   const [adjAfterSales, setAdjAfterSales] = useState("0");
   const [adjAfterSalesIssue, setAdjAfterSalesIssue] = useState("");
@@ -167,6 +173,7 @@ export function SalesPage() {
     totalNetAmount: allSalesData?.items?.reduce((sum, s) => sum + Number(s.net_amount || 0), 0) || 0,
     totalPaid: allSalesData?.items?.reduce((sum, s) => sum + Number(s.paid_amount || 0), 0) || 0,
     totalUnpaid: allSalesData?.items?.reduce((sum, s) => sum + (Number(s.net_amount || 0) - Number(s.paid_amount || 0)), 0) || 0,
+    totalAfterSales: allSalesData?.items?.reduce((sum, s) => sum + Number(s.after_sales_adjustment || 0), 0) || 0,
   };
 
   const toggleSelectAll = () => {
@@ -200,15 +207,56 @@ export function SalesPage() {
     onError: (err: any) => toast.error(err.response?.data?.detail || "批量删除失败"),
   });
 
+  const handleBatchUnlock = async () => {
+    if (selectedIds.size === 0) { toast.error("请先选择要解锁的记录"); return; }
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await api.post("/v1/sales/whole-fish/batch-unlock", { ids });
+      toast.success(`批量解锁成功：${res.data.unlocked || 0} 条已解锁，${res.data.skipped || 0} 条跳过`);
+      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      setSelectedIds(new Set());
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "批量解锁失败");
+    }
+  };
+
   const handleBatchDelete = () => {
     if (selectedIds.size === 0) { toast.error("请先选择要删除的记录"); return; }
     setBatchDeleteDialogOpen(true);
+  };
+
+  const handleBatchLock = async () => {
+    if (selectedIds.size === 0) { toast.error("请先选择要锁定的记录"); return; }
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await api.post("/v1/sales/whole-fish/batch-lock", { ids });
+      toast.success(`批量锁定成功：${res.data.locked || 0} 条已锁定，${res.data.skipped || 0} 条跳过`);
+      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      setSelectedIds(new Set());
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "批量锁定失败");
+    }
   };
 
   const handleDelete = async (sale: Sale) => {
     if (sale.is_locked) { toast.error("销售记录已锁定，不能删除"); return; }
     setDeleteSale(sale);
     setDeleteDialogOpen(true);
+  };
+
+  const handleLockToggle = async (sale: Sale) => {
+    try {
+      if (sale.is_locked) {
+        await api.post(`/v1/sales/whole-fish/${sale.id}/unlock`);
+        toast.success("销售记录已解锁");
+      } else {
+        await api.post(`/v1/sales/whole-fish/${sale.id}/lock`);
+        toast.success("销售记录已锁定");
+      }
+      queryClient.invalidateQueries({ queryKey: ["sales"] });
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "操作失败");
+    }
   };
 
   const confirmDelete = async () => {
@@ -242,20 +290,69 @@ export function SalesPage() {
 
   const handleOpenAdjust = (sale: Sale) => {
     setAdjustSale(sale);
-    setAdjRounding(String(sale.rounding_adjustment ?? 0));
-    setAdjAfterSales(String(sale.after_sales_adjustment ?? 0));
+    const afterSales = String(sale.after_sales_adjustment ?? 0);
+    const discount = String(sale.discount ?? 0);
+    setAdjAfterSales(afterSales);
     setAdjAfterSalesIssue(sale.notes ?? "");
-    setAdjDiscount(String(sale.discount ?? 0));
+    setAdjDiscount(discount);
+    setAdjRounding(String(sale.rounding_adjustment ?? 0));
     setAdjCommission(String(sale.commission ?? 0));
     setAdjBankAccountId("");
     setAdjReceiptDate(new Date().toISOString().split("T")[0]);
-    // 默认收款 = 应收金额（毛金额 - 折扣 - 售后调整）
-    const gross = Number(sale.gross_amount || 0);
-    const discount = Number(sale.discount || 0);
-    const afterSales = Number(sale.after_sales_adjustment || 0);
-    const net = Math.max(0, gross - discount - afterSales);
-    setAdjPaidAmount(String(net));
     setAdjustDialogOpen(true);
+  };
+
+  const openReceipt = (sale: Sale) => {
+    if (sale.is_locked) { toast.error("销售记录已锁定，不能收款"); return; }
+    setReceiptSale(sale);
+    const receivable = Math.max(0, Number(sale.net_amount || 0) - Number(sale.paid_amount || 0));
+    setReceiptAmount(receivable > 0 ? receivable.toFixed(2) : "");
+    setReceiptRounding("0"); // 默认抹零为0（实收=应收）
+    setReceiptBankAccountId("");
+    setReceiptDate(new Date().toISOString().split("T")[0]);
+    setReceiptDialogOpen(true);
+  };
+
+  // 当实收金额变化时，实时计算抹零 = 应收 - 实收
+  const handleReceiptAmountChange = (value: string) => {
+    setReceiptAmount(value);
+    if (!receiptSale) return;
+    const receivable = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
+    const actual = Number(value) || 0;
+    const rounding = Math.max(0, receivable - actual);
+    setReceiptRounding(rounding > 0 ? rounding.toFixed(2) : "0");
+  };
+
+  const handleSaveReceipt = async () => {
+    if (!receiptSale) return;
+    const amount = Number(receiptAmount);
+    if (amount <= 0) {
+      toast.error("收款金额必须大于0");
+      return;
+    }
+    // 前端校验：实收不能超过应收（net - paid）
+    const receivable = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
+    if (amount > receivable) {
+      toast.error(`收款金额不能超过应收余额 ¥${receivable.toFixed(2)}`);
+      return;
+    }
+    try {
+      // 收款时传 rounding_adjustment（用户手动控制抹零）
+      await api.post(`/v1/sales/whole-fish/${receiptSale.id}/receipts`, {
+        receipt_date: receiptDate,
+        amount: amount,
+        payment_method: "bank_transfer",
+        bank_account_id: receiptBankAccountId ? Number(receiptBankAccountId) : null,
+        rounding_adjustment: Number(receiptRounding || 0),
+        notes: "销售收款",
+      });
+      toast.success("收款成功");
+      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      setReceiptDialogOpen(false);
+      setReceiptSale(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "收款失败");
+    }
   };
 
   const adjustMutation = useMutation({
@@ -274,37 +371,14 @@ export function SalesPage() {
 
   const handleSaveAdjust = async () => {
     if (!adjustSale) return;
-    const gross = Number(adjustSale.gross_amount);
-    const net = Math.max(0, gross
-      - Number(adjustSale.scan_fee || 0)
-      - Number(adjRounding || 0)
-      - Number(adjAfterSales || 0)
-      - Number(adjDiscount || 0)
-      - Number(adjustSale.commission || 0)
-    );
-    const paidAmount = Number(adjPaidAmount || 0);
 
     try {
-      // 先保存调整项
+      // 保存调整项（售后 + 折扣，抹零在收款弹窗控制）
       await api.put(`/v1/sales/whole-fish/${adjustSale.id}`, {
-        rounding_adjustment: Number(adjRounding || 0),
         after_sales_adjustment: Number(adjAfterSales || 0),
         discount: Number(adjDiscount || 0),
-        net_amount: net,
         notes: adjAfterSalesIssue.trim() || undefined,
       });
-
-      // 如果本次收款金额 > 0，创建收款记录
-      if (paidAmount > 0) {
-        await api.post(`/v1/sales/whole-fish/${adjustSale.id}/receipts`, {
-          receipt_date: adjReceiptDate || new Date().toISOString().split("T")[0],
-          amount: paidAmount,
-          payment_method: "bank_transfer",
-          bank_account_id: adjBankAccountId ? Number(adjBankAccountId) : null,
-          reference_no: null,
-          notes: "销售调整收款",
-        });
-      }
 
       toast.success("调整已保存");
       queryClient.invalidateQueries({ queryKey: ["sales"] });
@@ -381,15 +455,9 @@ export function SalesPage() {
 
               {/* 调整项 */}
               <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs">抹零</Label>
-                    <Input inputMode="decimal" value={adjRounding} onChange={(e) => setAdjRounding(e.target.value)} placeholder="0" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">折扣</Label>
-                    <Input inputMode="decimal" value={adjDiscount} onChange={(e) => setAdjDiscount(e.target.value)} placeholder="0" />
-                  </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">折扣</Label>
+                  <Input inputMode="decimal" value={adjDiscount} onChange={(e) => setAdjDiscount(e.target.value)} placeholder="0" />
                 </div>
 
                 <div className="space-y-1">
@@ -399,99 +467,29 @@ export function SalesPage() {
                     <Input value={adjAfterSalesIssue} onChange={(e) => setAdjAfterSalesIssue(e.target.value)} placeholder="售后问题描述" />
                   </div>
                 </div>
-
-                {/* 本次收款 - 核心区域 */}
-                <div className="space-y-2 border-t pt-3 mt-3">
-                  <Label className="text-sm font-medium text-green-700">💰 本次收款</Label>
-                  <div className="flex gap-2 items-center">
-                    <Input
-                      inputMode="decimal"
-                      value={adjPaidAmount}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setAdjPaidAmount(val);
-                        // 自动计算抹零
-                        const paid = Number(val || 0);
-                        const gross = Number(adjustSale?.gross_amount || 0);
-                        const discount = Number(adjDiscount || 0);
-                        const afterSales = Number(adjAfterSales || 0);
-                        const net = Math.max(0, gross - discount - afterSales);
-                        if (paid > 0 && paid <= net) {
-                          setAdjRounding(String((net - paid).toFixed(2)));
-                        } else if (paid >= net) {
-                          setAdjRounding("0");
-                        }
-                      }}
-                      placeholder="输入实收金额"
-                      className="text-lg"
-                    />
-                    <span className="text-sm text-muted-foreground whitespace-nowrap">
-                      应收: ${adjustSale ? Math.max(0, Number(adjustSale.gross_amount) - Number(adjDiscount || 0) - Number(adjAfterSales || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs">收款银行</Label>
-                      <Select value={adjBankAccountId} onValueChange={(v) => setAdjBankAccountId(v ?? "")}>
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue placeholder="选择银行" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {bankAccounts.map((b: any) => (
-                            <SelectItem key={b.id} value={String(b.id)} className="text-xs">{b.bank_name} {b.account_number?.slice(-4)}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs">收款日期</Label>
-                      <Input type="date" value={adjReceiptDate} onChange={(e) => setAdjReceiptDate(e.target.value)} className="h-8 text-xs" />
-                    </div>
-                  </div>
-                  {Number(adjRounding) > 0 && (
-                    <div className="text-xs text-orange-600">
-                      自动抹零: ${Number(adjRounding).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                  )}
-                </div>
               </div>
 
               {/* 计算结果 */}
               <div className="bg-muted/50 rounded-md p-3 text-sm space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">毛金额</span>
-                  <span>${adjustSale ? Number(adjustSale.gross_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
-                </div>
-                {Number(adjDiscount) > 0 && (
-                  <div className="flex justify-between text-orange-600">
-                    <span>折扣</span>
-                    <span>-${Number(adjDiscount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-                {Number(adjAfterSales) > 0 && (
-                  <div className="flex justify-between text-orange-600">
-                    <span>售后调整</span>
-                    <span>-${Number(adjAfterSales).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-                {Number(adjRounding) > 0 && (
-                  <div className="flex justify-between text-orange-600">
-                    <span>抹零</span>
-                    <span>-${Number(adjRounding).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-                <div className="flex justify-between font-medium border-t pt-1">
-                  <span>净金额</span>
-                  <span>${adjustSale ? Math.max(0, Number(adjustSale.gross_amount) - Number(adjRounding || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
+                  <span className="text-muted-foreground">净金额</span>
+                  <span>${adjustSale ? Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0) - Number(adjustSale.rounding_adjustment || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
                 </div>
                 <div className="flex justify-between text-green-600">
-                  <span>本次收款</span>
-                  <span>+${Number(adjPaidAmount || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span>已收金额</span>
+                  <span>${adjustSale ? Number(adjustSale.paid_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
                 </div>
                 <div className="flex justify-between font-medium border-t pt-1">
                   <span>未付余额</span>
-                  <span className={adjustSale && (Number(adjustSale.gross_amount) - Number(adjRounding || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0) - Number(adjPaidAmount || 0)) <= 0 ? "text-green-600" : "text-orange-600"}>
-                    ${adjustSale ? Math.max(0, Number(adjustSale.gross_amount) - Number(adjRounding || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0) - Number(adjPaidAmount || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}
+                  <span className={(() => {
+                    const net = adjustSale ? Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0) - Number(adjustSale.rounding_adjustment || 0)) : 0;
+                    const remaining = net - Number(adjustSale?.paid_amount || 0);
+                    return remaining <= 0 ? "text-green-600" : "text-orange-600";
+                  })()}>
+                    ${adjustSale ? Math.max(0, (() => {
+                      const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0) - Number(adjustSale.rounding_adjustment || 0));
+                      return net - Number(adjustSale.paid_amount || 0);
+                    })()).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}
                   </span>
                 </div>
               </div>
@@ -499,8 +497,221 @@ export function SalesPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAdjustDialogOpen(false)}>取消</Button>
             <Button onClick={handleSaveAdjust} disabled={adjustMutation.isPending}>
-              {adjustMutation.isPending ? "保存中..." : "保存收款"}
+              {adjustMutation.isPending ? "保存中..." : "保存调整"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 收款弹窗 */}
+      <Dialog open={receiptDialogOpen} onOpenChange={setReceiptDialogOpen}>
+        <DialogContent className="max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle>💰 销售收款</DialogTitle>
+            <DialogDescription>
+              {receiptSale ? `销售单: ${receiptSale.sale_no ?? `#${receiptSale.id}`} · 客户: ${receiptSale.customer_name ?? "-"}` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* 金额明细 */}
+            <div className="bg-muted/50 rounded-md p-3 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">销售金额</span>
+                <span className="font-medium tabular-nums">¥{receiptSale ? Number(receiptSale.gross_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
+              </div>
+              {/* 调整项（有值才显示） */}
+              {receiptSale && Number(receiptSale.rounding_adjustment) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>抹零调整</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.rounding_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {receiptSale && Number(receiptSale.after_sales_adjustment) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>售后调整</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.after_sales_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {receiptSale && Number(receiptSale.discount) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>折扣</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.discount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {receiptSale && Number(receiptSale.commission) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>提成</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.commission).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {receiptSale && Number(receiptSale.scan_fee) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>扫码手续费</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.scan_fee).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">已收金额</span>
+                <span className="font-medium tabular-nums">¥{receiptSale ? Number(receiptSale.paid_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
+              </div>
+              <div className="flex justify-between font-semibold border-t border-dashed pt-2 mt-1">
+                <span>应收金额</span>
+                <span className="text-blue-600 text-base tabular-nums">
+                  ¥{receiptSale ? Math.max(0, Number(receiptSale.net_amount) - Number(receiptSale.paid_amount)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>本次实收金额</Label>
+              <Input
+                inputMode="decimal"
+                value={receiptAmount}
+                onChange={(e) => handleReceiptAmountChange(e.target.value)}
+                placeholder="输入实际收款金额"
+                className="text-lg"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs">抹零调整</Label>
+              <Input
+                inputMode="decimal"
+                value={receiptRounding}
+                onChange={(e) => setReceiptRounding(e.target.value)}
+                placeholder="0"
+                className="text-sm"
+              />
+              <p className="text-xs text-muted-foreground">本次收款时减免的尾差金额，默认0</p>
+            </div>
+
+            {/* 动态抹零/多收标签 */}
+            {(() => {
+              if (!receiptSale || !receiptAmount) return null;
+              const receivable = Math.max(0, Number(receiptSale.net_amount) - Number(receiptSale.paid_amount));
+              const actual = Number(receiptAmount) || 0;
+              const rounding = Number(receiptRounding) || 0;
+              const diff = receivable - actual - rounding;
+              if (diff === 0) {
+                return (
+                  <div className="flex justify-end items-center mt-1.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                    <span className="text-xs text-green-600 font-medium">已付清 ✓</span>
+                  </div>
+                );
+              }
+              if (diff > 0) {
+                return (
+                  <div className="flex justify-end items-center gap-2 mt-1.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-600 border border-orange-200">
+                      未付余额
+                    </span>
+                    <span className="text-sm font-semibold text-orange-600 tabular-nums">¥{diff.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                );
+              }
+              return (
+                <div className="flex justify-end items-center gap-2 mt-1.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-600 border border-green-200">
+                    ↑ 多收
+                  </span>
+                  <span className="text-sm font-semibold text-green-600 tabular-nums">¥{Math.abs(diff).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              );
+            })()}
+            {/* 计算公式提示 */}
+            {(() => {
+              if (!receiptSale || !receiptAmount) return null;
+              const receivable = Math.max(0, Number(receiptSale.net_amount) - Number(receiptSale.paid_amount));
+              const actual = Number(receiptAmount) || 0;
+              const rounding = Number(receiptRounding) || 0;
+              const diff = receivable - actual - rounding;
+              if (diff === 0) return null;
+              return (
+                <div className="flex justify-end mt-0.5">
+                  <span className="text-xs text-muted-foreground">
+                    应收 ¥{receivable.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 实收 ¥{actual.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {rounding > 0 ? `- 抹零 ¥${rounding.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""} = {diff > 0 ? `未付 ¥${diff.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `多收 ¥${Math.abs(diff).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  </span>
+                </div>
+              );
+            })()}
+
+            <div className="space-y-1">
+              <Label className="text-xs">收款银行</Label>
+              <Select value={receiptBankAccountId} onValueChange={(v) => setReceiptBankAccountId(v ?? "")}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="选择银行">
+                    {(() => {
+                      const b = bankAccounts.find((ba: any) => String(ba.id) === receiptBankAccountId);
+                      return b ? `${b.bank_name} ···${b.account_number?.slice(-4)}` : "选择银行";
+                    })()}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {bankAccounts.map((b: any) => (
+                    <SelectItem key={b.id} value={String(b.id)} className="text-xs">{b.bank_name} ···{b.account_number?.slice(-4)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">收款日期</Label>
+              <Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} className="h-8 text-xs" />
+            </div>
+
+            {/* 本次收款后未付 */}
+            <div className="border-t pt-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium">本次收款后未付</span>
+                <span className={`text-lg font-bold tabular-nums ${(() => {
+                  if (!receiptSale) return "text-gray-400";
+                  const remaining = Math.max(0, Number(receiptSale.net_amount) - Number(receiptSale.paid_amount));
+                  if (!receiptAmount) {
+                    return remaining <= 0 ? "text-green-600" : "text-orange-600";
+                  }
+                  const actual = Number(receiptAmount) || 0;
+                  const rounding = Number(receiptRounding) || 0;
+                  const afterPay = Math.max(0, remaining - actual - rounding);
+                  return afterPay <= 0 ? "text-green-600" : "text-orange-600";
+                })()}`}>
+                  ¥{(() => {
+                    if (!receiptSale) return "0.00";
+                    const remaining = Math.max(0, Number(receiptSale.net_amount) - Number(receiptSale.paid_amount));
+                    if (!receiptAmount) {
+                      return remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    }
+                    const actual = Number(receiptAmount) || 0;
+                    const rounding = Number(receiptRounding) || 0;
+                    const afterPay = Math.max(0, remaining - actual - rounding);
+                    return afterPay.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                  })()}
+                </span>
+              </div>
+              {receiptAmount && Number(receiptAmount) > 0 && (() => {
+                const receivable = Math.max(0, Number(receiptSale?.net_amount || 0) - Number(receiptSale?.paid_amount || 0));
+                const actual = Number(receiptAmount) || 0;
+                const rounding = Number(receiptRounding) || 0;
+                const afterPay = receivable - actual - rounding;
+                if (afterPay > 0) {
+                  return (
+                    <div className="flex justify-end mt-1">
+                      <span className="text-xs text-muted-foreground">应收 ¥{receivable.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 实收 ¥{actual.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 抹零 ¥{rounding.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = 未付 ¥{afterPay.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  );
+                }
+                if (afterPay <= 0) {
+                  return (
+                    <div className="flex justify-end mt-1">
+                      <span className="text-xs text-muted-foreground">应收 ¥{receivable.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 实收 ¥{actual.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {rounding > 0 ? `- 抹零 ¥${rounding.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""} = 已结清</span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReceiptDialogOpen(false)}>取消</Button>
+            <Button onClick={handleSaveReceipt} className="bg-green-600 hover:bg-green-700">确认收款</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -535,7 +746,11 @@ export function SalesPage() {
           <Input placeholder="搜索客户、批次名称、编号..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="pl-9" />
         </div>
         <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v ?? "all"); setPage(1); }}>
-          <SelectTrigger className="w-[160px]"><SelectValue placeholder="收款状态" /></SelectTrigger>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue>
+              {statusFilter === "all" ? "全部状态" : statusMap[statusFilter]?.label || statusFilter}
+            </SelectValue>
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部状态</SelectItem>
             {Object.entries(statusMap).map(([key, { label }]) => (
@@ -544,19 +759,24 @@ export function SalesPage() {
           </SelectContent>
         </Select>
         {selectedIds.size > 0 && (
-          <Button variant="destructive" size="sm" onClick={handleBatchDelete}><Trash className="h-4 w-4 mr-1" />批量删除 ({selectedIds.size})</Button>
+          <>
+            <Button variant="outline" size="sm" onClick={handleBatchLock}><Lock className="h-4 w-4 mr-1" />批量锁定 ({selectedIds.size})</Button>
+            <Button variant="outline" size="sm" onClick={handleBatchUnlock}><Unlock className="h-4 w-4 mr-1" />批量解锁 ({selectedIds.size})</Button>
+            <Button variant="destructive" size="sm" onClick={handleBatchDelete}><Trash className="h-4 w-4 mr-1" />批量删除 ({selectedIds.size})</Button>
+          </>
         )}
       </div>
 
       {/* 汇总行 */}
       {data?.items && data.items.length > 0 && (
-        <div className="grid grid-cols-6 gap-4">
-          <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">记录条数</p><p className="text-2xl font-bold">{summary.totalCount.toLocaleString()}</p></CardContent></Card>
-          <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">总箱数</p><p className="text-2xl font-bold">{summary.totalBoxes.toLocaleString()}</p></CardContent></Card>
-          <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">总重量</p><p className="text-2xl font-bold">{summary.totalWeight.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p></CardContent></Card>
-          <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">总销售金额</p><p className="text-2xl font-bold">${summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
-          <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">已收金额</p><p className="text-2xl font-bold text-green-600">${summary.totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
-          <Card><CardContent className="p-3 text-sm"><p className="text-muted-foreground">未收金额</p><p className="text-2xl font-bold text-orange-600">${summary.totalUnpaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+        <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
+          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">记录条数</p><p className="text-xl font-bold">{summary.totalCount.toLocaleString()}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">总箱数</p><p className="text-xl font-bold">{summary.totalBoxes.toLocaleString()}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">总重量</p><p className="text-xl font-bold">{summary.totalWeight.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">总销售金额</p><p className="text-xl font-bold">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">净金额</p><p className="text-xl font-bold text-blue-600">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">售后金额</p><p className="text-xl font-bold text-red-500">¥{summary.totalAfterSales.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">已收金额</p><p className="text-xl font-bold text-green-600">¥{summary.totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
         </div>
       )}
 
@@ -569,19 +789,23 @@ export function SalesPage() {
               <TableHead>销售单号</TableHead>
               <TableHead>日期</TableHead>
               <TableHead>客户</TableHead>
+              <TableHead>业务员</TableHead>
               <TableHead>批次编号</TableHead>
               <TableHead>批次名称</TableHead>
               <TableHead>规格</TableHead>
               <TableHead className="text-right">箱数</TableHead>
               <TableHead className="text-right">重量(kg)</TableHead>
               <TableHead className="text-right">销售金额</TableHead>
+              <TableHead className="text-right">净金额</TableHead>
+              <TableHead className="text-right">已收</TableHead>
+              <TableHead className="text-right">售后</TableHead>
               <TableHead>付款状态</TableHead>
               <TableHead className="w-[120px]">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading ? <TableRow><TableCell colSpan={12} className="text-center py-8">加载中...</TableCell></TableRow>
-             : (data?.items?.length ?? 0) === 0 ? <TableRow><TableCell colSpan={12} className="text-center py-8">暂无数据</TableCell></TableRow>
+            {isLoading ? <TableRow><TableCell colSpan={16} className="text-center py-8">加载中...</TableCell></TableRow>
+             : (data?.items?.length ?? 0) === 0 ? <TableRow><TableCell colSpan={16} className="text-center py-8">暂无数据</TableCell></TableRow>
              : <>
                 {data?.items.map((sale) => {
                   const statusInfo = statusMap[sale.status] ?? { label: sale.status, color: "" };
@@ -589,24 +813,45 @@ export function SalesPage() {
                   return (
                     <TableRow key={sale.id}>
                       <TableCell><Checkbox checked={selectedIds.has(sale.id)} onCheckedChange={(checked) => toggleSelect(sale.id, checked)} /></TableCell>
-                      <TableCell className="font-medium">{sale.is_locked && <span className="text-orange-500 mr-1">🔒</span>}{sale.sale_no ?? `#${sale.id}`}</TableCell>
+                      <TableCell className="font-medium relative">
+                        {sale.is_locked && <span className="text-orange-500 mr-1">🔒</span>}
+                        {sale.sale_no ?? `#${sale.id}`}
+                        {sale.aftersales && sale.aftersales.length > 0 && (
+                          <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold" title={`售后 ${sale.aftersales.length} 条`}>
+                            {sale.aftersales.length}
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell>{sale.sale_date}</TableCell>
                       <TableCell>{sale.customer_name ?? "-"}</TableCell>
+                      <TableCell>{sale.salesperson_name ?? "-"}</TableCell>
                       <TableCell>{sale.batch_code ?? sale.batch_name ?? "-"}</TableCell>
                       <TableCell>{sale.batch_name ?? "-"}</TableCell>
                       <TableCell>{sale.spec ?? "-"}</TableCell>
                       <TableCell className="text-right">{sale.box_count ?? "-"}</TableCell>
                       <TableCell className="text-right">{Number(sale.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-right">¥{Number(sale.gross_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                       <TableCell className="text-right">
-                        <div>${Number(sale.net_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                        {unpaid > 0 && <div className="text-xs text-orange-500">未付 ${unpaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>}
+                        ¥{Number(sale.net_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </TableCell>
+                      <TableCell className="text-right text-green-600">¥{Number(sale.paid_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-right">
+                        {Number(sale.after_sales_adjustment) > 0 ? (
+                          <span className="text-red-500 font-medium">-¥{Number(sale.after_sales_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
                       </TableCell>
                       <TableCell><Badge variant="secondary" className={statusInfo.color}>{statusInfo.label}</Badge></TableCell>
                       <TableCell>
                         <div className="flex gap-1">
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setDetailSale(sale); setDetailOpen(true); }}><Eye className="h-4 w-4" /></Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingSale(sale); setFormOpen(true); }} disabled={sale.is_locked}><Pencil className={cn("h-4 w-4", sale.is_locked && "text-muted-foreground")} /></Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleOpenAdjust(sale)} title="调整" disabled={sale.is_locked}><DollarSign className={cn("h-4 w-4", sale.is_locked && "text-muted-foreground")} /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-green-600" onClick={() => openReceipt(sale)} title="收款" disabled={sale.is_locked}><Banknote className={cn("h-4 w-4", sale.is_locked && "text-muted-foreground")} /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleOpenAdjust(sale)} title="调整" disabled={sale.is_locked}><SlidersHorizontal className={cn("h-4 w-4", sale.is_locked && "text-muted-foreground")} /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleLockToggle(sale)} title={sale.is_locked ? "解锁" : "锁定"}>
+                            {sale.is_locked ? <Unlock className="h-4 w-4 text-orange-500" /> : <Lock className="h-4 w-4 text-muted-foreground" />}
+                          </Button>
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleDelete(sale)} disabled={sale.is_locked}><Trash2 className={cn("h-4 w-4", sale.is_locked && "text-muted-foreground")} /></Button>
                         </div>
                       </TableCell>
@@ -616,7 +861,7 @@ export function SalesPage() {
                 {/* 页汇总行 */}
                 {data?.items && data.items.length > 0 && (
                   <TableRow className="bg-muted/50 font-medium border-t-2">
-                    <TableCell colSpan={7} className="text-right">本页合计:</TableCell>
+                    <TableCell colSpan={8} className="text-right">本页合计:</TableCell>
                     <TableCell className="text-right">
                       {data.items.reduce((s, it) => s + (Number(it.box_count) || 0), 0)}
                     </TableCell>
@@ -624,7 +869,19 @@ export function SalesPage() {
                       {data.items.reduce((s, it) => s + Number(it.weight_kg || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                     </TableCell>
                     <TableCell className="text-right">
-                      ${data.items.reduce((s, it) => s + Number(it.net_amount || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ¥{data.items.reduce((s, it) => s + Number(it.gross_amount || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      ¥{data.items.reduce((s, it) => s + Number(it.net_amount || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-right text-green-600">
+                      ¥{data.items.reduce((s, it) => s + Number(it.paid_amount || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-right text-red-500">
+                      {(() => {
+                        const totalAfterSales = data.items.reduce((s, it) => s + Number(it.after_sales_adjustment || 0), 0);
+                        return totalAfterSales > 0 ? `-¥${totalAfterSales.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-";
+                      })()}
                     </TableCell>
                     <TableCell colSpan={2} />
                   </TableRow>
@@ -765,16 +1022,20 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
         sale_date: saleDate,
         batch_id: Number(batchId),
         customer_id: Number(customerId),
-        salesperson_id: salespersonId ? Number(salespersonId) : undefined,
+        salesperson_id: salespersonId ? Number(salespersonId) : null,
         spec: firstItem.spec || undefined,
         box_count: totalBoxCount || undefined,
         weight_kg: Number(totalWeight),
         unit_price: totalWeight > 0 ? totalGross / totalWeight : 0,
         gross_amount: totalGross,
-        net_amount: totalGross,
         notes: notes.trim() || undefined,
         items: itemsPayload,
       };
+
+      if (!initialData) {
+        // 新建时才传 net_amount（初始等于 gross）
+        payload.net_amount = totalGross;
+      }
 
       if (initialData) {
         await api.put(`/v1/sales/whole-fish/${initialData.id}`, payload);
@@ -839,7 +1100,14 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
             <div className="space-y-2">
               <Label>业务员</Label>
               <Select value={salespersonId} onValueChange={(v) => setSalespersonId(v ?? "")}>
-                <SelectTrigger className="h-10"><SelectValue placeholder="选择业务员" /></SelectTrigger>
+                <SelectTrigger className="h-10">
+                  <SelectValue>
+                    {(() => {
+                      const s = salespersonsData?.items?.find((s: any) => String(s.id) === salespersonId);
+                      return s ? (s.full_name ?? s.name) : "选择业务员";
+                    })()}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>{salespersonsData?.items?.map((s: any) => <SelectItem key={s.id} value={String(s.id)}>{s.full_name ?? s.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
@@ -982,6 +1250,15 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
   const [activeTab, setActiveTab] = useState("info");
   const queryClient = useQueryClient();
 
+  const paymentMethodMap: Record<string, string> = {
+    bank_transfer: "银行转账",
+    cash: "现金",
+    check: "支票",
+    wechat: "微信",
+    alipay: "支付宝",
+    other: "其他",
+  };
+
   const [receiptFormOpen, setReceiptFormOpen] = useState(false);
   const [receiptDate, setReceiptDate] = useState("");
   const [receiptAmount, setReceiptAmount] = useState("");
@@ -1022,17 +1299,6 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
     onError: (err: any) => toast.error(err.response?.data?.detail || "添加失败"),
   });
 
-  const deleteReceiptMutation = useMutation({
-    mutationFn: async (receiptId: number) => {
-      await api.delete(`/v1/sales/whole-fish/${sale.id}/receipts/${receiptId}`);
-    },
-    onSuccess: () => {
-      toast.success("收款记录已删除");
-      queryClient.invalidateQueries({ queryKey: ["sales"] });
-    },
-    onError: (err: any) => toast.error(err.response?.data?.detail || "删除失败"),
-  });
-
   const resetReceiptForm = () => {
     setReceiptDate("");
     setReceiptAmount("");
@@ -1049,7 +1315,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
       <div className="flex gap-2 mb-4">
         <Button variant={activeTab === "info" ? "default" : "outline"} size="sm" onClick={() => setActiveTab("info")}>基本信息</Button>
         <Button variant={activeTab === "receipts" ? "default" : "outline"} size="sm" onClick={() => setActiveTab("receipts")}>收款记录 ({sale.receipts.length})</Button>
-        <Button variant={activeTab === "aftersales" ? "default" : "outline"} size="sm" onClick={() => setActiveTab("aftersales")}>售后记录 ({sale.aftersales.length})</Button>
+        <Button variant={activeTab === "aftersales" ? "default" : "outline"} size="sm" onClick={() => setActiveTab("aftersales")}>售后记录 ({sale.aftersales.length + (Number(sale.after_sales_adjustment) > 0 ? 1 : 0)})</Button>
       </div>
 
       {activeTab === "info" && (
@@ -1082,7 +1348,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                       <TableCell className="text-sm text-right">{item.box_count ?? "-"}</TableCell>
                       <TableCell className="text-sm text-right">{Number(item.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                       <TableCell className="text-sm text-right">{Number(item.unit_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
-                      <TableCell className="text-sm text-right">${Number(item.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-sm text-right">¥{Number(item.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                     </TableRow>
                   ))}
                   <TableRow className="bg-muted/50 font-medium text-sm">
@@ -1098,14 +1364,20 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
 
           {/* 汇总金额 */}
           <div className="bg-muted p-3 rounded-md space-y-2 text-sm">
-            <div className="flex justify-between"><span>毛金额</span><span>${Number(sale.gross_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-            {Number(sale.rounding_adjustment) > 0 && <div className="flex justify-between text-red-500"><span>抹零调整</span><span>-${Number(sale.rounding_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
-            {Number(sale.after_sales_adjustment) > 0 && <div className="flex justify-between text-red-500"><span>售后调整</span><span>-${Number(sale.after_sales_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
-            {Number(sale.discount) > 0 && <div className="flex justify-between text-red-500"><span>折扣</span><span>-${Number(sale.discount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
-            {Number(sale.commission) > 0 && <div className="flex justify-between text-red-500"><span>提成</span><span>-${Number(sale.commission).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
-            <div className="flex justify-between font-semibold border-t pt-1"><span>净金额</span><span>${Number(sale.net_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-            <div className="flex justify-between text-green-600"><span>已付</span><span>${Number(sale.paid_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
-            <div className="flex justify-between text-orange-600 font-medium"><span>未付</span><span>${unpaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            <div className="flex justify-between"><span>毛金额</span><span>¥{Number(sale.gross_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            {Number(sale.rounding_adjustment) > 0 && <div className="flex justify-between text-red-500"><span>抹零调整</span><span>-¥{Number(sale.rounding_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            {Number(sale.after_sales_adjustment) > 0 && <div className="flex justify-between text-red-500"><span>售后调整</span><span>-¥{Number(sale.after_sales_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            {Number(sale.discount) > 0 && <div className="flex justify-between text-red-500"><span>折扣</span><span>-¥{Number(sale.discount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            {Number(sale.commission) > 0 && <div className="flex justify-between text-red-500"><span>提成</span><span>-¥{Number(sale.commission).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            <div className="flex justify-between font-semibold border-t pt-1"><span>净金额</span><span>¥{Number(sale.net_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            <div className="flex justify-between text-green-600"><span>已付</span><span>¥{Number(sale.paid_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            {unpaid > 0 ? (
+              <div className="flex justify-between text-orange-600 font-medium"><span>未付</span><span>¥{unpaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            ) : unpaid < 0 ? (
+              <div className="flex justify-between text-blue-600 font-medium"><span>应退</span><span>¥{Math.abs(unpaid).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            ) : (
+              <div className="flex justify-between text-green-600 font-medium"><span>已结清</span><span>¥0.00</span></div>
+            )}
           </div>
         </div>
       )}
@@ -1115,7 +1387,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
           <div className="bg-muted/50 rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-medium">{receiptFormOpen ? "添加收款" : "收款操作"}</h4>
-              {!receiptFormOpen && <Button size="sm" onClick={() => setReceiptFormOpen(true)}><Plus className="h-3 w-3 mr-1" />添加收款</Button>}
+              {!receiptFormOpen && <Button size="sm" onClick={() => setReceiptFormOpen(true)} disabled={sale.is_locked}><Plus className="h-3 w-3 mr-1" />添加收款</Button>}
             </div>
             {receiptFormOpen && (
               <form onSubmit={(e) => { e.preventDefault(); if (!receiptDate || !receiptAmount) { toast.error("请填写日期和金额"); return; } createReceiptMutation.mutate({ receipt_date: receiptDate, amount: Number(receiptAmount), payment_method: receiptMethod, bank_account_id: receiptBankAccountId ? Number(receiptBankAccountId) : null, reference_no: receiptRef.trim() || null, notes: receiptNotes.trim() || null }); }} className="space-y-3">
@@ -1139,10 +1411,17 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                   <div className="space-y-1">
                     <Label className="text-xs">收款银行</Label>
                     <Select value={receiptBankAccountId} onValueChange={(v) => setReceiptBankAccountId(v)}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="选择银行" /></SelectTrigger>
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue placeholder="选择银行">
+                          {(() => {
+                            const b = bankAccounts.find((ba: any) => String(ba.id) === receiptBankAccountId);
+                            return b ? `${b.bank_name} ···${b.account_number?.slice(-4)}` : "选择银行";
+                          })()}
+                        </SelectValue>
+                      </SelectTrigger>
                       <SelectContent>
                         {bankAccounts.map((b: any) => (
-                          <SelectItem key={b.id} value={String(b.id)} className="text-xs">{b.bank_name} {b.account_number?.slice(-4)}</SelectItem>
+                          <SelectItem key={b.id} value={String(b.id)} className="text-xs">{b.bank_name} ···{b.account_number?.slice(-4)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -1168,35 +1447,19 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                   <TableHead className="text-xs">银行</TableHead>
                   <TableHead className="text-xs text-right">金额</TableHead>
                   <TableHead className="text-xs">备注</TableHead>
-                  <TableHead className="text-xs w-[60px]">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sale.receipts.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="text-sm">{r.receipt_date}</TableCell>
-                    <TableCell className="text-sm">{r.payment_method}</TableCell>
+                    <TableCell className="text-sm">{paymentMethodMap[r.payment_method] || r.payment_method}</TableCell>
                     <TableCell className="text-sm">{(() => {
                       const b = bankAccounts.find((ba: any) => ba.id === r.bank_account_id);
                       return b ? `${b.bank_name} ${b.account_number?.slice(-4)}` : "-";
                     })()}</TableCell>
-                    <TableCell className="text-sm text-right">${Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                    <TableCell className="text-sm text-right">¥{Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                     <TableCell className="text-sm">{r.notes ?? "-"}</TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-red-500"
-                        onClick={() => {
-                          if (confirm("确定删除这条收款记录吗？")) {
-                            deleteReceiptMutation.mutate(r.id);
-                          }
-                        }}
-                        disabled={deleteReceiptMutation.isPending}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -1207,12 +1470,20 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
 
       {activeTab === "aftersales" && (
         <div>
-          {sale.aftersales && sale.aftersales.length > 0 ? (
+          {sale.aftersales && sale.aftersales.length > 0 || Number(sale.after_sales_adjustment) > 0 ? (
             <Table>
               <TableHeader><TableRow><TableHead className="text-xs">日期</TableHead><TableHead className="text-xs">类型</TableHead><TableHead className="text-xs text-right">金额</TableHead><TableHead className="text-xs">状态</TableHead></TableRow></TableHeader>
               <TableBody>
+                {Number(sale.after_sales_adjustment) > 0 && (
+                  <TableRow>
+                    <TableCell className="text-sm">{sale.sale_date}</TableCell>
+                    <TableCell className="text-sm">售后调整</TableCell>
+                    <TableCell className="text-sm text-right text-red-500">-¥{Number(sale.after_sales_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                    <TableCell className="text-sm">已扣减</TableCell>
+                  </TableRow>
+                )}
                 {sale.aftersales.map((a) => (
-                  <TableRow key={a.id}><TableCell className="text-sm">{a.record_date}</TableCell><TableCell className="text-sm">{a.type}</TableCell><TableCell className="text-sm text-right">${Number(a.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell><TableCell className="text-sm">{a.status}</TableCell></TableRow>
+                  <TableRow key={a.id}><TableCell className="text-sm">{a.record_date}</TableCell><TableCell className="text-sm">{a.type}</TableCell><TableCell className="text-sm text-right">¥{Number(a.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell><TableCell className="text-sm">{a.status}</TableCell></TableRow>
                 ))}
               </TableBody>
             </Table>

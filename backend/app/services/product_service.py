@@ -287,12 +287,15 @@ class ProductService:
     # ==================== 包装物管理 ====================
 
     @staticmethod
-    async def get_packagings(db: AsyncSession, product_id: int) -> List[Any]:
+    async def get_packagings(db: AsyncSession, product_id: int, brand_id: Optional[int] = None) -> List[Any]:
         """获取成品包装物清单"""
         from app.models import ProductPackaging
-        result = await db.execute(
-            select(ProductPackaging).where(ProductPackaging.product_id == product_id)
-        )
+        query = select(ProductPackaging).where(ProductPackaging.product_id == product_id)
+        if brand_id is not None:
+            query = query.where(
+                (ProductPackaging.brand_id == brand_id) | (ProductPackaging.brand_id.is_(None))
+            )
+        result = await db.execute(query)
         return result.scalars().all()
 
     @staticmethod
@@ -303,6 +306,7 @@ class ProductService:
             product_id=product_id,
             level=data.level,
             material_id=data.material_id,
+            brand_id=getattr(data, 'brand_id', None),
             quantity=data.quantity,
             unit=data.unit,
             notes=data.notes,

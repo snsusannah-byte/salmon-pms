@@ -23,6 +23,8 @@ import { DailySlaughterPage } from "@/pages/DailySlaughterPage";
 import { LossRecordsPage } from "@/pages/LossRecordsPage";
 import NotificationsPage from "@/pages/NotificationsPage";
 import { BankAccountsPage } from "@/pages/BankAccountsPage";
+import { BrandsPage } from "@/pages/BrandsPage";
+import { FinishedProductsPage } from "@/pages/FinishedProductsPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
 const router = createBrowserRouter([
@@ -39,6 +41,8 @@ const router = createBrowserRouter([
       { path: "companies", element: <CompaniesPage /> },
       { path: "customers", element: <CustomersPage /> },
       { path: "products", element: <ProductsPage /> },
+      { path: "finished-products", element: <FinishedProductsPage /> },
+      { path: "brands", element: <BrandsPage /> },
       { path: "invoices", element: <InvoicesPage /> },
       { path: "batches", element: <BatchesPage /> },
       { path: "whole-fish-sales", element: <WholeFishSalesPage /> },

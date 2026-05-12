@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -56,8 +56,6 @@ import {
   Coins,
   FileDown,
   Search,
-  Lock,
-  Unlock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportExcel } from "@/lib/export";
@@ -173,7 +171,6 @@ interface Transaction {
   counterparty_name: string | null;
   reference_no: string | null;
   description: string | null;
-  is_locked: boolean;
   related_sale_ids: number[];
 }
 
@@ -1566,29 +1563,13 @@ function TransactionsTab() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-
-  // 筛选状态
-  const [filterType, setFilterType] = useState("");
-  const [filterCategory, setFilterCategory] = useState("");
-  const [filterSaleId, setFilterSaleId] = useState("");
-  const [filterLocked, setFilterLocked] = useState("");
-
-  // 批量删除
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");  // 交易流水搜索
 
   const { data, isLoading } = useQuery<Transaction[]>({
-    queryKey: ["transactions", searchQuery, filterType, filterCategory, filterSaleId, filterLocked],
+    queryKey: ["transactions", searchQuery],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (searchQuery.trim()) params.append("search", searchQuery.trim());
-      if (filterType) params.append("type", filterType);
-      if (filterCategory) params.append("category", filterCategory);
-      if (filterSaleId.trim() && /^\d+$/.test(filterSaleId.trim())) params.append("related_sale_id", filterSaleId.trim());
-      else if (filterSaleId.trim()) params.append("sale_no", filterSaleId.trim());
-      if (filterLocked === "locked") params.append("is_locked", "true");
-      else if (filterLocked === "unlocked") params.append("is_locked", "false");
       const res = await api.get(`/v1/finance/transactions?${params.toString()}`);
       return res.data;
     },
@@ -1606,14 +1587,11 @@ function TransactionsTab() {
 
   // Fetch all sales for displaying related sale numbers in list
   const { data: allSalesData } = useQuery({
-    queryKey: ["all-sales-for-transaction-list", data?.flatMap((t) => t.related_sale_ids || [])],
+    queryKey: ["all-sales-for-transaction-list"],
     queryFn: async () => {
-      const ids = data?.flatMap((t) => t.related_sale_ids || []).filter((id, i, arr) => arr.indexOf(id) === i) || [];
-      if (ids.length === 0) return [];
-      const res = await api.get(`/v1/sales/whole-fish?ids=${ids.join(",")}&limit=500`);
+      const res = await api.get("/v1/sales/whole-fish?limit=500");
       return res.data?.items || [];
     },
-    enabled: !!(data && data.length > 0),
   });
   const allSalesMap = React.useMemo(() => {
     const map: Record<number, string> = {};
@@ -1663,69 +1641,9 @@ function TransactionsTab() {
     return `${account.bank_name} ${account.account_number?.slice(-4) || ""}`;
   };
 
-  const lockMutation = useMutation({
-    mutationFn: async ({ id, locked }: { id: number; locked: boolean }) => {
-      const res = await api.post(`/v1/finance/transactions/${id}/${locked ? "lock" : "unlock"}`);
-      return res.data;
-    },
-    onSuccess: (_, variables) => {
-      toast.success(variables.locked ? "交易记录已锁定" : "交易记录已解锁");
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-    },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.detail || "操作失败");
-    },
-  });
-
-  const batchLockMutation = useMutation({
-    mutationFn: async (ids: number[]) => {
-      const res = await api.post("/v1/finance/transactions/batch-lock", { ids });
-      return res.data;
-    },
-    onSuccess: (data) => {
-      toast.success(`批量核对成功：${data.locked} 条已锁定${data.already_locked > 0 ? `，${data.already_locked} 条已锁定跳过` : ""}`);
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      setSelectedIds([]);
-    },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.detail || "批量核对失败");
-    },
-  });
-
   const handleDeleteClick = (transaction: Transaction) => {
     setDeleteTarget(transaction);
     setDeleteOpen(true);
-  };
-
-  const handleBatchDelete = async () => {
-    if (selectedIds.length === 0) return;
-    try {
-      const res = await api.post("/v1/finance/transactions/batch-delete", { ids: selectedIds });
-      const deleted = res.data?.deleted ?? selectedIds.length;
-      const notFound = res.data?.not_found ?? 0;
-      toast.success(`已删除 ${deleted} 条记录${notFound > 0 ? `，${notFound} 条未找到` : ""}`);
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
-      setBatchDeleteOpen(false);
-      setSelectedIds([]);
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail ?? "批量删除失败");
-    }
-  };
-
-  const toggleSelect = (id: number) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  };
-
-  const toggleSelectAll = () => {
-    if (!data || data.length === 0) return;
-    if (selectedIds.length === data.length) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(data.map((r) => r.id));
-    }
   };
 
   const handleConfirmDelete = async () => {
@@ -1774,14 +1692,41 @@ function TransactionsTab() {
       } else {
         await api.post("/v1/finance/transactions", payload);
         
-        // 后端 create_transaction 已自动创建关联销售单的收款记录
-        // 前端不再重复创建
-        
+        // 如果有关联销售单，自动创建销售收款记录（支持部分收款分摊）
         if (selectedSaleIds.length > 0 && type === "income" && category === "main_business_revenue") {
           const totalAmount = Number(amount);
-          // 刷新销售单数据
+          let remainingAmount = totalAmount;
+          
+          // 按顺序为选中的销售单分配收款
+          const selectedSales = salesList.filter((s: any) => selectedSaleIds.includes(s.id));
+          for (const sale of selectedSales) {
+            if (remainingAmount <= 0) break;
+            const saleRemaining = Math.max(0, Number(sale.net_amount ?? 0) - Number(sale.paid_amount ?? 0));
+            const receiptAmount = Math.min(saleRemaining, remainingAmount);
+            
+            if (receiptAmount > 0) {
+              try {
+                await api.post(`/v1/sales/whole-fish/${sale.id}/receipts`, {
+                  receipt_date: date || new Date().toISOString().split("T")[0],
+                  amount: receiptAmount,
+                  payment_method: "bank_transfer",
+                  bank_account_id: bankAccountId ? Number(bankAccountId) : null,
+                  reference_no: referenceNo || null,
+                  notes: `财务流水收款 ¥${totalAmount.toLocaleString()}（分摊）`,
+                });
+                remainingAmount -= receiptAmount;
+              } catch (err: any) {
+                console.error(`为销售单 ${sale.id} 创建收款记录失败:`, err);
+              }
+            }
+          }
+          
+          if (remainingAmount > 0) {
+            toast.success(`交易记录创建成功，已收款 ¥${totalAmount.toLocaleString()}，其中 ¥${(totalAmount - remainingAmount).toLocaleString()} 已分摊到销售单，剩余 ¥${remainingAmount.toLocaleString()} 无对应销售单可分配`);
+          } else {
+            toast.success(`交易记录创建成功，已收款 ¥${totalAmount.toLocaleString()} 并已全部分摊到销售单`);
+          }
           queryClient.invalidateQueries({ queryKey: ["sales"] });
-          toast.success(`交易记录创建成功，已收款 ¥${totalAmount.toLocaleString()} 并已关联到销售单`);
         } else {
           toast.success("交易记录创建成功");
         }
@@ -1794,23 +1739,10 @@ function TransactionsTab() {
       setSelectedCustomerId("");
       setCustomerSearch("");
     } catch (error: any) {
-      console.error("创建交易记录失败:", error);
-      console.error("Response data:", error.response?.data);
-      console.error("Response status:", error.response?.status);
       const detail = error.response?.data?.detail;
-      const rawData = error.response?.data;
-      let msg: string;
-      if (Array.isArray(detail)) {
-        msg = detail.map((d: any) => d.msg).join("; ");
-      } else if (typeof detail === "string") {
-        msg = detail;
-      } else if (rawData && typeof rawData === "string") {
-        msg = rawData;
-      } else if (rawData) {
-        msg = JSON.stringify(rawData);
-      } else {
-        msg = editingTransaction ? "更新失败" : "创建失败";
-      }
+      const msg = Array.isArray(detail)
+        ? detail.map((d: any) => d.msg).join("; ")
+        : (detail ?? (editingTransaction ? "更新失败" : "创建失败"));
       toast.error(msg);
     }
   };
@@ -1847,156 +1779,66 @@ function TransactionsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap justify-between gap-2">
+      <div className="flex justify-between gap-2">
         {/* 搜索框 */}
-        <div className="flex flex-wrap gap-2 items-center">
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="搜索日期、对方名称、描述..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          <Select value={filterType} onValueChange={(v) => { setFilterType(v ?? ""); setFilterCategory(""); }}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue placeholder="类型" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">全部类型</SelectItem>
-              {Object.entries(transactionTypeMap).map(([k, v]) => (
-                <SelectItem key={k} value={k}>{v}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={filterCategory} onValueChange={(v) => setFilterCategory(v ?? "")}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="分类" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">全部分类</SelectItem>
-              {Object.entries(transactionCategoryMap)
-                .filter(([k]) => {
-                  if (!filterType) return true;
-                  const incomeKeys = ["main_business_revenue", "other_business_revenue", "non_business_revenue", "fund_pooling"];
-                  const isIncome = incomeKeys.includes(k);
-                  return filterType === "income" ? isIncome : !isIncome;
-                })
-                .map(([k, v]) => (
-                  <SelectItem key={k} value={k}>{v}</SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-          <div className="relative w-[160px]">
-            <Input
-              placeholder="关联销售单号"
-              value={filterSaleId}
-              onChange={(e) => setFilterSaleId(e.target.value)}
-              className="text-sm"
-            />
-          </div>
-          <Select value={filterLocked} onValueChange={(v) => setFilterLocked(v ?? "")}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue placeholder="锁定状态" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">全部状态</SelectItem>
-              <SelectItem value="locked">已锁定</SelectItem>
-              <SelectItem value="unlocked">未锁定</SelectItem>
-            </SelectContent>
-          </Select>
-          {(searchQuery || filterType || filterCategory || filterSaleId || filterLocked) && (
-            <Button variant="ghost" size="sm" onClick={() => {
-              setSearchQuery("");
-              setFilterType("");
-              setFilterCategory("");
-              setFilterSaleId("");
-              setFilterLocked("");
-            }}>
-              重置
-            </Button>
-          )}
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="搜索日期、对方名称、描述..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
         </div>
         <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              if (!data || data.length === 0) {
-                toast.info("暂无数据可导出");
-                return;
-              }
-              const ok = exportExcel(
-                data,
-                [
-                  { header: "日期", key: "transaction_date" },
-                  { header: "类型", key: "type", format: (v) => transactionTypeMap[v] || v },
-                  { header: "分类", key: "category", format: (v) => transactionCategoryMap[v] || v },
-                  { header: "金额", key: "amount" },
-                  { header: "币种", key: "currency" },
-                  { header: "银行账户", key: "from_account_id", format: (v) => getBankAccountName(v || data.find((r: any) => r.from_account_id === v)?.to_account_id) },
-                  { header: "对方", key: "counterparty_name" },
-                  { header: "描述", key: "description" },
-                  { header: "关联销售单", key: "related_sale_ids", format: (v) => v?.length > 0 ? [...new Set(v)].map((id: number) => allSalesMap[id]).filter(Boolean).join(", ") : "-" },
-                ],
-                "交易流水"
-              );
-              if (ok) toast.success("导出成功");
-            }}
-          >
-            <FileDown className="h-4 w-4 mr-1" />
-            导出 Excel
-          </Button>
-          {selectedIds.length > 0 && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-green-600 text-green-600 hover:bg-green-50"
-              onClick={() => {
-                const unlockIds = selectedIds.filter((id) => !data?.find((r) => r.id === id)?.is_locked);
-                if (unlockIds.length === 0) {
-                  toast.info("选中的记录已全部锁定");
-                  return;
-                }
-                batchLockMutation.mutate(unlockIds);
-              }}
-              disabled={batchLockMutation.isPending}
-            >
-              <CheckCircle className="h-4 w-4 mr-1" />
-              批量核对 ({selectedIds.filter((id) => !data?.find((r) => r.id === id)?.is_locked).length})
-            </Button>
-          )}
-          {selectedIds.length > 0 && (
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => setBatchDeleteOpen(true)}
-            >
-              <Trash2 className="h-4 w-4 mr-1" />
-              批量删除 ({selectedIds.length})
-            </Button>
-          )}
-          <Button size="sm" onClick={() => {
-            setEditingTransaction(null);
-            setDate(new Date().toISOString().split("T")[0]);  // 默认今天，避免空字符串
-            setType("expense");
-            setCategory("");
-            setAmount("");
-            setCounterparty("");
-            setDescription("");
-            setReferenceNo("");
-            setCurrency("CNY");
-            setBankAccountId("");
-            setSelectedSaleIds([]);
-            setSelectedIds([]);
-            setFormOpen(true);
-          }}>
-            <Plus className="h-4 w-4 mr-1" />
-            新增流水
-          </Button>
-          <BatchImportButton type="transactions" />
-        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            if (!data || data.length === 0) {
+              toast.info("暂无数据可导出");
+              return;
+            }
+            const ok = exportExcel(
+              data,
+              [
+                { header: "日期", key: "transaction_date" },
+                { header: "类型", key: "type", format: (v) => transactionTypeMap[v] || v },
+                { header: "分类", key: "category", format: (v) => transactionCategoryMap[v] || v },
+                { header: "金额", key: "amount" },
+                { header: "币种", key: "currency" },
+                { header: "银行账户", key: "from_account_id", format: (v) => getBankAccountName(v || data.find((r: any) => r.from_account_id === v)?.to_account_id) },
+                { header: "对方", key: "counterparty_name" },
+                { header: "描述", key: "description" },
+                { header: "关联销售单", key: "related_sale_ids", format: (v) => v?.length > 0 ? [...new Set(v)].map((id: number) => allSalesMap[id] || `#${id}`).join(", ") : "-" },
+              ],
+              "交易流水"
+            );
+            if (ok) toast.success("导出成功");
+          }}
+        >
+          <FileDown className="h-4 w-4 mr-1" />
+          导出 Excel
+        </Button>
+        <Button size="sm" onClick={() => {
+          setEditingTransaction(null);
+          setDate("");
+          setType("expense");
+          setCategory("");
+          setAmount("");
+          setCounterparty("");
+          setDescription("");
+          setReferenceNo("");
+          setCurrency("CNY");
+          setBankAccountId("");
+          setSelectedSaleIds([]);
+          setFormOpen(true);
+        }}>
+          <Plus className="h-4 w-4 mr-1" />
+          新增流水
+        </Button>
+        <BatchImportButton type="transactions" />
+      </div>
       </div>
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
@@ -2232,36 +2074,10 @@ function TransactionsTab() {
         </DialogContent>
       </Dialog>
 
-      {/* 批量删除确认 */}
-      <Dialog open={batchDeleteOpen} onOpenChange={setBatchDeleteOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>确认批量删除</DialogTitle>
-          </DialogHeader>
-          <p className="py-4">
-            确定删除选中的 {selectedIds.length} 条交易流水吗？此操作不可撤销。
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setBatchDeleteOpen(false); }}>
-              取消
-            </Button>
-            <Button variant="destructive" onClick={handleBatchDelete}>
-              删除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <div className="border rounded-lg">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[40px]">
-                <Checkbox
-                  checked={data && data.length > 0 && selectedIds.length === data.length}
-                  onCheckedChange={toggleSelectAll}
-                />
-              </TableHead>
               <TableHead>日期</TableHead>
               <TableHead>类型</TableHead>
               <TableHead>分类</TableHead>
@@ -2277,33 +2093,21 @@ function TransactionsTab() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8">
+                <TableCell colSpan={10} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : !data?.length ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
             ) : (
               <>
                 {data.map((r) => (
-                <TableRow key={r.id} className={r.is_locked ? "bg-muted/30" : ""}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selectedIds.includes(r.id)}
-                      onCheckedChange={() => toggleSelect(r.id)}
-                      disabled={r.is_locked}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      {r.is_locked && <Lock className="h-3 w-3 text-muted-foreground" />}
-                      {r.transaction_date}
-                    </div>
-                  </TableCell>
+                <TableRow key={r.id}>
+                  <TableCell>{r.transaction_date}</TableCell>
                   <TableCell>
                     <span
                       className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -2331,55 +2135,27 @@ function TransactionsTab() {
                   </TableCell>
                   <TableCell className="text-xs">
                     {r.related_sale_ids?.length > 0
-                      ? [...new Set(r.related_sale_ids)].map(id => allSalesMap[id]).filter(Boolean).join(", ")
+                      ? [...new Set(r.related_sale_ids)].map(id => allSalesMap[id] || `#${id}`).join(", ")
                       : "-"}
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-1">
-                      {r.is_locked ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs text-muted-foreground"
-                          onClick={() => lockMutation.mutate({ id: r.id, locked: false })}
-                          disabled={lockMutation.isPending}
-                        >
-                          <Unlock className="h-3 w-3 mr-1" />
-                          解锁
-                        </Button>
-                      ) : (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => handleOpenEdit(r)}
-                            title="编辑"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-red-500"
-                            onClick={() => handleDeleteClick(r)}
-                            title="删除"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs"
-                            onClick={() => lockMutation.mutate({ id: r.id, locked: true })}
-                            disabled={lockMutation.isPending}
-                            title="核对锁定"
-                          >
-                            <Lock className="h-3 w-3 mr-1" />
-                            核对
-                          </Button>
-                        </>
-                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => handleOpenEdit(r)}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-red-500"
+                        onClick={() => handleDeleteClick(r)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -2387,12 +2163,11 @@ function TransactionsTab() {
               {/* 页汇总行 */}
               {data.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">
-                  <TableCell />
                   <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
                   <TableCell className="text-right font-bold">
                     {data.reduce((s, r) => s + (r.type === "income" ? Number(r.amount || 0) : -Number(r.amount || 0)), 0).toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                   </TableCell>
-                  <TableCell colSpan={5} />
+                  <TableCell colSpan={4} />
                 </TableRow>
               )}
             </>

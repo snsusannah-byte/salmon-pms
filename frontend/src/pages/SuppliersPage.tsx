@@ -43,6 +43,7 @@ interface Supplier {
   logistics_info: string | null;
   notes: string | null;
   is_active: boolean;
+  supplier_category: string | null;
   created_at: string;
 }
 
@@ -73,6 +74,13 @@ const fmt = (v?: number | string | null, currency?: string) => {
   if (v === undefined || v === null || v === "" || Number.isNaN(Number(v))) return "-";
   const symbol = currency === "USD" ? "$" : "¥";
   return `${symbol}${Number(v).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const supplierCategoryMap: Record<string, { label: string; color: string }> = {
+  raw_material: { label: "原料供应", color: "bg-blue-100 text-blue-700" },
+  material_supply: { label: "物料供应", color: "bg-green-100 text-green-700" },
+  customs_broker: { label: "报关行", color: "bg-purple-100 text-purple-700" },
+  service_provider: { label: "服务商", color: "bg-orange-100 text-orange-700" },
 };
 
 const PAGE_SIZE = 10;
@@ -234,6 +242,11 @@ export function SuppliersPage() {
                   {detailSupplier.company_full_name && (
                     <p className="text-sm text-muted-foreground">{detailSupplier.company_full_name}</p>
                   )}
+                  {detailSupplier.supplier_category && supplierCategoryMap[detailSupplier.supplier_category] && (
+                    <Badge variant="secondary" className={`mt-1 ${supplierCategoryMap[detailSupplier.supplier_category].color}`}>
+                      {supplierCategoryMap[detailSupplier.supplier_category].label}
+                    </Badge>
+                  )}
                 </div>
               </div>
 
@@ -388,6 +401,7 @@ export function SuppliersPage() {
           <TableHeader>
             <TableRow>
               <TableHead>供应商名称</TableHead>
+              <TableHead>分类</TableHead>
               <TableHead>联系人</TableHead>
               <TableHead>电话</TableHead>
               <TableHead>开户行</TableHead>
@@ -399,13 +413,13 @@ export function SuppliersPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   暂无供应商，点击右上角新增
                 </TableCell>
               </TableRow>
@@ -424,6 +438,15 @@ export function SuppliersPage() {
                           <span className="text-xs text-muted-foreground">{s.company_full_name}</span>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {s.supplier_category && supplierCategoryMap[s.supplier_category] ? (
+                        <Badge variant="secondary" className={supplierCategoryMap[s.supplier_category].color}>
+                          {supplierCategoryMap[s.supplier_category].label}
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-sm">{s.contact_person ?? "-"}</TableCell>
                     <TableCell className="text-sm">{s.phone ?? "-"}</TableCell>

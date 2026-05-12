@@ -111,6 +111,7 @@ class CompanyService:
         type: Optional[CompanyType] = None,
         exclude_type: Optional[List[CompanyType]] = None,
         business_role: Optional[str] = None,
+        supplier_category: Optional[str] = None,
         search: Optional[str] = None,
         is_active: Optional[bool] = None,
         skip: int = 0,
@@ -133,6 +134,11 @@ class CompanyService:
             for et in exclude_type:
                 query = query.where(Company.type != et)
                 count_query = count_query.where(Company.type != et)
+        
+        # 供应商分类筛选
+        if supplier_category:
+            query = query.where(Company.supplier_category == supplier_category)
+            count_query = count_query.where(Company.supplier_category == supplier_category)
         
         # 业务角色筛选（上游溯源 vs 业务往来）
         if business_role:

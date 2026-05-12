@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models import CompanyType, CustomerCategory
+from app.models import CompanyType, CustomerCategory, SupplierCategory
 
 # 主体业务角色分类
 UPSTREAM_TYPES = {"processing_plant", "fish_farm", "exporter"}  # 上游溯源（不参与应收应付）
@@ -44,6 +44,7 @@ class CompanyBase(BaseModel):
     logistics_info: Optional[str] = Field(None, description="物流信息")
     salesperson_id: Optional[int] = Field(None, description="业务员ID")
     customer_category: Optional[CustomerCategory] = Field(None, description="客户分类: wholesaler/distributor/retailer/platform/group_buying")
+    supplier_category: Optional[SupplierCategory] = Field(None, description="供应商分类: raw_material/material_supply/customs_broker/service_provider")
     is_active: Optional[bool] = Field(True, description="是否启用")
     notes: Optional[str] = Field(None, description="备注")
 
@@ -97,6 +98,7 @@ class CompanyUpdate(BaseModel):
     logistics_info: Optional[str] = Field(None)
     salesperson_id: Optional[int] = Field(None)
     customer_category: Optional[CustomerCategory] = None
+    supplier_category: Optional[SupplierCategory] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
 
@@ -108,8 +110,8 @@ class CompanyResponse(CompanyBase):
     id: int
     salesperson_name: Optional[str] = Field(None, description="业务员名称")
     business_role: str = Field(default="business_partner", description="业务角色：upstream(上游溯源) / business_partner(业务往来)")
-    payable_usd: Optional[float] = Field(None, description="应付款(USD)")
-    payable_cny: Optional[float] = Field(None, description="应付款(CNY)")
+    payable_usd: Optional[Decimal] = Field(None, description="应付款(USD)")
+    payable_cny: Optional[Decimal] = Field(None, description="应付款(CNY)")
     created_at: datetime
     updated_at: datetime
 
@@ -165,10 +167,10 @@ class CommissionResponse(BaseModel):
     sale_id: int
     sale_date: Optional[str] = None
     customer_name: Optional[str] = None
-    sale_amount: float
-    weight_kg: float
-    commission_rate: float
-    commission_amount: float
+    sale_amount: Decimal
+    weight_kg: Decimal
+    commission_rate: Decimal
+    commission_amount: Decimal
     status: str
     paid_date: Optional[str] = None
     notes: Optional[str] = None

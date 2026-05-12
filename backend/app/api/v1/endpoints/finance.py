@@ -435,8 +435,12 @@ async def delete_clearance_cost(
 async def list_transactions(
     type: Optional[str] = Query(None, description="类型"),
     category: Optional[str] = Query(None, description="分类"),
+    related_sale_id: Optional[int] = Query(None, description="关联销售单ID"),
+    sale_no: Optional[str] = Query(None, description="关联销售单号（模糊匹配，如20260106匹配XS20260106-XXX）"),
+    is_locked: Optional[bool] = Query(None, description="锁定状态筛选"),
     start_date: Optional[str] = Query(None, description="开始日期"),
     end_date: Optional[str] = Query(None, description="结束日期"),
+    search: Optional[str] = Query(None, description="搜索关键词（日期/对方名称/描述/参考号）"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -445,7 +449,7 @@ async def list_transactions(
     from datetime import date
     sd = date.fromisoformat(start_date) if start_date else None
     ed = date.fromisoformat(end_date) if end_date else None
-    items, total = await FinanceService.list_transactions(db, type=type, category=category, start_date=sd, end_date=ed, skip=skip, limit=limit)
+    items, total = await FinanceService.list_transactions(db, type=type, category=category, related_sale_id=related_sale_id, sale_no=sale_no, is_locked=is_locked, start_date=sd, end_date=ed, search=search, skip=skip, limit=limit)
     return [TransactionRecordResponse.model_validate(r) for r in items]
 
 
@@ -472,6 +476,8 @@ async def update_transaction(
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交易记录不存在")
+    if record.is_locked:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="交易记录已锁定，不能修改")
     updated = await FinanceService.update_transaction(db, record, data.model_dump(exclude_unset=True))
     return TransactionRecordResponse.model_validate(updated)
 
@@ -488,8 +494,111 @@ async def delete_transaction(
     record = result.scalar_one_or_none()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交易记录不存在")
+    if record.is_locked:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="交易记录已锁定，不能删除")
     await FinanceService.delete_transaction(db, record)
     return None
+
+
+@router.post("/transactions/{record_id}/lock", response_model=TransactionRecordResponse)
+async def lock_transaction(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """锁定交易记录"""
+    from sqlalchemy import select
+    from app.models import TransactionRecord
+    result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交易记录不存在")
+    record.is_locked = True
+    await db.commit()
+    await db.refresh(record)
+    return TransactionRecordResponse.model_validate(record)
+
+
+@router.post("/transactions/{record_id}/unlock", response_model=TransactionRecordResponse)
+async def unlock_transaction(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """解锁交易记录"""
+    from sqlalchemy import select
+    from app.models import TransactionRecord
+    result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交易记录不存在")
+    record.is_locked = False
+    await db.commit()
+    await db.refresh(record)
+    return TransactionRecordResponse.model_validate(record)
+
+
+@router.post("/transactions/batch-lock", response_model=dict)
+async def batch_lock_transactions(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量锁定交易记录
+
+    请求体: {"ids": [1, 2, 3]}
+    返回: {"locked": 3, "not_found": 0, "already_locked": 0}
+    """
+    from sqlalchemy import select
+    from app.models import TransactionRecord
+
+    ids = data.get("ids", [])
+    if not ids or not isinstance(ids, list):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ids 不能为空且必须是数组")
+
+    valid_ids = [int(i) for i in ids if isinstance(i, int) or (isinstance(i, str) and i.isdigit())]
+    if not valid_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ids 中无有效整数")
+
+    result = await db.execute(select(TransactionRecord).where(TransactionRecord.id.in_(valid_ids)))
+    records = result.scalars().all()
+
+    locked = 0
+    already_locked = 0
+    found_ids = {r.id for r in records}
+    not_found = len(valid_ids) - len(found_ids)
+
+    for r in records:
+        if r.is_locked:
+            already_locked += 1
+        else:
+            r.is_locked = True
+            locked += 1
+
+    if locked > 0:
+        await db.commit()
+
+    return {"locked": locked, "not_found": not_found, "already_locked": already_locked}
+
+
+@router.post("/transactions/batch-delete", response_model=dict)
+async def batch_delete_transactions(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量删除交易记录
+    
+    请求体: {"ids": [1, 2, 3]}
+    返回: {"deleted": 3, "not_found": 0}
+    """
+    ids = data.get("ids", [])
+    if not ids or not isinstance(ids, list):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ids 不能为空且必须是数组")
+    
+    # 过滤非整数项
+    valid_ids = [int(i) for i in ids if isinstance(i, int) or (isinstance(i, str) and i.isdigit())]
+    if not valid_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ids 中无有效整数")
+    
+    result = await FinanceService.delete_transactions_batch(db, valid_ids)
+    return result
 
 
 # ==================== 汇总 ====================

@@ -4,6 +4,8 @@ from app.api.v1.endpoints import (
     auth,
     companies,
     products,
+    brands,
+    finished_products,
     invoices,
     batches,
     sales,
@@ -26,6 +28,8 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["认证"])
 api_router.include_router(companies.router, prefix="/companies", tags=["主体管理"])
 api_router.include_router(products.router, prefix="/products", tags=["产品管理"])
+api_router.include_router(brands.router, prefix="/brands", tags=["品牌管理"])
+api_router.include_router(finished_products.router, prefix="/finished-products", tags=["成品定义"])
 api_router.include_router(invoices.router, prefix="/invoices", tags=["进口单证"])
 api_router.include_router(batches.router, prefix="/batches", tags=["批次管理"])
 api_router.include_router(sales.router, prefix="/sales", tags=["整鱼销售"])

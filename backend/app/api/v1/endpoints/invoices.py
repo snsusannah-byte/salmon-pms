@@ -31,6 +31,7 @@ async def list_invoices(
     end_date: Optional[date] = Query(None, description="结束日期"),
     search: Optional[str] = Query(None, description="搜索发票编号"),
     exclude_assigned: bool = Query(False, description="排除已关联批次的发票"),
+    exclude_with_fees: bool = Query(False, description="排除已有进口费用记录的发票（主票从票都不显示）"),
     skip: int = Query(0, ge=0, description="跳过数量"),
     limit: int = Query(100, ge=1, le=500, description="返回数量"),
     db: AsyncSession = Depends(get_db),
@@ -43,6 +44,7 @@ async def list_invoices(
     - **start_date/end_date**: 按日期范围筛选
     - **search**: 按发票编号搜索
     - **exclude_assigned**: 排除已关联批次的发票（用于批次创建时选择）
+    - **exclude_with_fees**: 排除已有进口费用记录的发票（用于进口费用创建时选择）
     """
     items, total = await InvoiceService.list_invoices(
         db=db,
@@ -53,6 +55,7 @@ async def list_invoices(
         end_date=end_date,
         search=search,
         exclude_assigned=exclude_assigned,
+        exclude_with_fees=exclude_with_fees,
         skip=skip,
         limit=limit,
     )
@@ -549,7 +552,7 @@ async def delete_invoice(
 
 # ==================== 锁定/解锁 ====================
 
-@router.post("/{invoice_id}/lock", response_model=InvoiceResponse)
+@router.post("/{invoice_id}/lock")
 async def lock_invoice(
     invoice_id: int,
     db: AsyncSession = Depends(get_db),
@@ -564,11 +567,10 @@ async def lock_invoice(
     
     invoice.is_locked = True
     await db.commit()
-    await db.refresh(invoice)
-    return InvoiceResponse.model_validate(invoice)
+    return {"id": invoice.id, "invoice_no": invoice.invoice_no, "is_locked": True}
 
 
-@router.post("/{invoice_id}/unlock", response_model=InvoiceResponse)
+@router.post("/{invoice_id}/unlock")
 async def unlock_invoice(
     invoice_id: int,
     db: AsyncSession = Depends(get_db),
@@ -583,8 +585,7 @@ async def unlock_invoice(
     
     invoice.is_locked = False
     await db.commit()
-    await db.refresh(invoice)
-    return InvoiceResponse.model_validate(invoice)
+    return {"id": invoice.id, "invoice_no": invoice.invoice_no, "is_locked": False}
 
 
 # ==================== 产品明细 ====================
@@ -734,12 +735,12 @@ async def allocate_costs(
     for inv in group_invoices:
         # 计算分摊比例
         if allocation_method == "by_weight" and total_weight > 0:
-            ratio = float(inv.total_weight_kg or 0) / float(total_weight)
+            ratio = Decimal(str(inv.total_weight_kg or 0)) / Decimal(str(total_weight))
         elif allocation_method == "by_amount" and total_amount > 0:
-            ratio = float(inv.total_amount_usd or 0) / float(total_amount)
+            ratio = Decimal(str(inv.total_amount_usd or 0)) / Decimal(str(total_amount))
         else:
             # 默认按箱数
-            ratio = (inv.total_boxes or 0) / total_boxes
+            ratio = Decimal(str(inv.total_boxes or 0)) / Decimal(str(total_boxes))
         
         # 分摊清关费
         if clearance_cost:

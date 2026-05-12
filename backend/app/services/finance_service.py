@@ -517,8 +517,12 @@ class FinanceService:
         db: AsyncSession,
         type: Optional[str] = None,
         category: Optional[str] = None,
+        related_sale_id: Optional[int] = None,
+        sale_no: Optional[str] = None,
+        is_locked: Optional[bool] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        search: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> Tuple[List[TransactionRecord], int]:
@@ -529,10 +533,54 @@ class FinanceService:
             filters.append(TransactionRecord.type == type)
         if category:
             filters.append(TransactionRecord.category == category)
+        if related_sale_id is not None:
+            # PostgreSQL JSON text field: search for the sale ID in JSON array
+            # Patterns: [1], [1,...], [...,1], [...,1,...]
+            sid = str(related_sale_id)
+            from sqlalchemy import or_, text
+            json_filter = or_(
+                TransactionRecord.related_sale_ids == f"[{sid}]",
+                TransactionRecord.related_sale_ids.like(f"[{sid},%"),
+                TransactionRecord.related_sale_ids.like(f"%,{sid}]"),
+                TransactionRecord.related_sale_ids.like(f"%,{sid},%"),
+            )
+            filters.append(json_filter)
+        if sale_no:
+            # 模糊匹配关联销售单号：先查 sale_no 包含关键词的销售单 ID，再筛选 related_sale_ids
+            from sqlalchemy import or_
+            from app.models import WholeFishSale
+            sale_result = await db.execute(
+                select(WholeFishSale.id).where(WholeFishSale.sale_no.ilike(f"%{sale_no}%"))
+            )
+            sale_ids = [row[0] for row in sale_result.all()]
+            if sale_ids:
+                # 构建 JSON 数组包含任一 sale_id 的条件
+                json_conditions = []
+                for sid in sale_ids:
+                    sid_str = str(sid)
+                    json_conditions.append(TransactionRecord.related_sale_ids == f"[{sid_str}]")
+                    json_conditions.append(TransactionRecord.related_sale_ids.like(f"[{sid_str},%"))
+                    json_conditions.append(TransactionRecord.related_sale_ids.like(f"%,{sid_str}]"))
+                    json_conditions.append(TransactionRecord.related_sale_ids.like(f"%,{sid_str},%"))
+                filters.append(or_(*json_conditions))
+            else:
+                # 没有匹配的销售单，返回空结果
+                filters.append(TransactionRecord.id == -1)
+        if is_locked is not None:
+            filters.append(TransactionRecord.is_locked == is_locked)
         if start_date:
             filters.append(TransactionRecord.transaction_date >= start_date)
         if end_date:
             filters.append(TransactionRecord.transaction_date <= end_date)
+        if search:
+            from sqlalchemy import or_
+            search_filter = or_(
+                TransactionRecord.counterparty_name.ilike(f"%{search}%"),
+                TransactionRecord.description.ilike(f"%{search}%"),
+                TransactionRecord.reference_no.ilike(f"%{search}%"),
+                TransactionRecord.transaction_date.cast(str).ilike(f"%{search}%"),
+            )
+            filters.append(search_filter)
         if filters:
             query = query.where(and_(*filters))
             count_query = count_query.where(and_(*filters))
@@ -543,54 +591,121 @@ class FinanceService:
 
     @staticmethod
     async def create_transaction(db: AsyncSession, data: dict) -> TransactionRecord:
+        from app.models import WholeFishSale  # 提前导入
+        from datetime import date
+        
+        # 日期字符串转 date 对象
+        if isinstance(data.get("transaction_date"), str):
+            data["transaction_date"] = date.fromisoformat(data["transaction_date"])
+        
         # 提取关联销售单列表（合并收款或多笔付款支持多选）
         related_sale_ids = data.pop("related_sale_ids", None)
+        
+        # 去重关联销售单列表
+        if related_sale_ids:
+            seen = set()
+            unique_ids = []
+            for sale_id in related_sale_ids:
+                if sale_id not in seen:
+                    seen.add(sale_id)
+                    unique_ids.append(sale_id)
+            related_sale_ids = unique_ids
+            
+            import json
+            data["related_sale_ids"] = json.dumps(related_sale_ids)
+        
+        # 如果关联了销售单，检查是否全部已收款
+        if related_sale_ids:
+            # 查询这些销售单的已收款总额
+            sale_result = await db.execute(
+                select(WholeFishSale).where(WholeFishSale.id.in_(related_sale_ids))
+            )
+            sales = sale_result.scalars().all()
+            total_remaining = sum(
+                max(Decimal("0"), Decimal(str(s.net_amount or 0)) - Decimal(str(s.paid_amount or 0)))
+                for s in sales
+            )
+            # 如果所有销售单都已全额收款，才拒绝
+            if total_remaining <= 0:
+                from fastapi import HTTPException
+                sale_nos = [s.sale_no or f"#{s.id}" for s in sales]
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"销售单 {', '.join(sale_nos)} 已全部收款，无需再次录入。"
+                )
         
         record = TransactionRecord(**data)
         db.add(record)
         await db.flush()  # 获取 record.id
         
-        # 如果关联了销售单，自动创建收款记录
+        # 如果关联了销售单，处理收款记录（FIFO：先填日期久的单）
         if related_sale_ids:
-            from app.models import SalesReceipt, WholeFishSale
+            from app.models import SalesReceipt
             from app.services.sales_service import SalesService
             
             remaining_amount = Decimal(str(data.get("amount", 0)))
             
-            for sale_id in related_sale_ids:
+            # 查询所有关联销售单，按日期从旧到新排序（FIFO）
+            sale_result = await db.execute(
+                select(WholeFishSale).where(WholeFishSale.id.in_(related_sale_ids)).order_by(WholeFishSale.sale_date.asc(), WholeFishSale.id.asc())
+            )
+            sales = sale_result.scalars().all()
+            
+            for sale in sales:
                 if remaining_amount <= 0:
                     break
+                
+                # 检查是否已为此 transaction + sale 创建过收款记录
+                existing_receipt = await db.execute(
+                    select(SalesReceipt).where(
+                        SalesReceipt.transaction_id == record.id,
+                        SalesReceipt.sale_id == sale.id
+                    )
+                )
+                if existing_receipt.scalar_one_or_none():
+                    continue  # 已存在，跳过
+                
+                # 检查该销售单是否有"未关联 transaction"的收款记录（从销售单页面创建的）
+                orphan_result = await db.execute(
+                    select(SalesReceipt).where(
+                        SalesReceipt.sale_id == sale.id,
+                        SalesReceipt.transaction_id == None
+                    )
+                )
+                orphans = orphan_result.scalars().all()
+                
+                if orphans:
+                    # 把已有的 orphan receipt 关联到当前 transaction，不创建新的
+                    for orphan in orphans:
+                        orphan.transaction_id = record.id
+                    # 更新销售单已付金额
+                    await SalesService._update_paid_amount(db, sale)
+                    # 减少剩余金额（但不能超过交易金额）
+                    orphan_total = sum(Decimal(str(o.amount)) for o in orphans)
+                    remaining_amount -= min(orphan_total, remaining_amount)
+                else:
+                    # 没有 orphan receipt，创建新的
+                    sale_remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
+                    if sale_remaining <= 0:
+                        continue
                     
-                sale_result = await db.execute(
-                    select(WholeFishSale).where(WholeFishSale.id == sale_id)
-                )
-                sale = sale_result.scalar_one_or_none()
-                if not sale:
-                    continue
-                
-                # 计算该销售单的剩余未付金额
-                sale_remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
-                if sale_remaining <= 0:
-                    continue
-                
-                # 分配金额：取剩余金额和交易流水剩余金额的较小值
-                allocate = min(sale_remaining, remaining_amount)
-                
-                receipt = SalesReceipt(
-                    sale_id=sale.id,
-                    receipt_date=data.get("transaction_date"),
-                    amount=allocate,
-                    payment_method="transfer",
-                    bank_account_id=data.get("to_account_id") or data.get("from_account_id"),
-                    reference_no=data.get("reference_no"),
-                    notes=data.get("notes"),
-                    transaction_id=record.id,
-                )
-                db.add(receipt)
-                await db.flush()
-                await SalesService._update_paid_amount(db, sale)
-                
-                remaining_amount -= allocate
+                    allocate = min(sale_remaining, remaining_amount)
+                    
+                    receipt = SalesReceipt(
+                        sale_id=sale.id,
+                        receipt_date=data.get("transaction_date"),
+                        amount=allocate,
+                        payment_method="transfer",
+                        bank_account_id=data.get("to_account_id") or data.get("from_account_id"),
+                        reference_no=data.get("reference_no"),
+                        notes=data.get("notes"),
+                        transaction_id=record.id,
+                    )
+                    db.add(receipt)
+                    await db.flush()
+                    await SalesService._update_paid_amount(db, sale)
+                    
+                    remaining_amount -= allocate
         
         await db.commit()
         await db.refresh(record)
@@ -598,6 +713,11 @@ class FinanceService:
 
     @staticmethod
     async def update_transaction(db: AsyncSession, record: TransactionRecord, data: dict) -> TransactionRecord:
+        related_sale_ids = data.pop("related_sale_ids", None)
+        if related_sale_ids is not None:
+            import json
+            record.related_sale_ids = json.dumps(related_sale_ids) if related_sale_ids else None
+        
         for field, value in data.items():
             if value is not None:
                 setattr(record, field, value)
@@ -632,9 +752,69 @@ class FinanceService:
                 sale = sale_result.scalar_one_or_none()
                 if sale:
                     await SalesService._update_paid_amount(db, sale)
+                    # 如果已全额清零，同步清零因收款产生的抹零
+                    if Decimal(str(sale.paid_amount or 0)) == 0:
+                        sale.rounding_adjustment = Decimal("0")
+                        await db.commit()
 
         await db.delete(record)
         await db.commit()
+
+    @staticmethod
+    async def delete_transactions_batch(db: AsyncSession, ids: List[int]) -> dict:
+        """批量删除交易记录，返回统计信息"""
+        from app.models import SalesReceipt, WholeFishSale
+        from sqlalchemy import select
+        from app.services.sales_service import SalesService
+
+        # 查询所有要删除的记录
+        result = await db.execute(
+            select(TransactionRecord).where(TransactionRecord.id.in_(ids))
+        )
+        records = result.scalars().all()
+
+        if not records:
+            return {"deleted": 0, "not_found": len(ids)}
+
+        deleted_count = 0
+        not_found = len(ids) - len(records)
+        affected_sale_ids = set()
+
+        # 收集所有关联的 SalesReceipt
+        record_ids = [r.id for r in records]
+        receipts_result = await db.execute(
+            select(SalesReceipt).where(SalesReceipt.transaction_id.in_(record_ids))
+        )
+        receipts = receipts_result.scalars().all()
+
+        for receipt in receipts:
+            affected_sale_ids.add(receipt.sale_id)
+            await db.delete(receipt)
+
+        await db.flush()
+
+        # 删除所有交易记录
+        for record in records:
+            await db.delete(record)
+            deleted_count += 1
+
+        await db.flush()
+
+        # 重新计算受影响销售单的收款状态
+        for sale_id in affected_sale_ids:
+            sale_result = await db.execute(
+                select(WholeFishSale).where(WholeFishSale.id == sale_id)
+            )
+            sale = sale_result.scalar_one_or_none()
+            if sale:
+                await SalesService._update_paid_amount(db, sale)
+                # 如果已全额清零，同步清零因收款产生的抹零
+                if Decimal(str(sale.paid_amount or 0)) == 0:
+                    sale.rounding_adjustment = Decimal("0")
+
+        await db.commit()
+
+        return {"deleted": deleted_count, "not_found": not_found}
 
     # ============== 汇总 ==============
 

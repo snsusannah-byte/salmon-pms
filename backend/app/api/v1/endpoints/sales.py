@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
-# from decimal import Decimal
+from decimal import Decimal
 from datetime import date, datetime
 
 from app.core.database import get_db
@@ -64,7 +64,8 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
             batch_name = batch_row[0]
             batch_code = batch_row[1]
     if sale.salesperson_id:
-        r = await db.execute(select(User.full_name).where(User.id == sale.salesperson_id))
+        from app.models import Salesperson
+        r = await db.execute(select(Salesperson.name).where(Salesperson.id == sale.salesperson_id))
         salesperson_name = r.scalar()
 
     receipts = [
@@ -117,6 +118,7 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
 async def list_whole_fish_sales(
     batch_id: Optional[int] = Query(None, description="批次ID"),
     customer_id: Optional[int] = Query(None, description="客户ID"),
+    ids: Optional[str] = Query(None, description="销售单ID列表(逗号分隔)"),
     status: Optional[SalesStatus] = Query(None, description="收款状态"),
     search: Optional[str] = Query(None, description="搜索客户名称、批次名称或销售单号"),
     skip: int = Query(0, ge=0),
@@ -124,8 +126,9 @@ async def list_whole_fish_sales(
     db: AsyncSession = Depends(get_db),
 ):
     """整鱼销售列表"""
+    id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
     items, total = await SalesService.list_sales(
-        db=db, batch_id=batch_id, customer_id=customer_id, status=status, search=search, skip=skip, limit=limit
+        db=db, batch_id=batch_id, customer_id=customer_id, ids=id_list, status=status, search=search, skip=skip, limit=limit
     )
     result_items = []
     for sale in items:
@@ -190,9 +193,22 @@ async def update_whole_fish_sale(
     if not sale:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
     await _check_batch_locked(db, batch_id=sale.batch_id)
-    update_data = data.model_dump(exclude_unset=True)
-    updated = await SalesService.update_sale(db, sale, update_data)
-    return await _build_sale_response(db, updated)
+    try:
+        update_data = data.model_dump(exclude_unset=False)
+        # 过滤掉 None 值，但保留 salesperson_id（允许设为 None 清除业务员）
+        filtered_data = {}
+        for k, v in update_data.items():
+            if v is not None or k == "salesperson_id":
+                filtered_data[k] = v
+        updated = await SalesService.update_sale(db, sale, filtered_data)
+        return await _build_sale_response(db, updated)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback, logging
+        logging.error(f"Update sale {sale_id} error: {str(e)}")
+        logging.error(traceback.format_exc())
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新失败: {str(e)}")
 
 
 @router.delete("/whole-fish/{sale_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -232,6 +248,84 @@ async def batch_delete_whole_fish_sales(
         await SalesService.delete_sale(db, sale)
         deleted += 1
     return {"deleted": deleted, "skipped": skipped}
+
+
+class BatchLockRequest(BaseModel):
+    ids: List[int]
+
+
+@router.post("/whole-fish/batch-lock")
+async def batch_lock_whole_fish_sales(
+    data: BatchLockRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量锁定整鱼销售记录"""
+    locked = 0
+    skipped = 0
+    for sale_id in data.ids:
+        sale = await SalesService.get_sale_by_id(db, sale_id)
+        if not sale:
+            skipped += 1
+            continue
+        if sale.is_locked:
+            skipped += 1
+            continue
+        sale.is_locked = True
+        locked += 1
+    await db.commit()
+    return {"locked": locked, "skipped": skipped}
+
+
+@router.post("/whole-fish/batch-unlock")
+async def batch_unlock_whole_fish_sales(
+    data: BatchLockRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量解锁整鱼销售记录"""
+    unlocked = 0
+    skipped = 0
+    for sale_id in data.ids:
+        sale = await SalesService.get_sale_by_id(db, sale_id)
+        if not sale:
+            skipped += 1
+            continue
+        if not sale.is_locked:
+            skipped += 1
+            continue
+        sale.is_locked = False
+        unlocked += 1
+    await db.commit()
+    return {"unlocked": unlocked, "skipped": skipped}
+
+
+# ==================== 锁定/解锁 ====================
+
+@router.post("/whole-fish/{sale_id}/lock")
+async def lock_whole_fish_sale(
+    sale_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """锁定整鱼销售记录"""
+    sale = await SalesService.get_sale_by_id(db, sale_id)
+    if not sale:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    sale.is_locked = True
+    await db.commit()
+    return {"id": sale.id, "sale_no": sale.sale_no, "is_locked": True}
+
+
+@router.post("/whole-fish/{sale_id}/unlock")
+async def unlock_whole_fish_sale(
+    sale_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """解锁整鱼销售记录"""
+    sale = await SalesService.get_sale_by_id(db, sale_id)
+    if not sale:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    sale.is_locked = False
+    await db.commit()
+    return {"id": sale.id, "sale_no": sale.sale_no, "is_locked": False}
 
 
 # ==================== 收款记录 ====================
@@ -490,12 +584,12 @@ async def batch_import_sales(
                         continue
             
             # 解析重量和单价
-            weight_kg = float(record.get("weight_kg", 0))
-            unit_price = float(record.get("unit_price", 0))
-            box_count = int(float(record.get("box_count", 0)))
+            weight_kg = Decimal(str(record.get("weight_kg", 0)))
+            unit_price = Decimal(str(record.get("unit_price", 0)))
+            box_count = int(Decimal(str(record.get("box_count", 0))))
             
             # 计算金额
-            gross_amount = round(weight_kg * unit_price, 2)
+            gross_amount = (weight_kg * unit_price).quantize(Decimal("0.01"))
             net_amount = gross_amount
             
             # 生成销售单号（如果不存在）

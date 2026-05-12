@@ -26,7 +26,7 @@ class ProductBase(BaseModel):
     is_active: bool = Field(True, description="是否启用")
     notes: Optional[str] = Field(None, description="备注")
     # V3: 品牌
-    brand: Optional[str] = Field(None, max_length=100, description="品牌名称：无品牌/中挪三文鱼/海兴悦三文鱼/北辰海选汇")
+    brand_id: Optional[int] = Field(None, description="品牌ID")
     # V3: 物料管理专用字段
     supplier_id: Optional[int] = Field(None, description="供应商ID")
     lead_time_days: Optional[int] = Field(None, description="供货周期(天)")
@@ -64,7 +64,7 @@ class ProductUpdate(BaseModel):
     safety_stock: Optional[int] = Field(None)
     is_active: Optional[bool] = Field(None)
     notes: Optional[str] = None
-    brand: Optional[str] = Field(None, max_length=100)  # V3: 品牌
+    brand_id: Optional[int] = Field(None, description="品牌ID")  # V3: 品牌
     supplier_id: Optional[int] = Field(None)  # V3: 物料-供应商
     lead_time_days: Optional[int] = Field(None)  # V3: 物料-供货周期
     last_purchase_price: Optional[Decimal] = Field(None)  # V3: 物料-最近采购价
@@ -75,6 +75,7 @@ class ProductResponse(ProductBase):
     model_config = ConfigDict(from_attributes=True)
     
     id: int
+    brand_name: Optional[str] = Field(None, description="品牌名称")
     created_at: datetime
     updated_at: datetime
 
@@ -125,6 +126,7 @@ class ProductPackagingBase(BaseModel):
     """包装物基础"""
     level: str = Field(..., description="包装层级: box盒级 / portion份级")
     material_id: int = Field(..., description="包材物料ID")
+    brand_id: Optional[int] = Field(None, description="品牌变体ID，不同品牌不同包装")
     quantity: Decimal = Field(..., gt=0, description="用量")
     unit: str = Field("个", max_length=20, description="用量单位")
     notes: Optional[str] = Field(None, description="备注")
@@ -139,6 +141,7 @@ class ProductPackagingUpdate(BaseModel):
     """更新包装物"""
     level: Optional[str] = Field(None, max_length=20)
     material_id: Optional[int] = Field(None)
+    brand_id: Optional[int] = Field(None)
     quantity: Optional[Decimal] = Field(None, gt=0)
     unit: Optional[str] = Field(None, max_length=20)
     notes: Optional[str] = None
@@ -151,6 +154,7 @@ class ProductPackagingResponse(ProductPackagingBase):
     id: int
     product_id: int
     material_name: Optional[str] = Field(None, description="物料名称")
+    brand_name: Optional[str] = Field(None, description="品牌名称")
     created_at: datetime
     updated_at: datetime
 

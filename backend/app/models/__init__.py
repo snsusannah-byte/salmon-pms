@@ -148,6 +148,14 @@ class CustomerCategory(str, PyEnum):
     GROUP_BUYING = "group_buying"      # 团购
 
 
+class SupplierCategory(str, PyEnum):
+    """供应商分类"""
+    RAW_MATERIAL = "raw_material"          # 原料供应
+    MATERIAL_SUPPLY = "material_supply"    # 物料供应
+    CUSTOMS_BROKER = "customs_broker"      # 报关行
+    SERVICE_PROVIDER = "service_provider"  # 服务商
+
+
 class Company(Base, TimestampMixin):
     """主体管理：加工厂/渔场/出口商/供应商/客户/报关行/物流/内部"""
     __tablename__ = "companies"
@@ -178,6 +186,7 @@ class Company(Base, TimestampMixin):
     logistics_info: Mapped[Optional[str]] = mapped_column(Text)  # 物流信息
     salesperson_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))  # 业务员
     customer_category: Mapped[Optional[CustomerCategory]] = mapped_column(Enum(CustomerCategory))  # 客户分类
+    supplier_category: Mapped[Optional[str]] = mapped_column(String(50))  # 供应商分类: raw_material/material_supply/customs_broker/service_provider
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
@@ -328,18 +337,18 @@ class ImportInvoice(Base, TimestampMixin):
     products: Mapped[List["InvoiceProduct"]] = relationship("InvoiceProduct", back_populates="invoice", lazy="raise", uselist=True, cascade="all, delete-orphan")
     # 主从关系
     parent_invoice: Mapped[Optional["ImportInvoice"]] = relationship("ImportInvoice", remote_side=[id], foreign_keys=[parent_invoice_id], lazy="raise")
-    sub_invoices: Mapped[List["ImportInvoice"]] = relationship("ImportInvoice", foreign_keys=[parent_invoice_id], lazy="raise")
+    sub_invoices: Mapped[List["ImportInvoice"]] = relationship("ImportInvoice", foreign_keys=[parent_invoice_id], lazy="raise", overlaps="parent_invoice")
 
 
 class ProductCategory(str, Enum):
     """产品分类"""
-    WHOLE_FISH = "WHOLE_FISH"           # 进口规格（整鱼）
-    FILLET = "FILLET"                   # 进口规格（鱼柳）
-    FINISHED_PRODUCT = "FINISHED_PRODUCT"  # 成品定义
-    BYPRODUCT = "BYPRODUCT"              # 副产品
-    PACKAGING = "PACKAGING"             # 包装物料
-    ACCESSORY = "ACCESSORY"             # 配套
-    BOM_MATERIAL = "BOM_MATERIAL"      # BOM物料/包材（兼容旧数据）
+    WHOLE_FISH = "whole_fish"           # 进口规格（整鱼）
+    FILLET = "fillet"                   # 进口规格（鱼柳）
+    FINISHED_PRODUCT = "finished_product"  # 成品定义
+    BYPRODUCT = "byproduct"              # 副产品
+    PACKAGING = "packaging"             # 包装物料
+    ACCESSORY = "accessory"             # 配套
+    BOM_MATERIAL = "bom_material"      # BOM物料/包材（兼容旧数据）
 
 
 class Product(Base, TimestampMixin):
@@ -362,7 +371,8 @@ class Product(Base, TimestampMixin):
     notes: Mapped[Optional[str]] = mapped_column(Text)
     
     # V3: 品牌（关联公司名称）
-    brand: Mapped[Optional[str]] = mapped_column(String(100))  # 品牌名称：无品牌/中挪三文鱼/海兴悦三文鱼/北辰海选汇
+    brand_id: Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"))  # 品牌ID（SKU变体用）
+    template_id: Mapped[Optional[int]] = mapped_column(ForeignKey("products.id"))  # 产品模板ID（NULL=模板/SPU，有值=变体/SKU）
     cost_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 成本价（自动计算：BOM成本+包装物成本）
 
     # V3: 物料管理专用字段（仅 bom_material 使用）
@@ -383,6 +393,21 @@ class Product(Base, TimestampMixin):
                                                        back_populates="finished_product",
                                                        lazy="raise",
                                                        cascade="all, delete-orphan")
+
+
+class Brand(Base, TimestampMixin):
+    """品牌定义（自有品牌 + OEM代工客户品牌）"""
+    __tablename__ = "brands"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)  # 品牌名称
+    code: Mapped[Optional[str]] = mapped_column(String(50), unique=True)  # 品牌编码
+    company_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"))  # 关联公司（OEM客户）
+    is_oem: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否为代工品牌
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    company: Mapped[Optional["Company"]] = relationship("Company", foreign_keys=[company_id], lazy="raise")
 
 
 class ProductBOM(Base, TimestampMixin):
@@ -408,6 +433,7 @@ class ProductPackaging(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    brand_id: Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"))  # 品牌变体：不同品牌不同包装
     level: Mapped[str] = mapped_column(String(20), nullable=False)  # box:盒级, portion:份级
     material_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)  # 用量
@@ -425,6 +451,7 @@ class ProductAccessory(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     accessory_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)  # 配套产品ID
+    brand_id: Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"))  # 品牌变体：不同品牌不同配套
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)  # 每份用量
     unit: Mapped[str] = mapped_column(String(20), default="个")
     notes: Mapped[Optional[str]] = mapped_column(Text)
@@ -688,6 +715,7 @@ class SalesReceipt(Base, TimestampMixin):
     transaction_id: Mapped[Optional[int]] = mapped_column(ForeignKey("transaction_records.id"), nullable=True)
 
     sale: Mapped["WholeFishSale"] = relationship("WholeFishSale", back_populates="receipts")
+    transaction: Mapped[Optional["TransactionRecord"]] = relationship("TransactionRecord", foreign_keys=[transaction_id])
 
 
 class AftersalesRecord(Base, TimestampMixin):
@@ -729,8 +757,10 @@ class TransactionRecord(Base, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text)
     related_invoice_id: Mapped[Optional[int]] = mapped_column(ForeignKey("import_invoices.id"))
     related_batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+    related_sale_ids: Mapped[Optional[str]] = mapped_column(Text)  # JSON array of sale IDs
     
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     confirmed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
     notes: Mapped[Optional[str]] = mapped_column(Text)
@@ -836,5 +866,17 @@ from app.models.finished_product_v2 import (
     FinishedProductCommission,
 )
 
-# 这样现有代码可以通过 from app.models import DailySlaughterRecord 等方式使用新模型
+from app.models.finished_products import (
+    ProductTemplate,
+    TemplatePart,
+    TemplateBOM,
+    TemplatePackaging,
+    ProductVariant,
+    VariantPackaging,
+    VariantAccessory,
+)
+
+from app.models.material_supplier import MaterialSupplier
+
+# 这样现有代码可以通过 from app.models import ProductTemplate 等方式使用新模型
 

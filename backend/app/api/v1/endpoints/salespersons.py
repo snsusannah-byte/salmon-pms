@@ -169,12 +169,15 @@ async def list_commissions(
     month: Optional[str] = Query(None, description="月份 YYYY-MM"),
     salesperson_id: Optional[int] = Query(None, description="业务员ID"),
     status: Optional[str] = Query(None, description="状态 pending/paid"),
+    batch_id: Optional[int] = Query(None, description="批次ID"),
     db: AsyncSession = Depends(get_db),
 ):
     """提成记录列表"""
-    query = select(CommissionRecord).join(Salesperson)
-    count_query = select(func.count(CommissionRecord.id))
-
+    from app.models import WholeFishSale, Company
+    from sqlalchemy.orm import joinedload
+    
+    query = select(CommissionRecord).options(joinedload(CommissionRecord.salesperson))
+    
     if month:
         from datetime import datetime
         start = datetime.strptime(month, "%Y-%m")
@@ -191,11 +194,49 @@ async def list_commissions(
 
     if status:
         query = query.where(CommissionRecord.status == status)
+    
+    # 如果按批次筛选，先查该批次的销售单ID
+    sale_ids = None
+    if batch_id:
+        result = await db.execute(select(WholeFishSale.id).where(WholeFishSale.batch_id == batch_id))
+        sale_ids = [r[0] for r in result.all()]
+        if sale_ids:
+            query = query.where(CommissionRecord.sale_id.in_(sale_ids))
+        else:
+            # 该批次没有销售单，返回空
+            return {
+                "items": [],
+                "summary": {"total_pending": 0, "total_paid": 0, "total_amount": 0},
+            }
 
     query = query.order_by(CommissionRecord.sale_date.desc())
 
     result = await db.execute(query)
     items = result.scalars().all()
+    
+    # 预加载客户信息
+    sale_ids_all = [r.sale_id for r in items]
+    customers_map = {}
+    if sale_ids_all:
+        result = await db.execute(
+            select(WholeFishSale.id, Company.name).join(Company, WholeFishSale.customer_id == Company.id).where(WholeFishSale.id.in_(sale_ids_all))
+        )
+        customers_map = {r[0]: r[1] for r in result.all()}
+    
+    # 预加载批次信息
+    batches_map = {}
+    if sale_ids_all:
+        result = await db.execute(
+            select(WholeFishSale.id, WholeFishSale.batch_id).where(WholeFishSale.id.in_(sale_ids_all))
+        )
+        batch_ids = [r[1] for r in result.all() if r[1]]
+        if batch_ids:
+            from app.models import Batch
+            result = await db.execute(select(Batch.id, Batch.batch_name).where(Batch.id.in_(batch_ids)))
+            batch_name_map = {r[0]: r[1] for r in result.all()}
+            
+            result = await db.execute(select(WholeFishSale.id, WholeFishSale.batch_id).where(WholeFishSale.id.in_(sale_ids_all)))
+            batches_map = {r[0]: batch_name_map.get(r[1], "-") for r in result.all()}
 
     total_pending = sum(float(r.commission_amount) for r in items if r.status == "pending")
     total_paid = sum(float(r.commission_amount) for r in items if r.status == "paid")
@@ -209,7 +250,8 @@ async def list_commissions(
                 "salesperson_name": r.salesperson.name if r.salesperson else "-",
                 "sale_id": r.sale_id,
                 "sale_date": r.sale_date.isoformat() if r.sale_date else None,
-                "customer_name": "-",  # TODO: 关联销售记录获取客户名称
+                "customer_name": customers_map.get(r.sale_id, "-"),
+                "batch_name": batches_map.get(r.sale_id, "-"),
                 "sale_amount": float(r.sale_amount),
                 "weight_kg": float(r.weight_kg),
                 "commission_rate": float(r.commission_rate),

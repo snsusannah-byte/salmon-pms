@@ -48,12 +48,14 @@ class BatchReportSummaryItem(BaseModel):
     total_sales_net: Decimal = Decimal("0")
     total_sales_weight: Decimal = Decimal("0")
     sales_count: int = 0
+    total_commission: Decimal = Decimal("0")
 
     # 利润
     total_expenses: Decimal = Decimal("0")
     shrinkage: Decimal = Decimal("0")
     net_profit: Decimal = Decimal("0")
     profit_margin: Optional[Decimal] = None
+    cumulative_profit: Decimal = Decimal("0")
 
     # 锁定状态
     is_locked: bool = False

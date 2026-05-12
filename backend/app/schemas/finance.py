@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ExchangeRecordBase(BaseModel):
@@ -161,8 +161,25 @@ class TransactionRecordResponse(TransactionRecordBase):
     """交易流水响应"""
     model_config = ConfigDict(from_attributes=True)
     id: int
+    is_locked: bool = False
+    related_sale_ids: Optional[List[int]] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("related_sale_ids", mode="before")
+    @classmethod
+    def parse_related_sale_ids(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        return None
 
 
 class FinanceSummary(BaseModel):

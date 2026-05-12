@@ -10,7 +10,7 @@ class InvoiceNotificationService:
     """进口单证通知服务"""
     
     @staticmethod
-    def generate_arrival_notification(invoice: ImportInvoice, products: list[InvoiceProduct], processing_plant_name: str = None) -> str:
+    def generate_arrival_notification(invoice: ImportInvoice, products: list[InvoiceProduct], processing_plant_display: str = None) -> str:
         """生成预计到货通知（纯文本，微信适用）"""
         # 从 ETA 获取到货日期时间（年月日时分）
         if invoice.eta:
@@ -35,7 +35,7 @@ class InvoiceNotificationService:
             "",
             f"到货日期：{arrival_datetime}",
             f"宰杀日期：{invoice.kill_date or '-'}",
-            f"加工厂：{processing_plant_name or '-'}",
+            f"加工厂：{processing_plant_display or '-'}",
             "",
             "规格箱数：",
         ]
@@ -81,20 +81,23 @@ class InvoiceNotificationService:
         notifications = []
         now = datetime.now()
         
-        # 获取加工厂名称
-        processing_plant_name = None
+        # 获取加工厂显示（优先EU注册号 enterprise_registration_no，其次 name）
+        processing_plant_display = None
         if invoice.processing_plant:
-            processing_plant_name = invoice.processing_plant.name
+            # 关系已加载，直接取
+            processing_plant_display = invoice.processing_plant.enterprise_registration_no or invoice.processing_plant.name
         elif invoice.processing_plant_id:
             # 如果关系没加载，直接查询
             company_result = await db.execute(
-                select(Company.name).where(Company.id == invoice.processing_plant_id)
+                select(Company).where(Company.id == invoice.processing_plant_id)
             )
-            processing_plant_name = company_result.scalar()
+            company = company_result.scalar_one_or_none()
+            if company:
+                processing_plant_display = company.enterprise_registration_no or company.name
         
         # 1. 预计到货通知
         arrival_text = InvoiceNotificationService.generate_arrival_notification(
-            invoice, products, processing_plant_name
+            invoice, products, processing_plant_display
         )
         arrival_notification = Notification(
             user_id=user_id,
