@@ -5,15 +5,14 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finished_product_v2 import (
     WarehousePurchaseOrder,
     WarehouseStock,
-    DailySlaughterRecord,
 )
-from app.models import Product, ProductCategory, Company
+from app.models import Product, ProductCategory
 
 
 class WarehouseService:
@@ -318,7 +317,7 @@ class WarehouseService:
         result = await db.execute(
             select(WarehouseStock, Product)
             .join(Product, WarehouseStock.product_id == Product.id)
-            .where(WarehouseStock.is_below_warning == True)
+            .where(WarehouseStock.is_below_warning)
             .where(Product.category != ProductCategory.BYPRODUCT)  # 副产品不预警
         )
         

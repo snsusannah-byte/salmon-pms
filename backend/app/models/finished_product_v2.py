@@ -2,10 +2,11 @@
 三文鱼PMS - 成品销售模块V2模型扩展
 基于现有模型向后兼容添加
 """
+# ruff: noqa: F821
 from datetime import date
 from decimal import Decimal
 from enum import Enum as PyEnum
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,

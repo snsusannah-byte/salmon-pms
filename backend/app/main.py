@@ -35,7 +35,7 @@ app.add_middleware(
 )
 
 # Register API routers
-from app.api.v1 import api_router
+from app.api.v1 import api_router  # noqa: E402
 app.include_router(api_router, prefix="/api/v1")
 
 # Health check

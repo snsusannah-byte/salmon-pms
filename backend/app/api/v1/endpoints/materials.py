@@ -7,14 +7,14 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.core.database import get_db
-from app.models import Product, ProductCategory, Company, CompanyType, MaterialSupplier
-from app.models.finished_product_v2 import WarehousePurchaseOrder, WarehouseStock, WarehouseType
+from app.models import Product, ProductCategory, Company, MaterialSupplier
+from app.models.finished_product_v2 import WarehousePurchaseOrder, WarehouseStock
 
 router = APIRouter()
 
@@ -286,7 +286,7 @@ async def get_material_summary(
     active_result = await db.execute(
         select(func.count(Product.id)).where(
             Product.category == ProductCategory.BOM_MATERIAL,
-            Product.is_active == True,
+            Product.is_active,
         )
     )
     active_materials = active_result.scalar() or 0

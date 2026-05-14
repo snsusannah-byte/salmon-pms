@@ -6,7 +6,7 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import WholeFishSale, WholeFishSaleItem, SalesReceipt, AftersalesRecord, SalesStatus, Company, Batch, User
+from app.models import WholeFishSale, WholeFishSaleItem, SalesReceipt, AftersalesRecord, SalesStatus, Company, Batch
 
 
 class SalesService:
@@ -37,7 +37,6 @@ class SalesService:
         limit: int = 100,
     ) -> Tuple[List[WholeFishSale], int]:
         from sqlalchemy import or_
-        from app.models import Company, Batch
         
         query = select(WholeFishSale).options(
             selectinload(WholeFishSale.items),
@@ -304,7 +303,7 @@ class SalesService:
 
     @staticmethod
     async def add_receipt(db: AsyncSession, sale_id: int, data: dict) -> SalesReceipt:
-        from app.models import TransactionRecord, TransactionType, TransactionCategory, Company
+        from app.models import TransactionRecord, TransactionType, TransactionCategory
         from fastapi import HTTPException
         sale = await SalesService.get_sale_by_id(db, sale_id)
         if not sale:
@@ -323,18 +322,14 @@ class SalesService:
             sale.rounding_adjustment = user_rounding
             await db.flush()
 
-        # 检查是否还有未付余额
+        # 检查是否还有未付余额（已全额收款后禁止再次收款，但允许本次收款略超应收）
         remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
         if remaining <= 0:
             raise HTTPException(
                 status_code=400,
                 detail=f"销售单 {sale.sale_no or f'#{sale.id}'} 已全额收款（净金额 ¥{sale.net_amount}，已收 ¥{sale.paid_amount}），无需再次收款。"
             )
-        if received_amount > remaining:
-            raise HTTPException(
-                status_code=400,
-                detail=f"收款金额 ¥{received_amount} 超过未付余额 ¥{remaining}"
-            )
+        # 允许实收金额大于未付余额（客户凑整多转场景），不再拦截
 
         receipt = SalesReceipt(sale_id=sale_id, **data)
         db.add(receipt)
@@ -408,11 +403,16 @@ class SalesService:
         await db.commit()
 
         if sale:
+            # 更新已付金额和状态
             await SalesService._update_paid_amount(db, sale)
-            # 如果已全额清零，同步清零因收款产生的抹零
-            if Decimal(str(sale.paid_amount or 0)) == 0:
+            
+            # 如果收款全部删除，同步清零因收款产生的抹零
+            if Decimal(str(sale.paid_amount or 0)) == 0 and Decimal(str(sale.rounding_adjustment or 0)) != 0:
+                await db.refresh(sale)
                 sale.rounding_adjustment = Decimal("0")
                 await db.commit()
+                # 抹零清零后重新计算净金额和状态
+                await SalesService._update_paid_amount(db, sale)
 
     @staticmethod
     async def _update_paid_amount(db: AsyncSession, sale: WholeFishSale) -> None:

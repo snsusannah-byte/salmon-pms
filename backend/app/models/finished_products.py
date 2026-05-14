@@ -3,6 +3,7 @@
 - 产品模板（SPU）：规格、部位、通用BOM/包装
 - 品牌变体（SKU）：品牌、价格、库存、专属包装/配套
 """
+# ruff: noqa: F821
 from decimal import Decimal
 from typing import List, Optional
 

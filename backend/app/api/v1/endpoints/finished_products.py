@@ -7,10 +7,9 @@ from typing import List, Optional
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, delete
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, func
 
 from app.core.database import get_db
 from app.models.finished_products import (
@@ -336,7 +335,7 @@ async def create_template(
                 num = int(c.split("-")[-1])
                 if num > max_num:
                     max_num = num
-            except:
+            except Exception:
                 pass
         code = f"TP-{max_num + 1:03d}"
 
@@ -722,7 +721,7 @@ async def create_variant(
                 num = int(c.split("-")[-1])
                 if num > max_num:
                     max_num = num
-            except:
+            except Exception:
                 pass
         code = f"{prefix}-{max_num + 1:03d}"
 

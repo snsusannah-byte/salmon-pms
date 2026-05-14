@@ -2,12 +2,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select, func, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date, datetime, timedelta
-from typing import List, Optional
 
 from app.core.database import get_db
 from app.models import (
     Batch, BatchStatus, ImportInvoice, Company, CompanyType,
-    WholeFishSale, Inventory, TransactionRecord, TransactionType,
+    Inventory,
 )
 
 router = APIRouter()
@@ -53,7 +52,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
     # 4. 客户数
     customer_result = await db.execute(
         select(func.count(Company.id)).where(
-            and_(Company.type == CompanyType.CUSTOMER, Company.is_active == True)
+            and_(Company.type == CompanyType.CUSTOMER, Company.is_active)
         )
     )
     total_customers = customer_result.scalar()
@@ -61,7 +60,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
     # 5. 公司总数（各类型）
     company_types_result = await db.execute(
         select(Company.type, func.count(Company.id))
-        .where(Company.is_active == True)
+        .where(Company.is_active)
         .group_by(Company.type)
     )
     company_breakdown = {row[0]: row[1] for row in company_types_result.all()}

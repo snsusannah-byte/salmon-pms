@@ -272,11 +272,14 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
       let tWeight = 0;
       let tAmount = 0;
       
+      // 向上取整到2位小数：Math.ceil(value * 100) / 100
+      const roundUp2 = (v: number) => Math.ceil(Math.round(v * 10000) / 100) / 100;
+      
       const productsWithAmount = currentProducts.map((p: any) => {
         const netWeight = Number(p?.net_weight_kg || 0);
         const unitPrice = Number(p?.unit_price || 0);
         const boxCount = Number(p?.box_count || 0);
-        const lineAmount = netWeight * unitPrice;
+        const lineAmount = roundUp2(netWeight * unitPrice);
         
         tBoxes += boxCount;
         tWeight += netWeight;
@@ -284,7 +287,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         
         return {
           ...p,
-          total_amount: Number(lineAmount.toFixed(2)),
+          total_amount: lineAmount,
         };
       });
 
@@ -293,7 +296,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         products: productsWithAmount,
         total_boxes: tBoxes,
         total_weight_kg: Number(tWeight.toFixed(3)),
-        total_amount_usd: Number(tAmount.toFixed(2)),
+        total_amount_usd: roundUp2(tAmount),
         kill_date: data.kill_date || undefined,
         arrival_date: data.arrival_date || undefined,
         is_master: data.is_master,
@@ -339,7 +342,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
     });
   };
 
-  // 实时计算汇总（直接在渲染时计算，不触发 setValue 避免无限循环）
+  // 实时计算汇总（直接使用已保存的产品金额，避免浮点精度误差）
   const products = form.watch("products") || [];
   let totalBoxes = 0;
   let totalWeight = 0;
@@ -347,11 +350,11 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
 
   products.forEach((p: any) => {
     const netWeight = Number(p?.net_weight_kg || 0);
-    const unitPrice = Number(p?.unit_price || 0);
     const boxCount = Number(p?.box_count || 0);
+    const lineAmount = Number(p?.total_amount || 0);
     totalBoxes += boxCount;
     totalWeight += netWeight;
-    totalAmount += netWeight * unitPrice;
+    totalAmount += lineAmount;
   });
 
   return (
@@ -588,7 +591,8 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
             {fields.map((field, index) => {
               const netWeight = Number(form.watch(`products.${index}.net_weight_kg`) || 0);
               const unitPrice = Number(form.watch(`products.${index}.unit_price`) || 0);
-              const lineAmount = netWeight * unitPrice;
+              const storedAmount = Number(form.watch(`products.${index}.total_amount`) || 0);
+              const lineAmount = Math.round(netWeight * unitPrice * 100) / 100;
               const productName = form.watch(`products.${index}.product_name`);
               
               return (
@@ -640,7 +644,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                     {...form.register(`products.${index}.unit_price`)} 
                   />
                   <div className="text-right text-xs font-medium tabular-nums">
-                    ${lineAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${storedAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                   <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-red-500 shrink-0" onClick={() => remove(index)}>
                     <X className="h-4 w-4" />

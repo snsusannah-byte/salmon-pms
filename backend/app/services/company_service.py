@@ -25,7 +25,7 @@ class CompanyService:
         """
         query = select(Company).where(Company.code == code)
         if not include_inactive:
-            query = query.where(Company.is_active == True)
+            query = query.where(Company.is_active)
         result = await db.execute(query)
         return result.scalar_one_or_none()
     
@@ -51,7 +51,7 @@ class CompanyService:
         result = await db.execute(
             select(Company)
             .where(Company.type == CompanyType.CUSTOMER)
-            .where(Company.is_active == True)
+            .where(Company.is_active)
             .where(Company.name == name)
             .limit(1)
         )

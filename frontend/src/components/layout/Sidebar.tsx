@@ -3,54 +3,56 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Building2,
-  Landmark,
+  Banknote,
   Users,
-  Package,
-  FileText,
   Boxes,
+  FileCheck,
+  Container,
   Fish,
   PackageCheck,
-  DollarSign,
+  Landmark,
   BarChart3,
   Settings,
   UserCog,
-  TrendingUp,
+  Percent,
   Warehouse,
-  Scissors,
+  Factory,
   Layers,
   Store,
   Tag,
+  FileSpreadsheet,
+  Wrench,
 } from "lucide-react";
 
 const navItems = [
   { icon: LayoutDashboard, label: "数据看板", path: "/dashboard" },
-  { icon: FileText, label: "进口单证", path: "/invoices" },
-  { icon: Boxes, label: "批次管理", path: "/batches" },
+  { icon: FileCheck, label: "进口单证", path: "/invoices" },
+  { icon: Container, label: "批次管理", path: "/batches" },
   { icon: Fish, label: "整鱼销售", path: "/whole-fish-sales" },
-  { icon: DollarSign, label: "财务管理", path: "/finance" },
+  { icon: Landmark, label: "财务管理", path: "/finance" },
   { icon: BarChart3, label: "报表中心", path: "/reports" },
 ];
 
 const finishedProductItems = [
   { icon: PackageCheck, label: "成品销售", path: "/finished-product-sales" },
-  { icon: Scissors, label: "生产管理", path: "/production" },
+  { icon: Factory, label: "生产管理", path: "/production" },
   { icon: Warehouse, label: "成品仓库", path: "/warehouse" },
-  { icon: BarChart3, label: "成品报表", path: "/finished-product-reports" },
+  { icon: FileSpreadsheet, label: "成品报表", path: "/finished-product-reports" },
 ];
 
 
 
 const bottomNavItems = [
-  { icon: Package, label: "产品管理", path: "/products" },
+  { icon: Boxes, label: "产品管理", path: "/products" },
   { icon: Tag, label: "品牌管理", path: "/brands" },
   { icon: Layers, label: "成品定义", path: "/finished-products" },
-  { icon: Layers, label: "物料管理", path: "/materials" },
+  { icon: Wrench, label: "物料管理", path: "/materials" },
   { icon: Building2, label: "主体管理", path: "/companies" },
   { icon: Users, label: "客户管理", path: "/customers" },
   { icon: Store, label: "供应商管理", path: "/suppliers" },
   { icon: UserCog, label: "业务员", path: "/salespersons" },
-  { icon: TrendingUp, label: "提成管理", path: "/commissions" },
-  { icon: Landmark, label: "银行账户", path: "/bank-accounts" },
+  { icon: Percent, label: "提成管理", path: "/commissions" },
+  { icon: Banknote, label: "银行账户", path: "/bank-accounts" },
   { icon: Settings, label: "系统设置", path: "/settings" },
 ];
 

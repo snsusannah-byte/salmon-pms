@@ -37,6 +37,7 @@ interface Supplier {
   address: string | null;
   website: string | null;
   bank_account: string | null;
+  payee: string | null;
   bank_name: string | null;
   currency: string;
   cooperation_date: string | null;

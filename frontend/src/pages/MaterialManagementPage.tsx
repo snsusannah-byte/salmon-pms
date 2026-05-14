@@ -732,7 +732,7 @@ export function MaterialManagementPage() {
             <div className="space-y-2">
               <Label>供应商 <span className="text-red-500">*</span></Label>
               <Select value={inSupplierId} onValueChange={(v) => {
-                setInSupplierId(v);
+                setInSupplierId(v ?? "");
                 const supplier = inMaterial?.suppliers.find((s) => String(s.supplier_id) === v);
                 if (supplier?.unit_price) setInPrice(String(supplier.unit_price));
               }}>

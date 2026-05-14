@@ -2,8 +2,7 @@
 成品仓库管理 API
 """
 from datetime import date
-from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.schemas.finished_product_v2 import (
     WarehousePurchaseOrderCreate,
-    WarehousePurchaseOrderUpdate,
     WarehousePurchaseOrderResponse,
     WarehousePurchaseOrderListResponse,
     WarehouseStockResponse,

@@ -30,7 +30,7 @@ const formSchema = z.object({
   bank_name: z.string().max(200).optional().or(z.literal("")),
   cooperation_date: z.string().optional().or(z.literal("")),
   logistics_info: z.string().optional().or(z.literal("")),
-  currency: z.string().default("CNY"),
+  currency: z.string().min(1),
   supplier_category: z.string().min(1, "请选择供应商分类"),
   notes: z.string().optional().or(z.literal("")),
 });
@@ -53,6 +53,8 @@ interface Supplier {
   currency: string;
   supplier_category: string | null;
   notes: string | null;
+  is_active?: boolean;
+  created_at?: string;
 }
 
 interface SupplierFormDialogProps {

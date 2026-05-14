@@ -180,6 +180,7 @@ interface Transaction {
 interface ImportFeeItem {
   invoice_id: number;
   invoice_no: string;
+  gross_weight_kg?: number | string;
   expense_date: string;
   customs_broker_id: number | null;
   customs_broker_name: string | null;
@@ -476,6 +477,7 @@ function ImportFeesTab() {
   const handleOpenEdit = (item: ImportFeeItem) => {
     setEditingItem(item);
     setInvoiceId(String(item.invoice_id || ""));
+    setGrossWeight(String(item.gross_weight_kg ?? ""));
     setExpenseDate(item.expense_date || "");
     setCustomsBrokerId(item.customs_broker_id || 15);
     setImportDuty(String(item.import_duty ?? ""));
@@ -504,6 +506,7 @@ function ImportFeesTab() {
         yard_fee: Number(yardFee) || 0,
         cold_storage_fee: Number(coldStorageFee) || 0,
         clearance_service_fee: Number(clearanceServiceFee) || 0,
+        gross_weight_kg: Number(grossWeight) || undefined,
       });
       toast.success("进口费用更新成功");
       queryClient.invalidateQueries({ queryKey: ["import-fees"] });
@@ -511,7 +514,16 @@ function ImportFeesTab() {
       setFormOpen(false);
       setEditingItem(null);
     } catch (error: any) {
-      toast.error(error.response?.data?.detail ?? "更新失败");
+      const detail = error.response?.data?.detail;
+      let msg = "更新失败";
+      if (Array.isArray(detail)) {
+        msg = detail.map((d: any) => d.msg || String(d)).join("; ");
+      } else if (typeof detail === "string") {
+        msg = detail;
+      } else if (detail && typeof detail === "object") {
+        msg = JSON.stringify(detail);
+      }
+      toast.error(msg);
     }
   };
 
@@ -706,7 +718,7 @@ function ImportFeesTab() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                {/* 浦虹场地费 */}
+                {/* 目的地查验费 */}
                 <div className="grid gap-2">
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -719,7 +731,7 @@ function ImportFeesTab() {
                       }}
                     />
                     <Label htmlFor="yard" className="cursor-pointer">
-                      浦虹场地费（目的地查验）
+                      目的地查验费
                     </Label>
                   </div>
                   <Input
@@ -845,8 +857,7 @@ function ImportFeesTab() {
               )}
 
               <div className="border rounded-lg p-3 space-y-2">
-                <div className="text-sm font-medium text-gray-700">海关税费</div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">进口关税</span>
                     <span className="font-medium">{fmt(detailItem.import_duty)}</span>
@@ -855,31 +866,39 @@ function ImportFeesTab() {
                     <span className="text-muted-foreground">进口增值税</span>
                     <span className="font-medium">{fmt(detailItem.import_vat)}</span>
                   </div>
+                  <div className="flex justify-between font-semibold border-t pt-1">
+                    <span>税费合计</span>
+                    <span>{fmt(detailItem.tax_total)}</span>
+                  </div>
+                  <div className="flex justify-between pt-1">
+                    <span className="text-muted-foreground">提货费</span>
+                    <span>{fmt(detailItem.pickup_fee)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">运费</span>
+                    <span>{fmt(detailItem.freight)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">报关服务费</span>
+                    <span>{fmt(detailItem.clearance_service_fee)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">目的地查验费</span>
+                    <span>{fmt(detailItem.yard_fee)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">冷藏费</span>
+                    <span>{fmt(detailItem.cold_storage_fee)}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold border-t pt-1">
+                    <span>清关费合计</span>
+                    <span>{fmt(detailItem.clearance_total)}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between font-semibold border-t pt-1">
-                  <span>税费合计</span>
-                  <span>{fmt(detailItem.tax_total)}</span>
+                <div className="flex justify-between font-bold border-t-2 pt-2 text-base">
+                  <span>合计</span>
+                  <span className="text-blue-700">{fmt(detailItem.grand_total)}</span>
                 </div>
-              </div>
-
-              <div className="border rounded-lg p-3 space-y-2">
-                <div className="text-sm font-medium text-gray-700">清关费用</div>
-                <div className="space-y-1">
-                  <div className="flex justify-between"><span className="text-muted-foreground">提货费</span><span>{fmt(detailItem.pickup_fee)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">运费</span><span>{fmt(detailItem.freight)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">场地费</span><span>{fmt(detailItem.yard_fee)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">冷藏费</span><span>{fmt(detailItem.cold_storage_fee)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">报关服务费</span><span>{fmt(detailItem.clearance_service_fee)}</span></div>
-                </div>
-                <div className="flex justify-between font-semibold border-t pt-1">
-                  <span>清关费用合计</span>
-                  <span className="text-blue-600">{fmt(detailItem.clearance_total)}</span>
-                </div>
-              </div>
-
-              <div className="bg-blue-50 p-3 rounded-lg flex justify-between font-bold text-base">
-                <span>费用总计</span>
-                <span className="text-blue-700">{fmt(detailItem.grand_total)}</span>
               </div>
             </div>
           )}
@@ -893,9 +912,15 @@ function ImportFeesTab() {
               <TableHead>发票号</TableHead>
               <TableHead>费用日期</TableHead>
               <TableHead>报关行</TableHead>
-              <TableHead>关税</TableHead>
-              <TableHead>增值税</TableHead>
-              <TableHead>清关费用</TableHead>
+              <TableHead>进口关税</TableHead>
+              <TableHead>进口增值税</TableHead>
+              <TableHead className="text-amber-700 bg-amber-50/50">税费合计</TableHead>
+              <TableHead>提货费</TableHead>
+              <TableHead>运费</TableHead>
+              <TableHead>报关服务费</TableHead>
+              <TableHead>目的地查验费</TableHead>
+              <TableHead>冷藏费</TableHead>
+              <TableHead className="text-blue-700 bg-blue-50/50">清关费合计</TableHead>
               <TableHead>合计</TableHead>
               <TableHead className="w-[100px]"></TableHead>
             </TableRow>
@@ -903,27 +928,33 @@ function ImportFeesTab() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">
+                <TableCell colSpan={14} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : !importFees.length ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
             ) : (
               <>
                 {importFees.map((f) => (
-                  <TableRow key={f.invoice_id}>
+                  <TableRow key={f.invoice_id} className="hover:bg-slate-100 cursor-default transition-colors">
                   <TableCell className="font-medium">{f.invoice_no}</TableCell>
                   <TableCell>{f.expense_date || "-"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{f.customs_broker_name || "-"}</TableCell>
                   <TableCell>{fmt(f.import_duty)}</TableCell>
                   <TableCell>{fmt(f.import_vat)}</TableCell>
-                  <TableCell>{fmt(f.clearance_total)}</TableCell>
-                  <TableCell className="font-semibold">{fmt(f.grand_total)}</TableCell>
+                  <TableCell className="font-semibold text-amber-700 bg-amber-50/30">{fmt(f.tax_total)}</TableCell>
+                  <TableCell>{fmt(f.pickup_fee)}</TableCell>
+                  <TableCell>{fmt(f.freight)}</TableCell>
+                  <TableCell>{fmt(f.clearance_service_fee)}</TableCell>
+                  <TableCell>{fmt(f.yard_fee)}</TableCell>
+                  <TableCell>{fmt(f.cold_storage_fee)}</TableCell>
+                  <TableCell className="font-semibold text-blue-700 bg-blue-50/30">{fmt(f.clearance_total)}</TableCell>
+                  <TableCell className="font-bold">{fmt(f.grand_total)}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       <Button
@@ -963,7 +994,13 @@ function ImportFeesTab() {
                   <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
                   <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.import_duty || 0), 0))}</TableCell>
                   <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.import_vat || 0), 0))}</TableCell>
-                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.clearance_total || 0), 0))}</TableCell>
+                  <TableCell className="font-semibold text-amber-700">{fmt(importFees.reduce((s, f) => s + Number(f.tax_total || 0), 0))}</TableCell>
+                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.pickup_fee || 0), 0))}</TableCell>
+                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.freight || 0), 0))}</TableCell>
+                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.clearance_service_fee || 0), 0))}</TableCell>
+                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.yard_fee || 0), 0))}</TableCell>
+                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.cold_storage_fee || 0), 0))}</TableCell>
+                  <TableCell className="font-semibold text-blue-700">{fmt(importFees.reduce((s, f) => s + Number(f.clearance_total || 0), 0))}</TableCell>
                   <TableCell className="font-bold">{fmt(importFees.reduce((s, f) => s + Number(f.grand_total || 0), 0))}</TableCell>
                   <TableCell />
                 </TableRow>
@@ -1567,28 +1604,39 @@ function TransactionsTab() {
   const [deleteTarget, setDeleteTarget] = useState<Transaction | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // 搜索防抖
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // 筛选状态
   const [filterType, setFilterType] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterSaleId, setFilterSaleId] = useState("");
   const [filterLocked, setFilterLocked] = useState("");
+  const [filterBankAccountId, setFilterBankAccountId] = useState("");
 
   // 批量删除
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
 
   const { data, isLoading } = useQuery<Transaction[]>({
-    queryKey: ["transactions", searchQuery, filterType, filterCategory, filterSaleId, filterLocked],
+    queryKey: ["transactions", debouncedSearch, filterType, filterCategory, filterSaleId, filterLocked, filterBankAccountId],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (searchQuery.trim()) params.append("search", searchQuery.trim());
+      if (debouncedSearch.trim()) params.append("search", debouncedSearch.trim());
       if (filterType) params.append("type", filterType);
       if (filterCategory) params.append("category", filterCategory);
-      if (filterSaleId.trim() && /^\d+$/.test(filterSaleId.trim())) params.append("related_sale_id", filterSaleId.trim());
+      if (filterSaleId.trim() && /^[1-9]\d*$/.test(filterSaleId.trim())) params.append("related_sale_id", filterSaleId.trim());
       else if (filterSaleId.trim()) params.append("sale_no", filterSaleId.trim());
       if (filterLocked === "locked") params.append("is_locked", "true");
       else if (filterLocked === "unlocked") params.append("is_locked", "false");
+      if (filterBankAccountId) params.append("bank_account_id", filterBankAccountId);
       const res = await api.get(`/v1/finance/transactions?${params.toString()}`);
       return res.data;
     },
@@ -1853,7 +1901,7 @@ function TransactionsTab() {
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="搜索日期、对方名称、描述..."
+              placeholder="搜索日期、对方名称、金额、描述、销售单号..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9"
@@ -1906,13 +1954,28 @@ function TransactionsTab() {
               <SelectItem value="unlocked">未锁定</SelectItem>
             </SelectContent>
           </Select>
-          {(searchQuery || filterType || filterCategory || filterSaleId || filterLocked) && (
+          <Select value={filterBankAccountId} onValueChange={(v) => setFilterBankAccountId(v ?? "")}>
+            <SelectTrigger className="w-[160px]">
+              <SelectValue placeholder="银行账户" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">全部账户</SelectItem>
+              {bankAccounts.map((b: any) => (
+                <SelectItem key={b.id} value={String(b.id)}>
+                  {b.bank_name} {b.account_number?.slice(-4)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {(searchQuery || filterType || filterCategory || filterSaleId || filterLocked || filterBankAccountId) && (
             <Button variant="ghost" size="sm" onClick={() => {
               setSearchQuery("");
+              setDebouncedSearch("");
               setFilterType("");
               setFilterCategory("");
               setFilterSaleId("");
               setFilterLocked("");
+              setFilterBankAccountId("");
             }}>
               重置
             </Button>
@@ -1938,7 +2001,7 @@ function TransactionsTab() {
                   { header: "银行账户", key: "from_account_id", format: (v) => getBankAccountName(v || data.find((r: any) => r.from_account_id === v)?.to_account_id) },
                   { header: "对方", key: "counterparty_name" },
                   { header: "描述", key: "description" },
-                  { header: "关联销售单", key: "related_sale_ids", format: (v) => v?.length > 0 ? [...new Set(v)].map((id: number) => allSalesMap[id]).filter(Boolean).join(", ") : "-" },
+                  { header: "关联销售单", key: "related_sale_ids", format: (v) => v?.length > 0 ? Array.from(new Set(v as number[])).map((id) => allSalesMap[id]).filter(Boolean).join(", ") : "-" },
                 ],
                 "交易流水"
               );

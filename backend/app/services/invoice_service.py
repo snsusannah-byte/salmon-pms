@@ -1,13 +1,19 @@
 from typing import List, Optional
 from datetime import datetime, date
-from decimal import Decimal
+from decimal import Decimal, ROUND_UP
 
 from sqlalchemy import select, func, and_, delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException
 
 from app.models import ImportInvoice, InvoiceProduct, InvoiceStatus, ExchangeStatus
 from app.schemas.invoice import InvoiceCreate, InvoiceUpdate, InvoiceProductCreate, InvoiceProductUpdate
+
+
+def _quantize(value: Decimal) -> Decimal:
+    """金额向上取整到2位小数（没有舍只有入）"""
+    return value.quantize(Decimal("0.01"), rounding=ROUND_UP)
 
 
 class InvoiceService:
@@ -23,6 +29,7 @@ class InvoiceService:
                 selectinload(ImportInvoice.processing_plant),
                 selectinload(ImportInvoice.fish_farm),
                 selectinload(ImportInvoice.exporter),
+                selectinload(ImportInvoice.supplier),
             )
             .where(ImportInvoice.id == invoice_id)
         )
@@ -88,7 +95,7 @@ class InvoiceService:
             clearance_ids = select(ClearanceCost.invoice_id)
 
             # 找到所有有费用记录的发票（包括主票和从票）
-            from sqlalchemy import union, text
+            from sqlalchemy import union
             has_fees_ids = union(tax_ids, clearance_ids).subquery()
 
             # 1. 排除自身有费用记录的发票
@@ -98,7 +105,7 @@ class InvoiceService:
             # 找到有费用记录的主票ID
             parent_with_fees = select(ImportInvoice.id).where(
                 ImportInvoice.id.in_(has_fees_ids),
-                ImportInvoice.is_master == True
+                ImportInvoice.is_master
             ).subquery()
 
             # 排除这些主票下的所有从票
@@ -219,24 +226,24 @@ class InvoiceService:
         
         # 计算总金额/总箱数/总重量
         if products_data:
-            invoice_data["total_amount_usd"] = sum(
-                p.total_amount for p in products_data
-            )
-            invoice_data["total_boxes"] = sum(
-                p.box_count for p in products_data
-            )
-            invoice_data["total_weight_kg"] = sum(
-                p.net_weight_kg for p in products_data
-            )
+            invoice_data["total_amount_usd"] = Decimal("0")
+            invoice_data["total_boxes"] = 0
+            invoice_data["total_weight_kg"] = Decimal("0")
+            
+            for p in products_data:
+                invoice_data["total_amount_usd"] += _quantize(p.total_amount)
+                invoice_data["total_boxes"] += p.box_count
+                invoice_data["total_weight_kg"] += p.net_weight_kg
         
         invoice = ImportInvoice(**invoice_data)
         db.add(invoice)
         
         # 创建产品明细（此时 invoice.id 还未分配，使用对象关联）
         for product_data in products_data:
-            product = InvoiceProduct(
-                **product_data.model_dump()
-            )
+            # 重新计算产品金额，确保精度正确
+            pd = product_data.model_dump()
+            pd["total_amount"] = _quantize(product_data.net_weight_kg * product_data.unit_price)
+            product = InvoiceProduct(**pd)
             product.invoice = invoice  # 通过关系关联
             db.add(product)
         
@@ -292,14 +299,19 @@ class InvoiceService:
             
             for product_data in products_data:
                 # product_data 是字典（已从 Pydantic model_dump）
+                # 重新计算产品金额，确保精度正确
+                net_weight = Decimal(str(product_data.get("net_weight_kg", 0)))
+                unit_price = Decimal(str(product_data.get("unit_price", 0)))
+                product_data["total_amount"] = _quantize(net_weight * unit_price)
+                
                 product = InvoiceProduct(
                     invoice_id=invoice.id,
                     **product_data
                 )
                 db.add(product)
-                total_amount += Decimal(str(product_data.get("total_amount", 0)))
+                total_amount += product_data["total_amount"]
                 total_boxes += product_data.get("box_count", 0)
-                total_weight += Decimal(str(product_data.get("net_weight_kg", 0)))
+                total_weight += net_weight
             
             # 更新汇总字段
             invoice.total_amount_usd = total_amount

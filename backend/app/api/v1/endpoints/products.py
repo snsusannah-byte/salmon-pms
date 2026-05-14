@@ -1,10 +1,11 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import ProductCategory, Brand
+from app.models import ProductCategory, Brand, Product
 from app.schemas.product import (
     ProductCreate,
     ProductUpdate,
@@ -603,7 +604,6 @@ async def stats_by_product_name(
       - 总计: 库存 150
     """
     from app.models import Brand
-    from sqlalchemy import func
     
     # 1. 查询所有成品
     query = select(Product)
@@ -616,7 +616,7 @@ async def stats_by_product_name(
     if search:
         query = query.where(Product.name.ilike(f"%{search}%"))
     
-    query = query.where(Product.is_active == True)
+    query = query.where(Product.is_active)
     query = query.order_by(Product.name, Product.brand_id)
     
     result = await db.execute(query)

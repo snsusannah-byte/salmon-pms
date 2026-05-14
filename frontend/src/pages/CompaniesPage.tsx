@@ -38,6 +38,7 @@ interface Company {
   id: number;
   name: string;
   chinese_name: string | null;
+  company_full_name: string | null;
   type: string;
   business_role?: string;
   code: string | null;

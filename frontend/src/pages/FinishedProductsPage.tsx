@@ -280,7 +280,7 @@ export function FinishedProductsPage() {
       setFormVariantPackagings(template.packagings.map(p => ({
         level: p.level,
         material_id: p.material_id,
-        material_name: p.material_name,
+        material_name: p.material_name ?? undefined,
         quantity: p.quantity,
         unit: p.unit,
         is_override: false,
@@ -289,7 +289,7 @@ export function FinishedProductsPage() {
     if (template?.boms) {
       setFormVariantAccessories(template.boms.map(b => ({
         accessory_id: b.material_id,
-        accessory_name: b.material_name,
+        accessory_name: b.material_name ?? undefined,
         quantity: b.quantity,
         unit: b.unit,
       })));
@@ -574,7 +574,7 @@ export function FinishedProductsPage() {
               {formParts.map((p, i) => (
                 <div key={i} className="grid grid-cols-4 gap-2">
                   <Select value={p.part_name} onValueChange={(v) => {
-                    const updated = [...formParts]; updated[i] = { ...p, part_name: v }; setFormParts(updated);
+                    const updated = [...formParts]; updated[i] = { ...p, part_name: v ?? "" }; setFormParts(updated);
                   }}>
                     <SelectTrigger className="text-xs"><SelectValue placeholder="选择部位" /></SelectTrigger>
                     <SelectContent>
@@ -648,7 +648,7 @@ export function FinishedProductsPage() {
                     const updated = [...formBOMs]; updated[i] = { ...b, quantity: Number(e.target.value) }; setFormBOMs(updated);
                   }} />
                   <Select value={b.unit || "个"} onValueChange={(v) => {
-                    const updated = [...formBOMs]; updated[i] = { ...b, unit: v }; setFormBOMs(updated);
+                    const updated = [...formBOMs]; updated[i] = { ...b, unit: v ?? "" }; setFormBOMs(updated);
                   }}>
                     <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -744,7 +744,7 @@ export function FinishedProductsPage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>品牌 <span className="text-red-500">*</span></Label>
-              <Select value={formBrandId} onValueChange={setFormBrandId}>
+              <Select value={formBrandId} onValueChange={(v) => setFormBrandId(v ?? "")}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择品牌">
                     {(() => {

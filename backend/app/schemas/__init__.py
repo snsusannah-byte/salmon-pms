@@ -1,3 +1,4 @@
+# ruff: noqa: F401
 from .sales import (
     WholeFishSaleBase,
     WholeFishSaleCreate,

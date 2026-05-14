@@ -1,20 +1,18 @@
 """
 每日宰杀记录 Service
 """
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finished_product_v2 import (
     DailySlaughterRecord,
     SlaughterType,
-    WarehouseStock,
-    LossRecord,
 )
-from app.models import Product, ProductCategory, Company, MovementType
+from app.models import Product, ProductCategory
 
 
 class DailySlaughterService:
@@ -76,7 +74,7 @@ class DailySlaughterService:
         """获取可供销售的宰杀日期列表（关联销售用）"""
         result = await db.execute(
             select(DailySlaughterRecord)
-            .where(DailySlaughterRecord.is_locked == True)
+            .where(DailySlaughterRecord.is_locked)
             .where(DailySlaughterRecord.available_meat_kg > min_available_kg)
             .order_by(DailySlaughterRecord.slaughter_date.desc())
         )
@@ -201,7 +199,6 @@ class DailySlaughterService:
     async def _deduct_warehouse_stock(db: AsyncSession, record: DailySlaughterRecord):
         """宰杀登记时自动扣减整鱼/鱼柳库存，并将产出入库到成品仓库"""
         from app.services.warehouse_service import WarehouseService
-        from app.models import Product
         from sqlalchemy import select
 
         # 1. 扣减原料库存（整鱼仓库）

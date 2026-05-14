@@ -3,11 +3,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
-from decimal import Decimal
 from datetime import date, datetime
 
 from app.core.database import get_db
-from app.models import SalesStatus, WholeFishSale, SalesReceipt, AftersalesRecord, Company, Batch, User, BatchInvoice
+from app.models import SalesStatus, WholeFishSale, AftersalesRecord, Company, Batch, BatchInvoice
 from app.schemas.sales import (
     WholeFishSaleCreate,
     WholeFishSaleUpdate,
@@ -15,7 +14,6 @@ from app.schemas.sales import (
     WholeFishSaleListResponse,
     WholeFishSaleItemResponse,
     SalesReceiptCreate,
-    SalesReceiptUpdate,
     SalesReceiptResponse,
     AftersalesRecordCreate,
     AftersalesRecordUpdate,
@@ -139,7 +137,6 @@ async def list_whole_fish_sales(
 async def _generate_sale_no(db: AsyncSession, sale_date: str) -> str:
     """生成销售单号: XSYYYYMMDD-NNN"""
     from sqlalchemy import func
-    from datetime import date
     d = date.fromisoformat(sale_date)
     prefix = f"XS{d.strftime('%Y%m%d')}"
     
@@ -205,7 +202,8 @@ async def update_whole_fish_sale(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback, logging
+        import traceback
+        import logging
         logging.error(f"Update sale {sale_id} error: {str(e)}")
         logging.error(traceback.format_exc())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新失败: {str(e)}")
@@ -483,9 +481,7 @@ async def batch_import_sales(
         pass
     records = data.get("rows", []) if isinstance(data, dict) else data
     from app.services.company_service import CompanyService
-    from app.services.batch_service import BatchService
     # from decimal import Decimal
-    from datetime import date, datetime
     
     created_count = 0
     result_items = []

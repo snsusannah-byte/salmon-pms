@@ -2,6 +2,7 @@
 物料-供应商关联模型
 支持多供应商供应该物料，每个供应商有不同价格
 """
+# ruff: noqa: F821
 from decimal import Decimal
 from typing import Optional
 
@@ -10,7 +11,6 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Numeric,
-    String,
     Text,
     UniqueConstraint,
 )

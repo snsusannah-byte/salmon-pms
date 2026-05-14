@@ -8,10 +8,7 @@ from app.models import Salesperson, CommissionRecord
 from app.schemas.company import (
     SalespersonCreate,
     SalespersonUpdate,
-    SalespersonResponse,
-    CommissionResponse,
 )
-from app.services.company_service import CompanyService
 
 router = APIRouter()
 

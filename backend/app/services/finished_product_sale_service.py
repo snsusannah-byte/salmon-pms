@@ -1,4 +1,5 @@
 from typing import List, Optional, Tuple
+from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -13,9 +14,7 @@ from app.models import (
     SalesStatus,
     Company,
     Product,
-    ProductCategory,
     ProductPackaging,
-    WarehouseStock,
 )
 
 
@@ -159,7 +158,6 @@ class FinishedProductSaleService:
         3. 包装物料：根据 product_packagings 配置扣减
         """
         from sqlalchemy.orm import selectinload
-        from app.models.finished_product_v2 import WarehouseStock
         from app.models import ProductAccessory
         
         quantity = Decimal(str(sale.quantity))
@@ -244,7 +242,6 @@ class FinishedProductSaleService:
     @staticmethod
     async def _restore_stock(db: AsyncSession, sale: FinishedProductSale) -> None:
         """删除销售时恢复库存"""
-        from app.models.finished_product_v2 import WarehouseStock
         from sqlalchemy.orm import selectinload
         from app.models import ProductAccessory
         

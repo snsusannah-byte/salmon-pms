@@ -39,6 +39,7 @@ const customerCategories = [
 const formSchema = z.object({
   name: z.string().min(1, "名称不能为空").max(200),
   chinese_name: z.string().max(200).optional().or(z.literal("")),
+  company_full_name: z.string().max(200).optional().or(z.literal("")),
   type: z.string().min(1, "类型不能为空"),
   code: z.string().max(50).optional().or(z.literal("")),
   contact_person: z.string().max(100).optional().or(z.literal("")),
@@ -73,6 +74,7 @@ interface Company {
   id: number;
   name: string;
   chinese_name: string | null;
+  company_full_name: string | null;
   type: string;
   code: string | null;
   contact_person: string | null;
@@ -119,6 +121,7 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
     defaultValues: {
       name: "",
       chinese_name: "",
+      company_full_name: "",
       type: "",
       code: "",
       contact_person: "",
@@ -150,6 +153,7 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
       form.reset({
         name: initialData.name,
         chinese_name: initialData.chinese_name ?? "",
+        company_full_name: initialData.company_full_name ?? "",
         type: initialData.type,
         code: initialData.code ?? "",
         contact_person: initialData.contact_person ?? "",
@@ -174,6 +178,7 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
       form.reset({
         name: "",
         chinese_name: "",
+        company_full_name: "",
         type: defaultType || "",
         code: "",
         contact_person: "",
@@ -257,6 +262,12 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
               <Label htmlFor="chinese_name">中文名称</Label>
               <Input id="chinese_name" {...form.register("chinese_name")} placeholder="中文名称" />
             </div>
+          </div>
+
+          {/* 公司全称 */}
+          <div className="space-y-2">
+            <Label htmlFor="company_full_name">公司全称</Label>
+            <Input id="company_full_name" {...form.register("company_full_name")} placeholder="公司完整注册名称" />
           </div>
 
           {/* 类型 */}

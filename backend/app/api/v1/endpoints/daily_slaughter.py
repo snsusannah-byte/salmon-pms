@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models.finished_product_v2 import DailySlaughterRecord, SlaughterType
 from app.schemas.finished_product_v2 import (
     DailySlaughterRecordCreate,
     DailySlaughterRecordUpdate,

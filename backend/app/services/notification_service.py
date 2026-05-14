@@ -1,8 +1,7 @@
-import asyncio
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from app.models import ImportInvoice, InvoiceProduct, Notification
 from app.core.database import AsyncSessionLocal
 
@@ -20,7 +19,7 @@ class InvoiceNotificationService:
                 try:
                     dt = datetime.fromisoformat(invoice.eta.replace("Z", "+00:00"))
                     arrival_datetime = dt.strftime("%Y-%m-%d %H:%M")
-                except:
+                except Exception:
                     arrival_datetime = invoice.eta
             else:
                 arrival_datetime = str(invoice.eta)

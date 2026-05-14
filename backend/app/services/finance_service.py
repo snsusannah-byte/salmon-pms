@@ -4,12 +4,11 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy import select, func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from app.models import (
     ExchangeRecord, ImportTax, ClearanceCost,
-    TransactionRecord, TransactionType, TransactionCategory,
-    ImportInvoice, WholeFishSale, ExchangeStatus, BatchInvoice, Batch,
+    TransactionRecord, TransactionType,
+    ImportInvoice, BatchInvoice, Batch,
 )
 
 
@@ -240,6 +239,7 @@ class FinanceService:
         SELECT
             i.id AS invoice_id,
             i.invoice_no,
+            c.gross_weight_kg,
             COALESCE(t.tax_date, c.cost_date) AS expense_date,
             c.customs_broker_id,
             co.name AS customs_broker_name,
@@ -290,6 +290,7 @@ class FinanceService:
             items.append({
                 "invoice_id": row["invoice_id"],
                 "invoice_no": row["invoice_no"],
+                "gross_weight_kg": row["gross_weight_kg"],
                 "expense_date": row["expense_date"],
                 "customs_broker_id": row["customs_broker_id"],
                 "customs_broker_name": row["customs_broker_name"],
@@ -354,6 +355,11 @@ class FinanceService:
                 Decimal(str(data.get("clearance_service_fee", 0)))
             ),
         }
+        
+        # 海关出关毛重（如果传了）
+        gross_weight = data.get("gross_weight_kg")
+        if gross_weight is not None:
+            clearance_data["gross_weight_kg"] = Decimal(str(gross_weight))
         
         existing_clearance = await db.execute(
             select(ClearanceCost).where(ClearanceCost.invoice_id == invoice_id)
@@ -523,6 +529,7 @@ class FinanceService:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         search: Optional[str] = None,
+        bank_account_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> Tuple[List[TransactionRecord], int]:
@@ -537,7 +544,7 @@ class FinanceService:
             # PostgreSQL JSON text field: search for the sale ID in JSON array
             # Patterns: [1], [1,...], [...,1], [...,1,...]
             sid = str(related_sale_id)
-            from sqlalchemy import or_, text
+            from sqlalchemy import or_
             json_filter = or_(
                 TransactionRecord.related_sale_ids == f"[{sid}]",
                 TransactionRecord.related_sale_ids.like(f"[{sid},%"),
@@ -572,14 +579,51 @@ class FinanceService:
             filters.append(TransactionRecord.transaction_date >= start_date)
         if end_date:
             filters.append(TransactionRecord.transaction_date <= end_date)
+        if bank_account_id is not None:
+            from sqlalchemy import or_
+            filters.append(or_(
+                TransactionRecord.from_account_id == bank_account_id,
+                TransactionRecord.to_account_id == bank_account_id,
+            ))
         if search:
             from sqlalchemy import or_
-            search_filter = or_(
+            # 支持金额搜索（精确匹配或部分匹配）
+            try:
+                search_amount = Decimal(str(search))
+                amount_filter = TransactionRecord.amount == search_amount
+            except Exception:
+                amount_filter = None
+            
+            search_conditions = [
                 TransactionRecord.counterparty_name.ilike(f"%{search}%"),
                 TransactionRecord.description.ilike(f"%{search}%"),
                 TransactionRecord.reference_no.ilike(f"%{search}%"),
                 TransactionRecord.transaction_date.cast(str).ilike(f"%{search}%"),
-            )
+            ]
+            if amount_filter is not None:
+                search_conditions.append(amount_filter)
+            
+            # 如果搜索关键词像销售单号，也搜索关联销售单
+            if search and len(search) >= 4:
+                from app.models import WholeFishSale
+                sale_result = await db.execute(
+                    select(WholeFishSale.id, WholeFishSale.sale_no).where(
+                        or_(
+                            WholeFishSale.sale_no.ilike(f"%{search}%"),
+                            WholeFishSale.customer_name.ilike(f"%{search}%") if hasattr(WholeFishSale, 'customer_name') else False,
+                        )
+                    )
+                )
+                sale_rows = sale_result.all()
+                if sale_rows:
+                    for row in sale_rows:
+                        sid = str(row[0])
+                        search_conditions.append(TransactionRecord.related_sale_ids == f"[{sid}]")
+                        search_conditions.append(TransactionRecord.related_sale_ids.like(f"[{sid},%"))
+                        search_conditions.append(TransactionRecord.related_sale_ids.like(f"%,{sid}]"))
+                        search_conditions.append(TransactionRecord.related_sale_ids.like(f"%,{sid},%"))
+            
+            search_filter = or_(*search_conditions)
             filters.append(search_filter)
         if filters:
             query = query.where(and_(*filters))
@@ -669,7 +713,7 @@ class FinanceService:
                 orphan_result = await db.execute(
                     select(SalesReceipt).where(
                         SalesReceipt.sale_id == sale.id,
-                        SalesReceipt.transaction_id == None
+                        SalesReceipt.transaction_id.is_(None)
                     )
                 )
                 orphans = orphan_result.scalars().all()
@@ -723,6 +767,36 @@ class FinanceService:
                 setattr(record, field, value)
         await db.commit()
         await db.refresh(record)
+        
+        # 如果交易金额变更，同步更新关联的销售收款并重新计算销售单状态
+        if "amount" in data and record.id:
+            from app.models import SalesReceipt, WholeFishSale
+            from sqlalchemy import select
+            from app.services.sales_service import SalesService
+            from decimal import Decimal
+            
+            result = await db.execute(
+                select(SalesReceipt).where(SalesReceipt.transaction_id == record.id)
+            )
+            receipts = result.scalars().all()
+            affected_sale_ids = set()
+            
+            for receipt in receipts:
+                # 更新收款记录金额
+                receipt.amount = Decimal(str(data["amount"]))
+                affected_sale_ids.add(receipt.sale_id)
+            
+            if affected_sale_ids:
+                await db.flush()
+                # 重新计算对应销售单的收款状态
+                for sale_id in affected_sale_ids:
+                    sale_result = await db.execute(
+                        select(WholeFishSale).where(WholeFishSale.id == sale_id)
+                    )
+                    sale = sale_result.scalar_one_or_none()
+                    if sale:
+                        await SalesService._update_paid_amount(db, sale)
+        
         return record
 
     @staticmethod

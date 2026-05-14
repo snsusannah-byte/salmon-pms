@@ -212,6 +212,21 @@ class ImportFeeCreate(BaseModel):
     notes: Optional[str] = Field(None, description="备注")
 
 
+class ImportFeeUpdate(BaseModel):
+    """统一进口费用更新（invoice_id 从路径参数获取，body 中不需要）"""
+    expense_date: date = Field(..., description="费用日期")
+    customs_broker_id: Optional[int] = Field(15, description="报关行ID")
+    import_duty: Decimal = Field(0, ge=0, description="进口关税")
+    import_vat: Decimal = Field(0, ge=0, description="进口增值税")
+    pickup_fee: Decimal = Field(0, ge=0, description="提货费")
+    freight: Decimal = Field(0, ge=0, description="运费")
+    yard_fee: Decimal = Field(0, ge=0, description="场地费")
+    cold_storage_fee: Decimal = Field(0, ge=0, description="冷藏费")
+    clearance_service_fee: Decimal = Field(0, ge=0, description="报关服务费")
+    gross_weight_kg: Optional[Decimal] = Field(None, ge=0, description="出关毛重(kg)")
+    notes: Optional[str] = Field(None, description="备注")
+
+
 class ImportFeeResponse(BaseModel):
     """统一进口费用响应"""
     model_config = ConfigDict(from_attributes=True)

@@ -43,7 +43,6 @@ from app.schemas.report import (
     PayableSupplierItem,
     PayableStatementResponse,
     FinancialStatements,
-    FinancialStatementsRequest,
     FinancialStatementItem,
     IncomeStatement,
     BalanceSheet,
@@ -462,6 +461,7 @@ async def list_batch_reports(
         total_exchange_payment = Decimal("0")
         total_exchange_fee = Decimal("0")
         exchange_rate = None
+        batch_exchange_applied_summary = False  # 批次级购汇只计算一次
 
         for bi, inv in bi_rows:
             invoice_ids.append(inv.id)
@@ -508,8 +508,15 @@ async def list_batch_reports(
             if ex:
                 if exchange_rate is None or exchange_rate == 0:
                     exchange_rate = _to_decimal(ex.exchange_rate)
-                total_exchange_payment += _to_decimal(ex.amount_cny)
-                total_exchange_fee += _to_decimal(ex.fee_cny)
+                if ex.invoice_id == inv.id:
+                    # 发票级别购汇
+                    total_exchange_payment += _to_decimal(ex.amount_cny)
+                    total_exchange_fee += _to_decimal(ex.fee_cny)
+                elif not batch_exchange_applied_summary:
+                    # 批次级别购汇，只计算一次
+                    total_exchange_payment += _to_decimal(ex.amount_cny)
+                    total_exchange_fee += _to_decimal(ex.fee_cny)
+                    batch_exchange_applied_summary = True
 
         # 批次销售汇总
         sales_list = await _get_batch_sales(db, batch.id)
@@ -679,6 +686,7 @@ async def get_batch_report(
     total_exchange_payment = Decimal("0")
     total_exchange_fee = Decimal("0")
     exchange_rate = None
+    batch_exchange_applied = False  # 批次级购汇只计算一次
 
     # 清关费分项汇总
     customs_broker_name = None
@@ -753,9 +761,21 @@ async def get_batch_report(
 
         # 购汇
         ex = await _get_invoice_exchange(db, inv.id, batch_id)
-        inv_exchange_payment = _to_decimal(ex.amount_cny) if ex else Decimal("0")
-        inv_exchange_fee = _to_decimal(ex.fee_cny) if ex else Decimal("0")
-        inv_exchange_rate = _to_decimal(ex.exchange_rate) if ex else Decimal("0")
+        inv_exchange_payment = Decimal("0")
+        inv_exchange_fee = Decimal("0")
+        inv_exchange_rate = Decimal("0")
+        if ex:
+            if ex.invoice_id == inv.id:
+                # 发票级别购汇记录
+                inv_exchange_payment = _to_decimal(ex.amount_cny)
+                inv_exchange_fee = _to_decimal(ex.fee_cny)
+                inv_exchange_rate = _to_decimal(ex.exchange_rate)
+            elif not batch_exchange_applied:
+                # 批次级别购汇记录，只计算一次
+                inv_exchange_payment = _to_decimal(ex.amount_cny)
+                inv_exchange_fee = _to_decimal(ex.fee_cny)
+                inv_exchange_rate = _to_decimal(ex.exchange_rate)
+                batch_exchange_applied = True
 
         if exchange_rate is None or exchange_rate == 0:
             if inv_exchange_rate > 0:
@@ -826,7 +846,7 @@ async def get_batch_report(
             invoice_no=inv.invoice_no,
             invoice_date=inv.invoice_date,
             processing_plant_name=await _get_company_name(db, inv.processing_plant_id),
-            processing_plant_eu_code=pp_company.enterprise_registration_no if pp_company else None,
+            processing_plant_eu_code=pp_company.code if pp_company else None,
             processing_plant_customs_code=pp_company.registration_code if pp_company else None,
             processing_plant_coc_no=pp_company.coc_cert_no if pp_company else None,
             fish_farm_name=await _get_company_name(db, inv.fish_farm_id),
@@ -1236,13 +1256,98 @@ async def get_invoice_report(
     # 计算核心数据
     data = await _calculate_invoice_report_data(db, invoice, include_sales=True)
 
+    # 计算累计利润（如果该发票属于某个批次）
+    cumulative_profit = Decimal("0")
+    if batch_id:
+        batch = await db.get(Batch, batch_id)
+        if batch:
+            # 计算到该批次为止的累计利润（复用批次财报逻辑）
+            completed_batches_result = await db.execute(
+                select(Batch.id, Batch.batch_date)
+                .join(BatchInvoice, BatchInvoice.batch_id == Batch.id)
+                .join(ImportInvoice, ImportInvoice.id == BatchInvoice.invoice_id)
+                .where(ImportInvoice.exchange_status == ExchangeStatus.COMPLETED)
+                .where(
+                    or_(
+                        Batch.batch_date < batch.batch_date,
+                        and_(Batch.batch_date == batch.batch_date, Batch.id <= batch.id)
+                    )
+                )
+                .distinct()
+                .order_by(Batch.batch_date, Batch.id)
+            )
+            for (cb_id, cb_date) in completed_batches_result.all():
+                cb_sales_result = await db.execute(
+                    select(WholeFishSale).where(WholeFishSale.batch_id == cb_id)
+                )
+                cb_sales_list = cb_sales_result.scalars().all()
+                cb_sales_net = sum(_to_decimal(s.net_amount) for s in cb_sales_list)
+
+                cb_sale_ids = [s.id for s in cb_sales_list]
+                cb_commission = Decimal("0")
+                if cb_sale_ids:
+                    cb_commission_result = await db.execute(
+                        select(func.sum(CommissionRecord.commission_amount)).where(CommissionRecord.sale_id.in_(cb_sale_ids))
+                    )
+                    cb_commission = _to_decimal(cb_commission_result.scalar())
+
+                cb_ex_result = await db.execute(
+                    select(ExchangeRecord).where(ExchangeRecord.batch_id == cb_id)
+                )
+                cb_ex_list = cb_ex_result.scalars().all()
+                cb_ex_payment = sum(_to_decimal(e.amount_cny) for e in cb_ex_list)
+                cb_ex_fee = sum(_to_decimal(e.fee_cny) for e in cb_ex_list)
+
+                cb_bi_result = await db.execute(
+                    select(BatchInvoice).where(BatchInvoice.batch_id == cb_id)
+                )
+                cb_inv_ids = [bi.invoice_id for bi in cb_bi_result.scalars().all()]
+
+                cb_taxes = Decimal("0")
+                cb_clearance = Decimal("0")
+                for cb_inv_id in cb_inv_ids:
+                    cb_tax = await _get_invoice_taxes(db, cb_inv_id)
+                    if cb_tax:
+                        cb_taxes += _to_decimal(cb_tax.import_vat) + _to_decimal(cb_tax.import_duty)
+                    cb_clearance_item = await _get_invoice_clearance(db, cb_inv_id)
+                    if cb_clearance_item:
+                        cb_clearance += (
+                            _to_decimal(cb_clearance_item.clearance_fee) +
+                            _to_decimal(cb_clearance_item.freight_fee) +
+                            _to_decimal(cb_clearance_item.inspection_fee) +
+                            _to_decimal(cb_clearance_item.quarantine_fee) +
+                            _to_decimal(cb_clearance_item.other_costs)
+                        )
+
+                cb_expenses = cb_ex_payment + cb_ex_fee + cb_taxes + cb_clearance
+
+                cb_shrinkage = Decimal("0")
+                if cb_inv_ids:
+                    cb_prod_result = await db.execute(
+                        select(InvoiceProduct).where(InvoiceProduct.invoice_id.in_(cb_inv_ids))
+                    )
+                    cb_prods = cb_prod_result.scalars().all()
+                    cb_import_weight = sum(_to_decimal(p.net_weight_kg) for p in cb_prods)
+                    cb_sales_weight = sum(_to_decimal(s.weight_kg) for s in cb_sales_list)
+                    if cb_import_weight > cb_sales_weight and cb_sales_weight > 0:
+                        cb_diff = cb_import_weight - cb_sales_weight
+                        cb_rate = Decimal("7.0")
+                        if cb_ex_list and cb_ex_list[0].exchange_rate and cb_ex_list[0].exchange_rate > 0:
+                            cb_rate = _to_decimal(cb_ex_list[0].exchange_rate)
+                        cb_import_amount = sum(_to_decimal(p.total_amount) for p in cb_prods)
+                        if cb_import_amount > 0 and cb_import_weight > 0:
+                            cb_unit_price = cb_import_amount / cb_import_weight
+                            cb_shrinkage = cb_diff * cb_unit_price * cb_rate
+
+                cumulative_profit += (cb_sales_net - cb_commission) - cb_expenses - round(cb_shrinkage, 2)
+
     # 溯源信息
     pp = await db.execute(select(Company).where(Company.id == invoice.processing_plant_id))
     pp_company = pp.scalar_one_or_none()
     ff = await db.execute(select(Company).where(Company.id == invoice.fish_farm_id))
     ff_company = ff.scalar_one_or_none()
     ex = await db.execute(select(Company).where(Company.id == invoice.exporter_id))
-    ex_company = ex.scalar_one_or_none()
+    _ = ex.scalar_one_or_none()  # exporter info reserved for future use
     sup = await db.execute(select(Company).where(Company.id == invoice.supplier_id))
     sup_company = sup.scalar_one_or_none()
 
@@ -1284,7 +1389,7 @@ async def get_invoice_report(
         kill_date=invoice.kill_date,
         arrival_date=invoice.arrival_date,
         processing_plant_name=data["processing_plant_name"],
-        processing_plant_eu_code=pp_company.enterprise_registration_no if pp_company else None,
+        processing_plant_eu_code=pp_company.code if pp_company else None,
         processing_plant_customs_code=pp_company.registration_code if pp_company else None,
         processing_plant_coc_no=pp_company.coc_cert_no if pp_company else None,
         fish_farm_name=await _get_company_name(db, invoice.fish_farm_id),
@@ -1323,6 +1428,7 @@ async def get_invoice_report(
         total_expenses=data["total_expenses"],
         shrinkage=data["shrinkage"],
         net_profit=data["net_profit"],
+        cumulative_profit=cumulative_profit,
         profit_margin=data["profit_margin"],
     )
 
@@ -1753,7 +1859,7 @@ async def list_payable_statements(
                     details.append(PayableSupplierItem(
                         date=ex.exchange_date,
                         type="exchange",
-                        description=f"购汇付款",
+                        description="购汇付款",
                         debit=Decimal("0"),
                         credit=_to_decimal(ex.amount_cny) + _to_decimal(ex.fee_cny),
                         balance=Decimal("0"),

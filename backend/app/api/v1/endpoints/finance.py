@@ -10,11 +10,10 @@ from app.schemas.finance import (
     ClearanceCostCreate, ClearanceCostUpdate, ClearanceCostResponse,
     TransactionRecordCreate, TransactionRecordUpdate, TransactionRecordResponse,
     FinanceSummary,
-    ImportFeeCreate, ImportFeeResponse,
-    BatchPurchaseTotalResponse,
+    ImportFeeCreate, ImportFeeUpdate,
 )
 from app.services.finance_service import FinanceService
-from app.models import BatchInvoice, ImportInvoice, Batch
+from app.models import BatchInvoice, Batch
 from sqlalchemy import select
 
 router = APIRouter()
@@ -52,7 +51,7 @@ async def list_bank_accounts(
     from app.models import BankAccount, Company, TransactionRecord
     
     result = await db.execute(
-        select(BankAccount).where(BankAccount.is_active == True).order_by(BankAccount.bank_name)
+        select(BankAccount).where(BankAccount.is_active).order_by(BankAccount.bank_name)
     )
     accounts = result.scalars().all()
     
@@ -62,7 +61,7 @@ async def list_bank_accounts(
         income_result = await db.execute(
             select(func.sum(TransactionRecord.amount)).where(
                 TransactionRecord.to_account_id == account.id,
-                TransactionRecord.is_confirmed == True,
+                TransactionRecord.is_confirmed,
             )
         )
         total_income = income_result.scalar() or 0
@@ -71,7 +70,7 @@ async def list_bank_accounts(
         expense_result = await db.execute(
             select(func.sum(TransactionRecord.amount)).where(
                 TransactionRecord.from_account_id == account.id,
-                TransactionRecord.is_confirmed == True,
+                TransactionRecord.is_confirmed,
             )
         )
         total_expense = expense_result.scalar() or 0
@@ -225,6 +224,7 @@ async def update_exchange_record(
     db: AsyncSession = Depends(get_db),
 ):
     """更新购汇记录"""
+    from app.models import ExchangeRecord
     result = await db.execute(select(ExchangeRecord).where(ExchangeRecord.id == record_id))
     record = result.scalar_one_or_none()
     if not record:
@@ -241,6 +241,7 @@ async def delete_exchange_record(
     db: AsyncSession = Depends(get_db),
 ):
     """删除购汇记录"""
+    from app.models import ExchangeRecord
     result = await db.execute(select(ExchangeRecord).where(ExchangeRecord.id == record_id))
     record = result.scalar_one_or_none()
     if not record:
@@ -283,7 +284,7 @@ async def create_import_fee(
 @router.put("/import-fees/{invoice_id}")
 async def update_import_fee(
     invoice_id: int,
-    data: ImportFeeCreate,
+    data: ImportFeeUpdate,
     db: AsyncSession = Depends(get_db),
 ):
     """更新统一进口费用（复用 create 逻辑，已存在则更新）"""
@@ -441,6 +442,7 @@ async def list_transactions(
     start_date: Optional[str] = Query(None, description="开始日期"),
     end_date: Optional[str] = Query(None, description="结束日期"),
     search: Optional[str] = Query(None, description="搜索关键词（日期/对方名称/描述/参考号）"),
+    bank_account_id: Optional[int] = Query(None, description="银行账户ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -449,7 +451,7 @@ async def list_transactions(
     from datetime import date
     sd = date.fromisoformat(start_date) if start_date else None
     ed = date.fromisoformat(end_date) if end_date else None
-    items, total = await FinanceService.list_transactions(db, type=type, category=category, related_sale_id=related_sale_id, sale_no=sale_no, is_locked=is_locked, start_date=sd, end_date=ed, search=search, skip=skip, limit=limit)
+    items, total = await FinanceService.list_transactions(db, type=type, category=category, related_sale_id=related_sale_id, sale_no=sale_no, is_locked=is_locked, start_date=sd, end_date=ed, search=search, bank_account_id=bank_account_id, skip=skip, limit=limit)
     return [TransactionRecordResponse.model_validate(r) for r in items]
 
 

@@ -8,8 +8,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.finished_product_v2 import LossRecord, LossType, DailySlaughterRecord
-from app.models import Product
+from app.models.finished_product_v2 import LossRecord
 
 
 class LossRecordService:

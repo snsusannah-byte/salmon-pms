@@ -172,9 +172,9 @@ class Company(Base, TimestampMixin):
     phone: Mapped[Optional[str]] = mapped_column(String(50))
     email: Mapped[Optional[str]] = mapped_column(String(100))
     address: Mapped[Optional[str]] = mapped_column(Text)
-    registration_code: Mapped[Optional[str]] = mapped_column(String(100))
-    enterprise_registration_no: Mapped[Optional[str]] = mapped_column(String(100))
-    coc_cert_no: Mapped[Optional[str]] = mapped_column(String(100))
+    registration_code: Mapped[Optional[str]] = mapped_column(String(100))  # CN海关准入号
+    enterprise_registration_no: Mapped[Optional[str]] = mapped_column(String(100))  # 养殖GGN（GlobalGAP Number）
+    coc_cert_no: Mapped[Optional[str]] = mapped_column(String(100))  # 监管链COC认证号
     farming_area: Mapped[Optional[str]] = mapped_column(String(100), default="FAO 27")
     website: Mapped[Optional[str]] = mapped_column(String(255))
     bank_name: Mapped[Optional[str]] = mapped_column(String(200))
@@ -568,6 +568,7 @@ class ClearanceCost(Base, TimestampMixin):
     cost_date: Mapped[Date] = mapped_column(Date, nullable=False)
     customs_broker_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"), nullable=True)  # 报关行ID
     customs_broker: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # 报关行名称（冗余）
+    gross_weight_kg: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 3), nullable=True)  # 海关出关毛重(kg)
     clearance_fee: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     freight_fee: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     inspection_fee: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), default=Decimal("0"))
@@ -852,31 +853,31 @@ class SystemConfig(Base, TimestampMixin):
 
 # ==================== 新增导入（追加到现有 __init__.py 末尾）====================
 
-from app.models.finished_product_v2 import (
+from app.models.finished_product_v2 import (  # noqa: E402
     # 枚举
-    SlaughterType,
-    LossType,
-    SaleItemType,
+    SlaughterType as SlaughterType,
+    LossType as LossType,
+    SaleItemType as SaleItemType,
     # 模型
-    DailySlaughterRecord,
-    WarehousePurchaseOrder,
-    WarehouseStock,
-    FinishedProductSaleItem,
-    LossRecord,
-    FinishedProductCommission,
+    DailySlaughterRecord as DailySlaughterRecord,
+    WarehousePurchaseOrder as WarehousePurchaseOrder,
+    WarehouseStock as WarehouseStock,
+    FinishedProductSaleItem as FinishedProductSaleItem,
+    LossRecord as LossRecord,
+    FinishedProductCommission as FinishedProductCommission,
 )
 
-from app.models.finished_products import (
-    ProductTemplate,
-    TemplatePart,
-    TemplateBOM,
-    TemplatePackaging,
-    ProductVariant,
-    VariantPackaging,
-    VariantAccessory,
+from app.models.finished_products import (  # noqa: E402
+    ProductTemplate as ProductTemplate,
+    TemplatePart as TemplatePart,
+    TemplateBOM as TemplateBOM,
+    TemplatePackaging as TemplatePackaging,
+    ProductVariant as ProductVariant,
+    VariantPackaging as VariantPackaging,
+    VariantAccessory as VariantAccessory,
 )
 
-from app.models.material_supplier import MaterialSupplier
+from app.models.material_supplier import MaterialSupplier as MaterialSupplier  # noqa: E402
 
 # 这样现有代码可以通过 from app.models import ProductTemplate 等方式使用新模型
 

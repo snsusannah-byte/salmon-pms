@@ -1,4 +1,3 @@
-from datetime import timedelta
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -9,7 +8,7 @@ from app.core.deps import get_current_user
 from app.core.database import get_db
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.models import User
-from app.schemas.auth import Token, LoginRequest, RegisterRequest, UserInfo
+from app.schemas.auth import Token, RegisterRequest, UserInfo
 
 router = APIRouter()
 
@@ -90,7 +89,6 @@ async def list_users(
     current_user: User = Depends(get_current_user),  # type: ignore
 ):
     """获取所有用户列表（用于业务员选择等）"""
-    from typing import List
-    result = await db.execute(select(User).where(User.is_active == True))
+    result = await db.execute(select(User).where(User.is_active))
     users = result.scalars().all()
     return [UserInfo.model_validate(u) for u in users]

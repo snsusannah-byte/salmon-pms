@@ -75,6 +75,7 @@ interface Invoice {
   processing_plant_id: number;
   fish_farm_id: number;
   exporter_id: number;
+  supplier_id: number;
   total_amount_usd: string;
   total_boxes: number;
   total_weight_kg: string;
@@ -100,6 +101,7 @@ interface Invoice {
   exporter_code: string | null;
   notes: string | null;
   products: InvoiceProduct[];
+  sub_invoices?: { id: number; invoice_no: string }[] | null;
   created_at: string;
 }
 

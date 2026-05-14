@@ -2,7 +2,7 @@
 报表中心 Schema
 包含：批次财报、单票财报、应收/应付对账单、三大财务报表
 """
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 
@@ -314,6 +314,7 @@ class InvoiceReportDetail(BaseModel):
     total_expenses: Decimal = Decimal("0")
     shrinkage: Decimal = Decimal("0")
     net_profit: Decimal = Decimal("0")
+    cumulative_profit: Decimal = Decimal("0")
     profit_margin: Optional[Decimal] = None
 
 

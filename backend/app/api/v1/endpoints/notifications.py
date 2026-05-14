@@ -1,4 +1,3 @@
-from typing import List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,8 +23,8 @@ async def list_notifications(
     count_query = select(func.count(Notification.id))
     
     if unread_only:
-        query = query.where(Notification.is_read == False)
-        count_query = count_query.where(Notification.is_read == False)
+        query = query.where(~Notification.is_read)
+        count_query = count_query.where(~Notification.is_read)
     
     query = query.order_by(Notification.created_at.desc()).offset(skip).limit(limit)
     
@@ -49,7 +48,7 @@ async def get_unread_count(
 ):
     """获取未读通知数量（小铃铛用）"""
     result = await db.execute(
-        select(func.count(Notification.id)).where(Notification.is_read == False)
+        select(func.count(Notification.id)).where(~Notification.is_read)
     )
     count = result.scalar()
     return {"count": count}
@@ -86,7 +85,7 @@ async def mark_all_as_read(
 ):
     """标记所有通知为已读"""
     result = await db.execute(
-        select(Notification).where(Notification.is_read == False)
+        select(Notification).where(~Notification.is_read)
     )
     notifications = result.scalars().all()
     

@@ -127,6 +127,7 @@ export function SalesPage() {
   const [receiptRounding, setReceiptRounding] = useState("0");
   const [receiptBankAccountId, setReceiptBankAccountId] = useState("");
   const [receiptDate, setReceiptDate] = useState(new Date().toISOString().split("T")[0]);
+  const [receiptDescription, setReceiptDescription] = useState("");
   const [adjRounding, setAdjRounding] = useState("0");
   const [adjAfterSales, setAdjAfterSales] = useState("0");
   const [adjAfterSalesIssue, setAdjAfterSalesIssue] = useState("");
@@ -289,6 +290,7 @@ export function SalesPage() {
   const bankAccounts = bankAccountsData || [];
 
   const handleOpenAdjust = (sale: Sale) => {
+    if (sale.is_locked) { toast.error("销售记录已锁定，不能调整"); return; }
     setAdjustSale(sale);
     const afterSales = String(sale.after_sales_adjustment ?? 0);
     const discount = String(sale.discount ?? 0);
@@ -310,6 +312,7 @@ export function SalesPage() {
     setReceiptRounding("0"); // 默认抹零为0（实收=应收）
     setReceiptBankAccountId("");
     setReceiptDate(new Date().toISOString().split("T")[0]);
+    setReceiptDescription("");
     setReceiptDialogOpen(true);
   };
 
@@ -330,11 +333,11 @@ export function SalesPage() {
       toast.error("收款金额必须大于0");
       return;
     }
-    // 前端校验：实收不能超过应收（net - paid）
+    // 收款金额允许略大于应收（实际业务中客户可能凑整多转）
     const receivable = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
     if (amount > receivable) {
-      toast.error(`收款金额不能超过应收余额 ¥${receivable.toFixed(2)}`);
-      return;
+      // 多收场景：仅做提示，不拦截
+      console.log(`本次实收 ¥${amount.toFixed(2)} 超过应收余额 ¥${receivable.toFixed(2)}，多收 ¥${(amount - receivable).toFixed(2)}`);
     }
     try {
       // 收款时传 rounding_adjustment（用户手动控制抹零）
@@ -344,7 +347,7 @@ export function SalesPage() {
         payment_method: "bank_transfer",
         bank_account_id: receiptBankAccountId ? Number(receiptBankAccountId) : null,
         rounding_adjustment: Number(receiptRounding || 0),
-        notes: "销售收款",
+        notes: receiptDescription.trim() || undefined,
       });
       toast.success("收款成功");
       queryClient.invalidateQueries({ queryKey: ["sales"] });
@@ -373,10 +376,12 @@ export function SalesPage() {
     if (!adjustSale) return;
 
     try {
-      // 保存调整项（售后 + 折扣，抹零在收款弹窗控制）
+      // 保存所有调整项
       await api.put(`/v1/sales/whole-fish/${adjustSale.id}`, {
         after_sales_adjustment: Number(adjAfterSales || 0),
         discount: Number(adjDiscount || 0),
+        rounding_adjustment: Number(adjRounding || 0),
+        commission: Number(adjCommission || 0),
         notes: adjAfterSalesIssue.trim() || undefined,
       });
 
@@ -434,65 +439,130 @@ export function SalesPage() {
       <Dialog open={adjustDialogOpen} onOpenChange={setAdjustDialogOpen}>
         <DialogContent className="max-w-[480px]">
           <DialogHeader>
-            <DialogTitle>销售调整 #{adjustSale?.id}</DialogTitle>
+            <DialogTitle>🔧 销售调整</DialogTitle>
             <DialogDescription className="text-sm">
-              销售单号: <span className="font-mono">{adjustSale?.sale_no}</span> · 客户: {adjustSale?.customer_name}
+              {adjustSale ? `销售单: ${adjustSale.sale_no ?? `#${adjustSale.id}`} · 客户: ${adjustSale.customer_name ?? "-"}` : ""}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            {/* 毛金额 */}
+          <div className="space-y-4 py-2">
+            {/* 金额明细 */}
             <div className="bg-muted/50 rounded-md p-3 text-sm space-y-1">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">毛金额</span>
-                <span className="font-medium">${adjustSale ? Number(adjustSale.gross_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
+                <span className="text-muted-foreground">销售金额</span>
+                <span className="font-medium tabular-nums">¥{adjustSale ? Number(adjustSale.gross_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
               </div>
-              {adjustSale && Number(adjustSale.weight_kg) > 0 && (
-                <div className="text-xs text-muted-foreground">
-                  {Number(adjustSale.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg × {Number(adjustSale.unit_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/kg
+              {adjustSale && Number(adjustSale.scan_fee) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>扫码手续费</span>
+                  <span className="tabular-nums">-¥{Number(adjustSale.scan_fee).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               )}
+              {adjustSale && Number(adjustSale.rounding_adjustment || adjRounding) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>抹零调整</span>
+                  <span className="tabular-nums">-¥{Number(adjRounding || adjustSale.rounding_adjustment || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {adjustSale && (Number(adjustSale.after_sales_adjustment || adjAfterSales) !== 0) && (
+                <div className="flex justify-between text-orange-600">
+                  <span>售后调整</span>
+                  <span className="tabular-nums">-¥{Number(adjAfterSales || adjustSale.after_sales_adjustment || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {adjustSale && (Number(adjustSale.discount || adjDiscount) !== 0) && (
+                <div className="flex justify-between text-orange-600">
+                  <span>折扣</span>
+                  <span className="tabular-nums">-¥{Number(adjDiscount || adjustSale.discount || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {adjustSale && (Number(adjustSale.commission || adjCommission) !== 0) && (
+                <div className="flex justify-between text-orange-600">
+                  <span>提成</span>
+                  <span className="tabular-nums">-¥{Number(adjCommission || adjustSale.commission || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-semibold border-t border-dashed pt-2 mt-1">
+                <span>净金额</span>
+                <span className="text-blue-600 tabular-nums">
+                  ¥{(() => {
+                    if (!adjustSale) return "0.00";
+                    const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || adjustSale.rounding_adjustment || 0) - Number(adjAfterSales || adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || adjustSale.discount || 0) - Number(adjCommission || adjustSale.commission || 0));
+                    return net.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                  })()}
+                </span>
+              </div>
+              <div className="flex justify-between text-green-600">
+                <span>已收金额</span>
+                <span className="tabular-nums">¥{adjustSale ? Number(adjustSale.paid_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
+              </div>
+              <div className="flex justify-between font-semibold border-t border-dashed pt-2 mt-1">
+                <span>未付余额</span>
+                <span className={(() => {
+                  if (!adjustSale) return "text-gray-400";
+                  const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || adjustSale.rounding_adjustment || 0) - Number(adjAfterSales || adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || adjustSale.discount || 0) - Number(adjCommission || adjustSale.commission || 0));
+                  const remaining = net - Number(adjustSale.paid_amount || 0);
+                  return remaining <= 0 ? "text-green-600" : "text-orange-600";
+                })()}>
+                  ¥{(() => {
+                    if (!adjustSale) return "0.00";
+                    const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || adjustSale.rounding_adjustment || 0) - Number(adjAfterSales || adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || adjustSale.discount || 0) - Number(adjCommission || adjustSale.commission || 0));
+                    const remaining = Math.max(0, net - Number(adjustSale.paid_amount || 0));
+                    return remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                  })()}
+                </span>
+              </div>
             </div>
 
-              {/* 调整项 */}
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">折扣</Label>
-                  <Input inputMode="decimal" value={adjDiscount} onChange={(e) => setAdjDiscount(e.target.value)} placeholder="0" />
-                </div>
+            {/* 调整输入 */}
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">抹零调整 <span className="text-muted-foreground font-normal">（尾差减免）</span></Label>
+                <Input inputMode="decimal" value={adjRounding} onChange={(e) => setAdjRounding(e.target.value)} placeholder="0" />
+                <p className="text-xs text-muted-foreground">用于减免未付尾差，如 0.94 元直接抹零</p>
+              </div>
 
-                <div className="space-y-1">
-                  <Label className="text-xs">售后调整</Label>
-                  <div className="flex gap-2">
-                    <Input inputMode="decimal" value={adjAfterSales} onChange={(e) => setAdjAfterSales(e.target.value)} placeholder="0" className="w-32" />
-                    <Input value={adjAfterSalesIssue} onChange={(e) => setAdjAfterSalesIssue(e.target.value)} placeholder="售后问题描述" />
+              <div className="space-y-1">
+                <Label className="text-xs">折扣</Label>
+                <Input inputMode="decimal" value={adjDiscount} onChange={(e) => setAdjDiscount(e.target.value)} placeholder="0" />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">售后调整</Label>
+                <div className="flex gap-2">
+                  <Input inputMode="decimal" value={adjAfterSales} onChange={(e) => setAdjAfterSales(e.target.value)} placeholder="0" className="w-32" />
+                  <Input value={adjAfterSalesIssue} onChange={(e) => setAdjAfterSalesIssue(e.target.value)} placeholder="售后问题描述" />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">提成</Label>
+                <Input inputMode="decimal" value={adjCommission} onChange={(e) => setAdjCommission(e.target.value)} placeholder="0" />
+              </div>
+            </div>
+
+            {/* 调整提示 */}
+            {(() => {
+              if (!adjustSale) return null;
+              const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0) - Number(adjCommission || 0));
+              const remaining = net - Number(adjustSale.paid_amount || 0);
+              if (remaining <= 0 && Number(adjustSale.paid_amount || 0) > 0) {
+                return (
+                  <div className="flex items-center gap-2 text-xs text-green-600 bg-green-50 rounded-md p-2">
+                    <span>✓</span>
+                    <span>调整后已付清，状态将变为「已结清」</span>
                   </div>
-                </div>
-              </div>
-
-              {/* 计算结果 */}
-              <div className="bg-muted/50 rounded-md p-3 text-sm space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">净金额</span>
-                  <span>${adjustSale ? Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0) - Number(adjustSale.rounding_adjustment || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
-                </div>
-                <div className="flex justify-between text-green-600">
-                  <span>已收金额</span>
-                  <span>${adjustSale ? Number(adjustSale.paid_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}</span>
-                </div>
-                <div className="flex justify-between font-medium border-t pt-1">
-                  <span>未付余额</span>
-                  <span className={(() => {
-                    const net = adjustSale ? Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0) - Number(adjustSale.rounding_adjustment || 0)) : 0;
-                    const remaining = net - Number(adjustSale?.paid_amount || 0);
-                    return remaining <= 0 ? "text-green-600" : "text-orange-600";
-                  })()}>
-                    ${adjustSale ? Math.max(0, (() => {
-                      const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjAfterSales || 0) - Number(adjDiscount || 0) - Number(adjustSale.rounding_adjustment || 0));
-                      return net - Number(adjustSale.paid_amount || 0);
-                    })()).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0"}
-                  </span>
-                </div>
-              </div>
+                );
+              }
+              if (remaining > 0 && Number(adjustSale.paid_amount || 0) > 0) {
+                return (
+                  <div className="flex items-center gap-2 text-xs text-orange-600 bg-orange-50 rounded-md p-2">
+                    <span>⚠</span>
+                    <span>调整后仍有未付 ¥{remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}，需继续收款</span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAdjustDialogOpen(false)}>取消</Button>
@@ -1398,7 +1468,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <Label className="text-xs">收款方式</Label>
-                    <Select value={receiptMethod} onValueChange={(v) => setReceiptMethod(v)}>
+                    <Select value={receiptMethod} onValueChange={(v) => setReceiptMethod(v ?? "")}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="bank_transfer">银行转账</SelectItem>
@@ -1410,7 +1480,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">收款银行</Label>
-                    <Select value={receiptBankAccountId} onValueChange={(v) => setReceiptBankAccountId(v)}>
+                    <Select value={receiptBankAccountId} onValueChange={(v) => setReceiptBankAccountId(v ?? "")}>
                       <SelectTrigger className="h-8 text-xs">
                         <SelectValue placeholder="选择银行">
                           {(() => {

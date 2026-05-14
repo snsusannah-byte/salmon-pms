@@ -1,17 +1,13 @@
-from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import FinishedProductSale, Product
-from app.models.finished_product_v2 import FinishedProductSaleItem, SaleItemType
+from app.models.finished_product_v2 import SaleItemType
 from app.schemas.finished_product_v2 import (
     FinishedProductSaleItemResponse,
-    FinishedProductSaleItemCreate,
     SlaughterDateOption,
     FinishedProductSaleWithItemsCreate,
 )

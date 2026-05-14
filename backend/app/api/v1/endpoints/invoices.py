@@ -3,6 +3,7 @@ from typing import List, Optional
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -354,6 +355,7 @@ async def get_invoice(
         "processing_plant_id": invoice.processing_plant_id,
         "fish_farm_id": invoice.fish_farm_id,
         "exporter_id": invoice.exporter_id,
+        "supplier_id": invoice.supplier_id,
         "total_amount_usd": invoice.total_amount_usd,
         "total_boxes": invoice.total_boxes,
         "total_weight_kg": invoice.total_weight_kg,
@@ -375,6 +377,7 @@ async def get_invoice(
         "processing_plant_name": invoice.processing_plant.name if invoice.processing_plant else None,
         "fish_farm_name": invoice.fish_farm.name if invoice.fish_farm else None,
         "exporter_name": invoice.exporter.name if invoice.exporter else None,
+        "supplier_name": invoice.supplier.name if invoice.supplier else None,
         "products": [],
     }
     

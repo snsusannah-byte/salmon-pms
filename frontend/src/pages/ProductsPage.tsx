@@ -144,6 +144,7 @@ export default function ProductsPage() {
       level: string;
       material_id: number;
       material_name?: string;
+      brand_id?: number;
       quantity: number;
       unit: string;
       notes?: string;

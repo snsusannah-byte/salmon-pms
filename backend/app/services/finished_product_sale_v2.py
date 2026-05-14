@@ -5,9 +5,8 @@
 - 关联宰杀日期
 - 自动扣减包装物/配套/赠品库存
 """
-from datetime import date
 from decimal import Decimal
-from typing import List, Optional
+from typing import List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,15 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.finished_product_v2 import (
     FinishedProductSaleItem,
     SaleItemType,
-    WarehouseStock,
-    DailySlaughterRecord,
 )
 from app.models import (
-    Product,
-    ProductCategory,
     ProductBOM,
     ProductPackaging,
-    Company,
     FinishedProductSale,
 )
 
@@ -118,7 +112,7 @@ class FinishedProductSaleServiceV2:
                         quantity=Decimal(str(quantity or 1)),
                         reason="sale",
                     )
-                except ValueError as e:
+                except ValueError:
                     # 库存不足警告但不阻止（业务上可能允许负库存）
                     pass
         
@@ -210,7 +204,7 @@ class FinishedProductSaleServiceV2:
                         product_id=item.product_id,
                         quantity=Decimal(str(item.quantity)),
                     )
-                except:
+                except Exception:
                     pass
         
         # 3. 恢复包装物库存
@@ -238,7 +232,7 @@ class FinishedProductSaleServiceV2:
             restore_qty = (bom.quantity * Decimal(str(sale_quantity))).quantize(Decimal("0.0001"))
             try:
                 await WarehouseService.stock_in(db, product_id=bom.material_id, quantity=restore_qty)
-            except:
+            except Exception:
                 pass
         
         result = await db.execute(
@@ -250,7 +244,7 @@ class FinishedProductSaleServiceV2:
             restore_qty = (pkg.quantity * Decimal(str(sale_quantity))).quantize(Decimal("0.0001"))
             try:
                 await WarehouseService.stock_in(db, product_id=pkg.material_id, quantity=restore_qty)
-            except:
+            except Exception:
                 pass
 
     @staticmethod

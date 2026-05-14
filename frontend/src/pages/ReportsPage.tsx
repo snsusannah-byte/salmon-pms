@@ -326,7 +326,7 @@ function BatchReportsTab() {
       </Dialog>
 
       <Dialog open={detailOpen} onOpenChange={(open) => { setDetailOpen(open); if (!open) setDetailId(null); }}>
-        <DialogContent className="max-w-[750px] w-full p-4 sm:!max-w-[750px] print:max-w-none print:w-full print:h-auto print:overflow-visible">
+        <DialogContent className="max-w-[750px] w-full p-4 sm:!max-w-[750px] max-h-[90vh] overflow-y-auto print:max-w-none print:w-full print:h-auto print:overflow-visible">
           <DialogHeader>
             <div className="flex items-center justify-between">
               <DialogTitle className="text-base">
@@ -449,18 +449,13 @@ function BatchReportsTab() {
                     `;
                   }).join('');
                   const cb = detailData.clearance_breakdown || {};
-                  const hasClearance = Number(cb.clearance_fee || 0) > 0 || Number(cb.freight_fee || 0) > 0 || Number(cb.other_costs || 0) > 0 || Number(cb.inspection_fee || 0) > 0 || Number(cb.quarantine_fee || 0) > 0;
                   let clearanceRows = '';
-                  if (hasClearance) {
-                    clearanceRows = `<div class="row bold"><span>清关费合计</span><span>${fmt$(detailData.total_clearance_cost)}</span></div>`;
-                    if (Number(cb.clearance_fee || 0) > 0) clearanceRows += `<div class="row" style="padding-left:8pt"><span>提货费</span><span>${fmt$(cb.clearance_fee)}</span></div>`;
-                    if (Number(cb.freight_fee || 0) > 0) clearanceRows += `<div class="row" style="padding-left:8pt"><span>运费</span><span>${fmt$(cb.freight_fee)}</span></div>`;
-                    if (Number(cb.other_costs || 0) > 0) clearanceRows += `<div class="row" style="padding-left:8pt"><span>报关服务费</span><span>${fmt$(cb.other_costs)}</span></div>`;
-                    if (Number(cb.inspection_fee || 0) > 0) clearanceRows += `<div class="row" style="padding-left:8pt"><span>检验费</span><span>${fmt$(cb.inspection_fee)}</span></div>`;
-                    if (Number(cb.quarantine_fee || 0) > 0) clearanceRows += `<div class="row" style="padding-left:8pt"><span>检疫费</span><span>${fmt$(cb.quarantine_fee)}</span></div>`;
-                  } else {
-                    clearanceRows = `<div class="row"><span>清关费</span><span>${fmt$(detailData.total_clearance_cost)}</span></div>`;
-                  }
+                  if (Number(cb.clearance_fee || 0) > 0) clearanceRows += `<div class="row"><span>${isEn ? 'Pickup Fee' : '提货费'}</span><span>${fmt$(cb.clearance_fee)}</span></div>`;
+                  if (Number(cb.freight_fee || 0) > 0) clearanceRows += `<div class="row"><span>${isEn ? 'Freight' : '运费'}</span><span>${fmt$(cb.freight_fee)}</span></div>`;
+                  if (Number(cb.other_costs || 0) > 0) clearanceRows += `<div class="row"><span>${isEn ? 'Customs Service' : '报关服务费'}</span><span>${fmt$(cb.other_costs)}</span></div>`;
+                  if (Number(cb.inspection_fee || 0) > 0) clearanceRows += `<div class="row"><span>${isEn ? 'Inspection Fee' : '目的地查验费'}</span><span>${fmt$(cb.inspection_fee)}</span></div>`;
+                  if (Number(cb.quarantine_fee || 0) > 0) clearanceRows += `<div class="row"><span>${isEn ? 'Cold Storage' : '冷藏费'}</span><span>${fmt$(cb.quarantine_fee)}</span></div>`;
+                  if (clearanceRows) clearanceRows += `<div class="row bold" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt"><span>${isEn ? 'Clearance Total' : '清关费合计'}</span><span>${fmt$(detailData.total_clearance_cost)}</span></div>`;
                   const html = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>${t.title} · ${detailData.batch_code}</title>
 <style>
@@ -498,8 +493,11 @@ function BatchReportsTab() {
   .totals-bar .green { color: #4ade80; }
 </style></head><body>
 <div class="page">
-  <h1>${t.title} · ${detailData.batch_code}</h1>
-  <h2>${detailData.batch_name} &nbsp;|&nbsp; ${fmtDate(detailData.batch_date)}</h2>
+  <div style="display:flex;align-items:baseline;gap:8pt;margin-bottom:4pt">
+    <span style="font-size:16pt;font-weight:bold;color:#1e293b">${t.title}</span>
+    <span style="font-size:11pt;font-weight:600;color:#334155">${detailData.invoice_nos ? detailData.invoice_nos.replace(/\u0026/g, ', ') : detailData.batch_code}</span>
+    <span style="font-size:9pt;color:#64748b">${isEn ? 'Kill Date: ' : '宰杀日期：'}${detailData.invoices?.[0]?.kill_date || fmtDate(detailData.batch_date)}</span>
+  </div>
 
   <!-- 第一行：采购信息 + 购汇登记 -->
   <div class="grid-2">
@@ -509,10 +507,10 @@ function BatchReportsTab() {
     </div>
     <div class="section">
       <div class="section-title green">💱 ${t.exchange}</div>
-      <div class="row"><span>汇率</span><span>${detailData.exchange_rate || '-'}</span></div>
-      <div class="row"><span>购汇金额</span><span>${fmt$(detailData.total_exchange_payment)}</span></div>
-      <div class="row"><span>手续费</span><span>${fmt$(detailData.total_exchange_fee)}</span></div>
-      <div class="row bold" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt"><span>购汇合计</span><span>${fmt$(Number(detailData.total_exchange_payment || 0) + Number(detailData.total_exchange_fee || 0))}</span></div>
+      <div class="row"><span>${isEn ? 'Rate' : '汇率'}</span><span>${detailData.exchange_rate || '-'}</span></div>
+      <div class="row"><span>${isEn ? 'Payment' : '购汇金额'}</span><span>${fmt$(detailData.total_exchange_payment)}</span></div>
+      <div class="row"><span>${isEn ? 'Fee' : '手续费'}</span><span>${fmt$(detailData.total_exchange_fee)}</span></div>
+      <div class="row bold" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt"><span>${isEn ? 'Exchange Total' : '购汇合计'}</span><span>${fmt$(Number(detailData.total_exchange_payment || 0) + Number(detailData.total_exchange_fee || 0))}</span></div>
     </div>
   </div>
 
@@ -520,31 +518,33 @@ function BatchReportsTab() {
   <div class="grid-2">
     <div class="section">
       <div class="section-title" style="color:#d97706">💰 ${t.importCost}</div>
-      <div class="row"><span>进口关税</span><span>${fmt$(detailData.total_import_duty)}</span></div>
-      <div class="row"><span>进口增值税</span><span>${fmt$(detailData.total_import_vat)}</span></div>
+      <div class="row"><span>${isEn ? 'Import Duty' : '进口关税'}</span><span>${fmt$(detailData.total_import_duty)}</span></div>
+      <div class="row"><span>${isEn ? 'Import VAT' : '进口增值税'}</span><span>${fmt$(detailData.total_import_vat)}</span></div>
+      <div class="row bold" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt"><span>${isEn ? 'Total Taxes' : '税费合计'}</span><span>${fmt$(detailData.total_taxes)}</span></div>
       ${clearanceRows}
-      <div class="row bold" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt"><span>税费合计</span><span>${fmt$(detailData.total_taxes)}</span></div>
+      <div class="row bold" style="border-top:2px solid #d97706;margin-top:2pt;padding-top:2pt"><span>${isEn ? 'Total' : '合计'}</span><span>${fmt$(Number(detailData.total_taxes || 0) + Number(detailData.total_clearance_cost || 0))}</span></div>
     </div>
     <div class="section">
       <div class="section-title" style="color:#7c3aed">📈 ${t.profitLoss}</div>
-      <div class="row"><span>销售毛额</span><span>${fmt$(detailData.total_sales_amount)}</span></div>
-      <div class="row red"><span>抹零</span><span>-${fmt$(detailData.total_rounding)}</span></div>
-      <div class="row red"><span>售后调整</span><span>-${fmt$(detailData.total_after_sales)}</span></div>
-      <div class="row red"><span>折扣</span><span>-${fmt$(detailData.total_discount)}</span></div>
-      <div class="row bold"><span>销售净额</span><span class="bold">${fmt$(detailData.total_sales_net)}</span></div>
-      <div class="row red"><span>业务员提成</span><span>-${fmt$(detailData.total_commission)}</span></div>
-      <div class="row red"><span>账面损耗</span><span>-${fmt$(detailData.shrinkage)}</span></div>
-      <div class="row red"><span>支出合计</span><span>-${fmt$(detailData.total_expenses)}</span></div>
-      <div style="font-size:8pt;color:#999;margin-top:2pt;text-align:right">${isEn ? 'Expenses = Import Costs + Exchange' : '支出合计 = 进口费用 + 购汇登记'}</div>
+      <div class="row"><span>${isEn ? 'Gross Sales' : '销售毛额'}</span><span>${fmt$(detailData.total_sales_amount)}</span></div>
+      ${Number(detailData.total_scan_fee || 0) !== 0 ? `<div class="row red"><span>${isEn ? 'Scan Fee' : '扫码费'}</span><span>-${fmt$(detailData.total_scan_fee)}</span></div>` : ''}
+      ${Number(detailData.total_rounding || 0) !== 0 ? `<div class="row red"><span>${isEn ? 'Rounding' : '抹零'}</span><span>-${fmt$(detailData.total_rounding)}</span></div>` : ''}
+      ${Number(detailData.total_after_sales || 0) !== 0 ? `<div class="row red"><span>${isEn ? 'After Sales' : '售后调整'}</span><span>-${fmt$(detailData.total_after_sales)}</span></div>` : ''}
+      ${Number(detailData.total_discount || 0) !== 0 ? `<div class="row red"><span>${isEn ? 'Discount' : '折扣'}</span><span>-${fmt$(detailData.total_discount)}</span></div>` : ''}
+      <div class="row bold"><span>${isEn ? 'Net Sales' : '销售净额'}</span><span class="bold">${fmt$(detailData.total_sales_net)}</span></div>
+      ${Number(detailData.total_commission || 0) !== 0 ? `<div class="row red"><span>${isEn ? 'Commission' : '业务员提成'}</span><span>-${fmt$(detailData.total_commission)}</span></div>` : ''}
+      ${Number(detailData.shrinkage || 0) !== 0 ? `<div class="row red"><span>${isEn ? 'Shrinkage' : '账面损耗'}(${Number(detailData.total_weight_kg || 0).toLocaleString()}kg - ${Number(detailData.total_sales_weight || 0).toLocaleString()}kg = ${Number((detailData.total_weight_kg || 0) - (detailData.total_sales_weight || 0)).toLocaleString()}kg)</span><span>-${fmt$(detailData.shrinkage)}</span></div>` : ''}
+      <div class="row red"><span>${isEn ? 'Exchange Total' : '购汇合计'}</span><span>-${fmt$(Number(detailData.total_exchange_payment || 0) + Number(detailData.total_exchange_fee || 0))}</span></div>
+      <div class="row red"><span>${isEn ? 'Import Cost Total' : '进口费用合计'}</span><span>-${fmt$(Number(detailData.total_taxes || 0) + Number(detailData.total_clearance_cost || 0))}</span></div>
       <div class="row bold ${Number(detailData.net_profit) >= 0 ? 'green' : 'red'}" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt"><span>${t.netProfit}</span><span>${fmt$(detailData.net_profit)}</span></div>
     </div>
   </div>
 
   <!-- 利润汇总 -->
   <div class="profit-bar">
-    <div><div class="label">期初净利润留存</div><div class="value">${fmt$(Number(detailData.cumulative_profit || 0) - Number(detailData.net_profit || 0))}</div></div>
-    <div><div class="label">本期经营净利润</div><div class="value ${Number(detailData.net_profit) >= 0 ? 'green' : 'red'}">${fmt$(detailData.net_profit)}</div></div>
-    <div><div class="label">累计净利润总额</div><div class="value">${fmt$(detailData.cumulative_profit)}</div></div>
+    <div><div class="label">${isEn ? 'Opening Profit' : '期初净利润留存'}</div><div class="value">${fmt$(Number(detailData.cumulative_profit || 0) - Number(detailData.net_profit || 0))}</div></div>
+    <div><div class="label">${isEn ? 'Current Profit' : '本期经营净利润'}</div><div class="value ${Number(detailData.net_profit) >= 0 ? 'green' : 'red'}">${fmt$(detailData.net_profit)}</div></div>
+    <div><div class="label">${isEn ? 'Cumulative Profit' : '累计净利润总额'}</div><div class="value">${fmt$(detailData.cumulative_profit)}</div></div>
   </div>
 
   <!-- 销售明细 -->
@@ -562,17 +562,17 @@ function BatchReportsTab() {
       <div class="trace-item"><div class="icon">📍</div><div class="label">${isEn ? 'Farm' : '养殖场'}</div><div class="value">${detailData.invoices?.[0]?.fish_farm_name || '-'}</div></div>
       <div class="trace-item"><div class="icon">🚢</div><div class="label">${isEn ? 'Exporter' : '出口商'}</div><div class="value">${detailData.invoices?.[0]?.exporter_name || '-'}</div></div>
     </div>
-    <div style="margin-top:6pt; font-size:8.5pt; line-height:1.6">
-      ${detailData.invoices?.[0]?.processing_plant_eu_code ? `<div><span style="color:#999">EU注册号：</span>${detailData.invoices[0].processing_plant_eu_code}</div>` : ''}
-      ${detailData.invoices?.[0]?.processing_plant_customs_code ? `<div><span style="color:#999">CN海关准入：</span>${detailData.invoices[0].processing_plant_customs_code}</div>` : ''}
-      ${detailData.invoices?.[0]?.fish_farm_ggn ? `<div><span style="color:#999">养殖GGN：</span>${detailData.invoices[0].fish_farm_ggn}</div>` : ''}
-      ${detailData.invoices?.[0]?.fish_farm_coc_no ? `<div><span style="color:#999">监管链COC：</span>${detailData.invoices[0].fish_farm_coc_no}</div>` : ''}
-      ${detailData.invoices?.[0]?.processing_plant_coc_no ? `<div><span style="color:#999">监管链COC(加工厂)：</span>${detailData.invoices[0].processing_plant_coc_no}</div>` : ''}
-      ${detailData.invoices?.[0]?.fish_farm_area ? `<div><span style="color:#999">养殖区：</span>${detailData.invoices[0].fish_farm_area}</div>` : ''}
+    <div style="margin-top:6pt; font-size:8.5pt; line-height:1.6; display:flex; flex-wrap:wrap; gap:6pt 12pt">
+      ${detailData.invoices?.[0]?.processing_plant_eu_code ? `<span><span style="color:#999">${isEn ? 'EU Code:' : 'EU注册号：'}</span>${detailData.invoices[0].processing_plant_eu_code}</span>` : ''}
+      ${detailData.invoices?.[0]?.processing_plant_customs_code ? `<span><span style="color:#999">${isEn ? 'CN Customs:' : 'CN海关准入：'}</span>${detailData.invoices[0].processing_plant_customs_code}</span>` : ''}
+      ${detailData.invoices?.[0]?.fish_farm_ggn ? `<span><span style="color:#999">${isEn ? 'GGN:' : '养殖GGN：'}</span>${detailData.invoices[0].fish_farm_ggn}</span>` : ''}
+      ${detailData.invoices?.[0]?.fish_farm_coc_no ? `<span><span style="color:#999">${isEn ? 'COC:' : '监管链COC：'}</span>${detailData.invoices[0].fish_farm_coc_no}</span>` : ''}
+      ${detailData.invoices?.[0]?.processing_plant_coc_no ? `<span><span style="color:#999">${isEn ? 'COC(Plant):' : '监管链COC(加工厂)：'}</span>${detailData.invoices[0].processing_plant_coc_no}</span>` : ''}
+      ${detailData.invoices?.[0]?.fish_farm_area ? `<span><span style="color:#999">${isEn ? 'Area:' : '养殖区：'}</span>${detailData.invoices[0].fish_farm_area}</span>` : ''}
     </div>
   </div>
 
-  <div class="footer">${t.footer}<br>打印时间: ${new Date().toLocaleString(isEn ? 'en-US' : 'zh-CN')}</div>
+  <div class="footer">${t.footer}<br>${isEn ? 'Printed:' : '打印时间:'} ${new Date().toLocaleString(isEn ? 'en-US' : 'zh-CN')}</div>
 </div>
 </body></html>`;
                   printWindow.document.write(html);
@@ -588,11 +588,17 @@ function BatchReportsTab() {
           {detailData ? (
             <div className="space-y-3 text-sm">
               {/* === 第一行：标题 === */}
-              <div className="border-b pb-2 mb-2">
-                <h2 className="text-lg font-bold text-slate-800">
-                  {detailLang === "zh" ? "财务报告" : "Financial Report"} · {detailData.batch_code}
-                  <span className="text-sm font-normal text-slate-400 ml-3">{fmtDate(detailData.batch_date)}</span>
+              <div className="border-b pb-3 mb-2 flex items-baseline gap-3">
+                <h2 className="text-xl font-bold text-slate-800">
+                  {detailLang === "zh" ? "财务报告" : "Financial Report"}
                 </h2>
+                <span className="text-sm text-slate-600 font-medium">
+                  {detailData.invoice_nos ? detailData.invoice_nos.replace(/\u0026/g, ', ') : detailData.batch_code}
+                </span>
+                <span className="text-xs text-slate-400">
+                  {detailLang === "zh" ? "宰杀日期：" : "Kill Date: "}
+                  {detailData.invoices?.[0]?.kill_date ? detailData.invoices[0].kill_date : fmtDate(detailData.batch_date)}
+                </span>
               </div>
 
               {/* === 第二行：采购信息 + 购汇登记 === */}
@@ -668,23 +674,24 @@ function BatchReportsTab() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="border rounded-lg p-2.5 space-y-1.5">
                   <p className="text-xs font-semibold text-amber-600">{detailLang === "zh" ? "进口费用" : "Import Costs"}</p>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "关税" : "Duty"}</span><span>{fmt$(detailData.total_import_duty)}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "增值税" : "VAT"}</span><span>{fmt$(detailData.total_import_vat)}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "进口关税" : "Import Duty"}</span><span>{fmt$(detailData.total_import_duty)}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "进口增值税" : "Import VAT"}</span><span>{fmt$(detailData.total_import_vat)}</span></div>
+                  <div className="flex justify-between text-xs font-medium border-t pt-1"><span>{detailLang === "zh" ? "税费合计" : "Total Taxes"}</span><span>{fmt$(detailData.total_taxes)}</span></div>
                   {(() => {
                     const cb = detailData.clearance_breakdown || {};
-                    const hasClearance = Number(cb.clearance_fee || 0) > 0 || Number(cb.freight_fee || 0) > 0 || Number(cb.pickup_fee || 0) > 0 || Number(cb.yard_fee || 0) > 0 || Number(cb.cold_storage_fee || 0) > 0 || Number(cb.inspection_fee || 0) > 0 || Number(cb.quarantine_fee || 0) > 0 || Number(cb.other_costs || 0) > 0;
-                    return hasClearance ? (
+                    const hasClearance = Number(cb.clearance_fee || 0) > 0 || Number(cb.freight_fee || 0) > 0 || Number(cb.other_costs || 0) > 0 || Number(cb.inspection_fee || 0) > 0 || Number(cb.quarantine_fee || 0) > 0;
+                    return (
                       <>
-                        <div className="flex justify-between text-xs font-medium"><span className="text-muted-foreground">{detailLang === "zh" ? `清关费合计 (${cb.customs_broker || "威揽"})` : "Clearance Total"}</span><span>{fmt$(detailData.total_clearance_cost)}</span></div>
-                        {Number(cb.clearance_fee || 0) > 0 && <div className="flex justify-between text-xs pl-2"><span className="text-muted-foreground">{detailLang === "zh" ? "提货费" : "Pickup Fee"}</span><span>{fmt$(cb.clearance_fee)}</span></div>}
-                        {Number(cb.freight_fee || 0) > 0 && <div className="flex justify-between text-xs pl-2"><span className="text-muted-foreground">{detailLang === "zh" ? "运费" : "Freight"}</span><span>{fmt$(cb.freight_fee)}</span></div>}
-                        {Number(cb.other_costs || 0) > 0 && <div className="flex justify-between text-xs pl-2"><span className="text-muted-foreground">{detailLang === "zh" ? "报关服务费" : "Customs Service"}</span><span>{fmt$(cb.other_costs)}</span></div>}
-                        {Number(cb.inspection_fee || 0) > 0 && <div className="flex justify-between text-xs pl-2"><span className="text-muted-foreground">{detailLang === "zh" ? "检验费" : "Inspection"}</span><span>{fmt$(cb.inspection_fee)}</span></div>}
-                        {Number(cb.quarantine_fee || 0) > 0 && <div className="flex justify-between text-xs pl-2"><span className="text-muted-foreground">{detailLang === "zh" ? "检疫费" : "Quarantine"}</span><span>{fmt$(cb.quarantine_fee)}</span></div>}
+                        {Number(cb.clearance_fee || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "提货费" : "Pickup Fee"}</span><span>{fmt$(cb.clearance_fee)}</span></div>}
+                        {Number(cb.freight_fee || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "运费" : "Freight"}</span><span>{fmt$(cb.freight_fee)}</span></div>}
+                        {Number(cb.other_costs || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "报关服务费" : "Customs Service"}</span><span>{fmt$(cb.other_costs)}</span></div>}
+                        {Number(cb.inspection_fee || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "目的地查验费" : "Inspection Fee"}</span><span>{fmt$(cb.inspection_fee)}</span></div>}
+                        {Number(cb.quarantine_fee || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "冷藏费" : "Cold Storage"}</span><span>{fmt$(cb.quarantine_fee)}</span></div>}
+                        {hasClearance && <div className="flex justify-between text-xs font-medium border-t pt-1"><span>{detailLang === "zh" ? "清关费合计" : "Clearance Total"}</span><span>{fmt$(detailData.total_clearance_cost)}</span></div>}
                       </>
-                    ) : <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "清关费" : "Clearance"}</span><span>{fmt$(detailData.total_clearance_cost)}</span></div>;
+                    );
                   })()}
-                  <div className="flex justify-between text-xs font-medium border-t pt-1"><span>{detailLang === "zh" ? "税费合计" : "Total Taxes"}</span><span>{fmt$(detailData.total_taxes)}</span></div>
+                  <div className="flex justify-between text-xs font-bold border-t-2 border-amber-200 pt-1"><span>{detailLang === "zh" ? "合计" : "Total"}</span><span className="text-amber-700">{fmt$(Number(detailData.total_taxes || 0) + Number(detailData.total_clearance_cost || 0))}</span></div>
                 </div>
                 <div className="border rounded-lg p-2.5 space-y-1.5">
                   <p className="text-xs font-semibold text-purple-600">{detailLang === "zh" ? "损益分析" : "Profit/Loss"}</p>
@@ -716,13 +723,17 @@ function BatchReportsTab() {
                   )}
                   {Number(detailData.shrinkage || 0) !== 0 && (
                     <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "账面损耗(采购重量-销售重量*汇率)" : "Shrinkage(Purchase-Sales*Rate)"}</span>
+                      <span className="text-muted-foreground pl-2">{detailLang === "zh" ? `账面损耗(采购${Number(detailData.total_weight_kg || 0).toLocaleString()}kg - 销售${Number(detailData.total_sales_weight || 0).toLocaleString()}kg = ${Number((detailData.total_weight_kg || 0) - (detailData.total_sales_weight || 0)).toLocaleString()}kg)` : "Shrinkage"}</span>
                       <span className="text-red-500">-{fmt$(detailData.shrinkage)}</span>
                     </div>
                   )}
                   <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "支出合计(进口费用+购汇登记)" : "Total Expense(Import+Exchange)"}</span>
-                    <span className="text-red-500">-{fmt$(detailData.total_expenses)}</span>
+                    <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "购汇合计" : "Exchange Total"}</span>
+                    <span className="text-red-500">-{fmt$(Number(detailData.total_exchange_payment || 0) + Number(detailData.total_exchange_fee || 0))}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "进口费用合计" : "Import Cost Total"}</span>
+                    <span className="text-red-500">-{fmt$(Number(detailData.total_taxes || 0) + Number(detailData.total_clearance_cost || 0))}</span>
                   </div>
                   
                   {/* 第四步：净利润 */}
@@ -813,24 +824,24 @@ function BatchReportsTab() {
                     <div className="font-medium">{detailData.invoices?.[0]?.exporter_name || "-"}</div>
                   </div>
                 </div>
-                <div className="text-xs text-muted-foreground space-y-0.5 pt-2 mt-2 border-t">
+                <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 pt-2 mt-2 border-t">
                   {detailData.invoices?.[0]?.processing_plant_eu_code && (
-                    <div>EU注册号：{detailData.invoices[0].processing_plant_eu_code}</div>
+                    <span>EU注册号：{detailData.invoices[0].processing_plant_eu_code}</span>
                   )}
                   {detailData.invoices?.[0]?.processing_plant_customs_code && (
-                    <div>CN海关准入：{detailData.invoices[0].processing_plant_customs_code}</div>
+                    <span>CN海关准入：{detailData.invoices[0].processing_plant_customs_code}</span>
                   )}
                   {detailData.invoices?.[0]?.fish_farm_ggn && (
-                    <div>养殖GGN：{detailData.invoices[0].fish_farm_ggn}</div>
+                    <span>养殖GGN：{detailData.invoices[0].fish_farm_ggn}</span>
                   )}
                   {detailData.invoices?.[0]?.fish_farm_coc_no && (
-                    <div>监管链COC：{detailData.invoices[0].fish_farm_coc_no}</div>
+                    <span>监管链COC：{detailData.invoices[0].fish_farm_coc_no}</span>
                   )}
                   {detailData.invoices?.[0]?.processing_plant_coc_no && (
-                    <div>监管链COC(加工厂)：{detailData.invoices[0].processing_plant_coc_no}</div>
+                    <span>监管链COC(加工厂)：{detailData.invoices[0].processing_plant_coc_no}</span>
                   )}
                   {detailData.invoices?.[0]?.fish_farm_area && (
-                    <div>养殖区：{detailData.invoices[0].fish_farm_area}</div>
+                    <span>养殖区：{detailData.invoices[0].fish_farm_area}</span>
                   )}
                 </div>
               </div>
@@ -1020,20 +1031,35 @@ function InvoiceReportsTab() {
                 </h2>
               </div>
 
-              {/* === 第二行：采购信息 + 进口费用 === */}
+              {/* === 第二行：采购信息 + 进口费用（与批次财报模板一致） === */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="border rounded-lg p-2.5 space-y-1.5">
                   <p className="text-xs font-semibold text-blue-600">{detailLang === "zh" ? "采购信息" : "Purchase Info"}</p>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "金额(USD)" : "Amount(USD)"}</span><span>${Number(detailData.total_amount_usd || 0).toLocaleString()}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "采购金额(USD)" : "Amount(USD)"}</span><span>${Number(detailData.total_amount_usd || 0).toLocaleString()}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "采购成本(CNY)" : "Cost(CNY)"}</span><span>{fmt$(detailData.purchase_cost_cny)}</span></div>
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "重量" : "Weight"}</span><span>{Number(detailData.total_weight_kg || 0).toLocaleString()} kg</span></div>
                   <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "箱数" : "Boxes"}</span><span>{detailData.total_boxes || 0}</span></div>
                 </div>
                 <div className="border rounded-lg p-2.5 space-y-1.5">
                   <p className="text-xs font-semibold text-amber-600">{detailLang === "zh" ? "进口费用" : "Import Costs"}</p>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "关税" : "Duty"}</span><span>{fmt$(detailData.import_duty)}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "增值税" : "VAT"}</span><span>{fmt$(detailData.import_vat)}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? `清关费 (${detailData.clearance_breakdown?.customs_broker || "威揽"})` : "Clearance"}</span><span>{fmt$(detailData.clearance_cost)}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "进口关税" : "Import Duty"}</span><span>{fmt$(detailData.import_duty)}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "进口增值税" : "Import VAT"}</span><span>{fmt$(detailData.import_vat)}</span></div>
                   <div className="flex justify-between text-xs font-medium border-t pt-1"><span>{detailLang === "zh" ? "税费合计" : "Total Taxes"}</span><span>{fmt$(detailData.total_taxes)}</span></div>
+                  {(() => {
+                    const cb = detailData.clearance_breakdown || {};
+                    const hasClearance = Number(cb.clearance_fee || 0) > 0 || Number(cb.freight_fee || 0) > 0 || Number(cb.other_costs || 0) > 0 || Number(cb.inspection_fee || 0) > 0 || Number(cb.quarantine_fee || 0) > 0;
+                    return (
+                      <>
+                        {Number(cb.clearance_fee || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "提货费" : "Pickup Fee"}</span><span>{fmt$(cb.clearance_fee)}</span></div>}
+                        {Number(cb.freight_fee || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "运费" : "Freight"}</span><span>{fmt$(cb.freight_fee)}</span></div>}
+                        {Number(cb.other_costs || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "报关服务费" : "Customs Service"}</span><span>{fmt$(cb.other_costs)}</span></div>}
+                        {Number(cb.inspection_fee || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "目的地查验费" : "Inspection Fee"}</span><span>{fmt$(cb.inspection_fee)}</span></div>}
+                        {Number(cb.quarantine_fee || 0) > 0 && <div className="flex justify-between text-xs"><span className="text-muted-foreground">{detailLang === "zh" ? "冷藏费" : "Cold Storage"}</span><span>{fmt$(cb.quarantine_fee)}</span></div>}
+                        {hasClearance && <div className="flex justify-between text-xs font-medium border-t pt-1"><span>{detailLang === "zh" ? "清关费合计" : "Clearance Total"}</span><span>{fmt$(detailData.clearance_cost)}</span></div>}
+                      </>
+                    );
+                  })()}
+                  <div className="flex justify-between text-xs font-bold border-t-2 border-amber-200 pt-1"><span>{detailLang === "zh" ? "合计" : "Total"}</span><span className="text-amber-700">{fmt$(Number(detailData.total_taxes || 0) + Number(detailData.clearance_cost || 0))}</span></div>
                 </div>
               </div>
 
@@ -1054,7 +1080,7 @@ function InvoiceReportsTab() {
                   
                   {/* 第二步：扣减项 → 算出销售净额 */}
                   {Number(detailData.total_scan_fee || 0) !== 0 && (
-                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "扫码手续费" : "Scan Fee"}</span><span className="text-red-500">-{fmt$(detailData.total_scan_fee)}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "扫码费" : "Scan Fee"}</span><span className="text-red-500">-{fmt$(detailData.total_scan_fee)}</span></div>
                   )}
                   {Number(detailData.total_rounding || 0) !== 0 && (
                     <div className="flex justify-between text-xs"><span className="text-muted-foreground pl-2">{detailLang === "zh" ? "抹零" : "Rounding"}</span><span className="text-red-500">-{fmt$(detailData.total_rounding)}</span></div>
@@ -1076,13 +1102,17 @@ function InvoiceReportsTab() {
                   )}
                   {Number(detailData.shrinkage || 0) !== 0 && (
                     <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "账面损耗(采购重量-销售重量*汇率)" : "Shrinkage(Purchase-Sales*Rate)"}</span>
+                      <span className="text-muted-foreground pl-2">{detailLang === "zh" ? `账面损耗(采购${Number(detailData.total_weight_kg || 0).toLocaleString()}kg - 销售${Number(detailData.sales_weight || 0).toLocaleString()}kg = ${Number((detailData.total_weight_kg || 0) - (detailData.sales_weight || 0)).toLocaleString()}kg)` : "Shrinkage"}</span>
                       <span className="text-red-500">-{fmt$(detailData.shrinkage)}</span>
                     </div>
                   )}
                   <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "支出合计(进口费用+购汇登记)" : "Total Expense(Import+Exchange)"}</span>
-                    <span className="text-red-500">-{fmt$(detailData.total_expenses)}</span>
+                    <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "购汇合计" : "Exchange Total"}</span>
+                    <span className="text-red-500">-{fmt$(Number(detailData.exchange_payment || 0) + Number(detailData.exchange_fee || 0))}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "进口费用合计" : "Import Cost Total"}</span>
+                    <span className="text-red-500">-{fmt$(Number(detailData.total_taxes || 0) + Number(detailData.clearance_cost || 0))}</span>
                   </div>
                   
                   {/* 第四步：净利润 */}
@@ -1153,6 +1183,7 @@ function InvoiceReportsTab() {
                         <TableHead className="text-xs py-1">{detailLang === "zh" ? "日期" : "Date"}</TableHead>
                         <TableHead className="text-xs py-1">{detailLang === "zh" ? "客户" : "Customer"}</TableHead>
                         <TableHead className="text-xs py-1">{detailLang === "zh" ? "规格" : "Spec"}</TableHead>
+                        <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "箱数" : "Boxes"}</TableHead>
                         <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "重量" : "Weight"}</TableHead>
                         <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "单价" : "Price"}</TableHead>
                         <TableHead className="text-xs py-1 text-right">{detailLang === "zh" ? "净额" : "Net"}</TableHead>
@@ -1164,6 +1195,7 @@ function InvoiceReportsTab() {
                           <TableCell className="text-xs py-1">{fmtDate(sale.sale_date)}</TableCell>
                           <TableCell className="text-xs py-1">{sale.customer_name || "-"}</TableCell>
                           <TableCell className="text-xs py-1">{sale.spec || "-"}</TableCell>
+                          <TableCell className="text-xs py-1 text-right">{sale.box_count || 0}</TableCell>
                           <TableCell className="text-xs py-1 text-right">{Number(sale.weight_kg || 0).toLocaleString()}</TableCell>
                           <TableCell className="text-xs py-1 text-right">{fmt$(sale.unit_price)}</TableCell>
                           <TableCell className="text-xs py-1 text-right font-medium">{fmt$(sale.net_amount)}</TableCell>
@@ -1172,6 +1204,7 @@ function InvoiceReportsTab() {
                       {/* 汇总行 */}
                       <TableRow className="border-t-2 font-medium bg-muted/30">
                         <TableCell className="text-xs py-1" colSpan={3}>{detailLang === "zh" ? "合计" : "Total"}</TableCell>
+                        <TableCell className="text-xs py-1 text-right">{detailData.sales.reduce((sum: number, s: any) => sum + (s.box_count || 0), 0)}</TableCell>
                         <TableCell className="text-xs py-1 text-right">{Number(detailData.total_sales_weight || 0).toLocaleString()} kg</TableCell>
                         <TableCell className="text-xs py-1 text-right">—</TableCell>
                         <TableCell className="text-xs py-1 text-right font-bold">{fmt$(detailData.total_sales_net)}</TableCell>
@@ -1206,24 +1239,24 @@ function InvoiceReportsTab() {
                     <div className="font-medium">{detailData.supplier_name || "-"}</div>
                   </div>
                 </div>
-                <div className="text-xs text-muted-foreground space-y-0.5 pt-2 mt-2 border-t">
+                <div className="text-xs text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 pt-2 mt-2 border-t">
                   {detailData.processing_plant_eu_code && (
-                    <div>EU注册号：{detailData.processing_plant_eu_code}</div>
+                    <span>EU注册号：{detailData.processing_plant_eu_code}</span>
                   )}
                   {detailData.processing_plant_customs_code && (
-                    <div>CN海关准入：{detailData.processing_plant_customs_code}</div>
+                    <span>CN海关准入：{detailData.processing_plant_customs_code}</span>
                   )}
                   {detailData.fish_farm_ggn && (
-                    <div>养殖GGN：{detailData.fish_farm_ggn}</div>
+                    <span>养殖GGN：{detailData.fish_farm_ggn}</span>
                   )}
                   {detailData.fish_farm_coc_no && (
-                    <div>监管链COC：{detailData.fish_farm_coc_no}</div>
+                    <span>监管链COC：{detailData.fish_farm_coc_no}</span>
                   )}
                   {detailData.processing_plant_coc_no && (
-                    <div>监管链COC(加工厂)：{detailData.processing_plant_coc_no}</div>
+                    <span>监管链COC(加工厂)：{detailData.processing_plant_coc_no}</span>
                   )}
                   {detailData.fish_farm_area && (
-                    <div>养殖区：{detailData.fish_farm_area}</div>
+                    <span>养殖区：{detailData.fish_farm_area}</span>
                   )}
                 </div>
               </div>
@@ -1326,7 +1359,7 @@ function ReceivableStatementsTab() {
                     </TableCell>
                     <TableCell className="text-center">
                       <Dialog>
-                        <DialogTrigger asChild>
+                        <DialogTrigger>
                           <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setDetailCustomer(item)}>
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
@@ -1489,7 +1522,7 @@ function PayableStatementsTab() {
                     </TableCell>
                     <TableCell className="text-center">
                       <Dialog>
-                        <DialogTrigger asChild>
+                        <DialogTrigger>
                           <Button variant="ghost" size="sm" className="h-7 px-2">
                             <Eye className="h-3.5 w-3.5" />
                           </Button>

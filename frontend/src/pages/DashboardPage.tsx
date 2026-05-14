@@ -11,14 +11,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Boxes,
-  DollarSign,
+  Container,
+  ReceiptText,
   Users,
-  Ship,
-  FileText,
-  Weight,
+  Plane,
+  Receipt,
+  Scale,
   Package,
+  GitBranch,
   BarChart3,
+  ClipboardCheck,
+  TrendingUp,
 } from "lucide-react";
 import {
   PieChart,
@@ -159,7 +162,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">总批次</CardTitle>
-            <Boxes className="h-4 w-4 text-muted-foreground" />
+            <Container className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -179,7 +182,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">发票总额 (USD)</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <ReceiptText className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -196,7 +199,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">本月进口</CardTitle>
-            <Ship className="h-4 w-4 text-muted-foreground" />
+            <Plane className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -213,7 +216,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">库存总重</CardTitle>
-            <Weight className="h-4 w-4 text-muted-foreground" />
+            <Scale className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
@@ -234,7 +237,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium">发票月度趋势</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="h-[260px]">
             {monthlyTrend?.length > 0 ? (
@@ -268,8 +271,9 @@ export function DashboardPage() {
 
         {/* 报关状态饼图 */}
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium">报关状态分布</CardTitle>
+            <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="h-[260px]">
             {customsPieData.length > 0 ? (
@@ -318,8 +322,9 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* 批次状态饼图 */}
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium">批次状态分布</CardTitle>
+            <GitBranch className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="h-[260px]">
             {batchPieData.length > 0 ? (
@@ -411,7 +416,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium">最近发票</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
+            <Receipt className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             {recentInvoices?.length > 0 ? (
@@ -456,7 +461,7 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="text-sm font-medium">最近批次</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
+            <Container className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             {recentBatches?.length > 0 ? (
