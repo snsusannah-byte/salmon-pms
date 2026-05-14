@@ -346,6 +346,12 @@ class SalesService:
         
         bank_account_id = data.get("bank_account_id")
         
+        # 构建描述：只保留类型 + 用户输入的收款描述
+        user_notes = data.get("notes")
+        desc = "销售收款"
+        if user_notes:
+            desc = f"{desc} - {user_notes}"
+        
         transaction = TransactionRecord(
             transaction_date=data.get("receipt_date"),
             type=TransactionType.INCOME,
@@ -356,8 +362,8 @@ class SalesService:
             counterparty_id=sale.customer_id,
             counterparty_name=customer_name,
             reference_no=data.get("reference_no") or sale.sale_no or f"#{sale.id}",
-            description=f"销售收款: {sale.sale_no or f'#{sale.id}'}",
-            notes=data.get("notes"),
+            description=desc,
+            notes=user_notes,
             is_confirmed=True,
         )
         # 设置关联销售单（JSON 数组）

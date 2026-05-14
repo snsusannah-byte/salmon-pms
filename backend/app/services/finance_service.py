@@ -2,7 +2,8 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import cast, select, func, and_, text, or_
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -541,34 +542,25 @@ class FinanceService:
         if category:
             filters.append(TransactionRecord.category == category)
         if related_sale_id is not None:
-            # PostgreSQL JSON text field: search for the sale ID in JSON array
-            # Patterns: [1], [1,...], [...,1], [...,1,...]
-            sid = str(related_sale_id)
-            from sqlalchemy import or_
-            json_filter = or_(
-                TransactionRecord.related_sale_ids == f"[{sid}]",
-                TransactionRecord.related_sale_ids.like(f"[{sid},%"),
-                TransactionRecord.related_sale_ids.like(f"%,{sid}]"),
-                TransactionRecord.related_sale_ids.like(f"%,{sid},%"),
+            # PostgreSQL JSONB: 使用 @> 操作符检查数组是否包含指定 sale_id
+            filters.append(
+                TransactionRecord.related_sale_ids.op('@>')(
+                    cast(f"[{related_sale_id}]", JSONB)
+                )
             )
-            filters.append(json_filter)
         if sale_no:
             # 模糊匹配关联销售单号：先查 sale_no 包含关键词的销售单 ID，再筛选 related_sale_ids
-            from sqlalchemy import or_
             from app.models import WholeFishSale
             sale_result = await db.execute(
                 select(WholeFishSale.id).where(WholeFishSale.sale_no.ilike(f"%{sale_no}%"))
             )
             sale_ids = [row[0] for row in sale_result.all()]
             if sale_ids:
-                # 构建 JSON 数组包含任一 sale_id 的条件
-                json_conditions = []
-                for sid in sale_ids:
-                    sid_str = str(sid)
-                    json_conditions.append(TransactionRecord.related_sale_ids == f"[{sid_str}]")
-                    json_conditions.append(TransactionRecord.related_sale_ids.like(f"[{sid_str},%"))
-                    json_conditions.append(TransactionRecord.related_sale_ids.like(f"%,{sid_str}]"))
-                    json_conditions.append(TransactionRecord.related_sale_ids.like(f"%,{sid_str},%"))
+                # 使用 JSONB @> 操作符检查数组是否包含任一 sale_id
+                json_conditions = [
+                    TransactionRecord.related_sale_ids.op('@>')(cast(f"[{sid}]", JSONB))
+                    for sid in sale_ids
+                ]
                 filters.append(or_(*json_conditions))
             else:
                 # 没有匹配的销售单，返回空结果
@@ -580,13 +572,11 @@ class FinanceService:
         if end_date:
             filters.append(TransactionRecord.transaction_date <= end_date)
         if bank_account_id is not None:
-            from sqlalchemy import or_
             filters.append(or_(
                 TransactionRecord.from_account_id == bank_account_id,
                 TransactionRecord.to_account_id == bank_account_id,
             ))
         if search:
-            from sqlalchemy import or_
             # 支持金额搜索（精确匹配或部分匹配）
             try:
                 search_amount = Decimal(str(search))
@@ -617,11 +607,9 @@ class FinanceService:
                 sale_rows = sale_result.all()
                 if sale_rows:
                     for row in sale_rows:
-                        sid = str(row[0])
-                        search_conditions.append(TransactionRecord.related_sale_ids == f"[{sid}]")
-                        search_conditions.append(TransactionRecord.related_sale_ids.like(f"[{sid},%"))
-                        search_conditions.append(TransactionRecord.related_sale_ids.like(f"%,{sid}]"))
-                        search_conditions.append(TransactionRecord.related_sale_ids.like(f"%,{sid},%"))
+                        search_conditions.append(
+                            TransactionRecord.related_sale_ids.op('@>')(cast(f"[{row[0]}]", JSONB))
+                        )
             
             search_filter = or_(*search_conditions)
             filters.append(search_filter)
@@ -653,10 +641,7 @@ class FinanceService:
                 if sale_id not in seen:
                     seen.add(sale_id)
                     unique_ids.append(sale_id)
-            related_sale_ids = unique_ids
-            
-            import json
-            data["related_sale_ids"] = json.dumps(related_sale_ids)
+            data["related_sale_ids"] = unique_ids
         
         # 如果关联了销售单，检查是否全部已收款
         if related_sale_ids:
@@ -759,8 +744,7 @@ class FinanceService:
     async def update_transaction(db: AsyncSession, record: TransactionRecord, data: dict) -> TransactionRecord:
         related_sale_ids = data.pop("related_sale_ids", None)
         if related_sale_ids is not None:
-            import json
-            record.related_sale_ids = json.dumps(related_sale_ids) if related_sale_ids else None
+            record.related_sale_ids = related_sale_ids if related_sale_ids else None
         
         for field, value in data.items():
             if value is not None:

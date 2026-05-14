@@ -727,6 +727,16 @@ export function SalesPage() {
               <Label className="text-xs">收款日期</Label>
               <Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} className="h-8 text-xs" />
             </div>
+            <div className="space-y-1">
+              <Label className="text-xs">收款描述</Label>
+              <Input
+                value={receiptDescription}
+                onChange={(e) => setReceiptDescription(e.target.value)}
+                placeholder="如：张三转账/微信收款/尾款等"
+                className="h-8 text-xs"
+              />
+              <p className="text-xs text-muted-foreground">描述会同步显示在交易流水中</p>
+            </div>
 
             {/* 本次收款后未付 */}
             <div className="border-t pt-3">

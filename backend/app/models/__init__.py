@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
@@ -758,7 +759,7 @@ class TransactionRecord(Base, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text)
     related_invoice_id: Mapped[Optional[int]] = mapped_column(ForeignKey("import_invoices.id"))
     related_batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
-    related_sale_ids: Mapped[Optional[str]] = mapped_column(Text)  # JSON array of sale IDs
+    related_sale_ids: Mapped[Optional[list]] = mapped_column(JSON)  # JSON array of sale IDs
     
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

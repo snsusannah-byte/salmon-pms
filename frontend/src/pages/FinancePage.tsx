@@ -1740,6 +1740,21 @@ function TransactionsTab() {
     },
   });
 
+  const batchUnlockMutation = useMutation({
+    mutationFn: async (ids: number[]) => {
+      const res = await api.post("/v1/finance/transactions/batch-unlock", { ids });
+      return res.data;
+    },
+    onSuccess: (data) => {
+      toast.success(`批量解锁成功：${data.unlocked} 条已解锁${data.not_locked > 0 ? `，${data.not_locked} 条未锁定跳过` : ""}`);
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      setSelectedIds([]);
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || "批量解锁失败");
+    },
+  });
+
   const handleDeleteClick = (transaction: Transaction) => {
     setDeleteTarget(transaction);
     setDeleteOpen(true);
@@ -2028,6 +2043,25 @@ function TransactionsTab() {
             >
               <CheckCircle className="h-4 w-4 mr-1" />
               批量核对 ({selectedIds.filter((id) => !data?.find((r) => r.id === id)?.is_locked).length})
+            </Button>
+          )}
+          {selectedIds.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-600 text-amber-600 hover:bg-amber-50"
+              onClick={() => {
+                const lockedIds = selectedIds.filter((id) => data?.find((r) => r.id === id)?.is_locked);
+                if (lockedIds.length === 0) {
+                  toast.info("选中的记录已全部未锁定");
+                  return;
+                }
+                batchUnlockMutation.mutate(lockedIds);
+              }}
+              disabled={batchUnlockMutation.isPending}
+            >
+              <Unlock className="h-4 w-4 mr-1" />
+              批量解锁 ({selectedIds.filter((id) => data?.find((r) => r.id === id)?.is_locked).length})
             </Button>
           )}
           {selectedIds.length > 0 && (

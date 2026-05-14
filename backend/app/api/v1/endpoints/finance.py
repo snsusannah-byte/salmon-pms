@@ -502,42 +502,6 @@ async def delete_transaction(
     return None
 
 
-@router.post("/transactions/{record_id}/lock", response_model=TransactionRecordResponse)
-async def lock_transaction(
-    record_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """锁定交易记录"""
-    from sqlalchemy import select
-    from app.models import TransactionRecord
-    result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
-    record = result.scalar_one_or_none()
-    if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交易记录不存在")
-    record.is_locked = True
-    await db.commit()
-    await db.refresh(record)
-    return TransactionRecordResponse.model_validate(record)
-
-
-@router.post("/transactions/{record_id}/unlock", response_model=TransactionRecordResponse)
-async def unlock_transaction(
-    record_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """解锁交易记录"""
-    from sqlalchemy import select
-    from app.models import TransactionRecord
-    result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
-    record = result.scalar_one_or_none()
-    if not record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交易记录不存在")
-    record.is_locked = False
-    await db.commit()
-    await db.refresh(record)
-    return TransactionRecordResponse.model_validate(record)
-
-
 @router.post("/transactions/batch-lock", response_model=dict)
 async def batch_lock_transactions(
     data: dict,
@@ -578,6 +542,84 @@ async def batch_lock_transactions(
         await db.commit()
 
     return {"locked": locked, "not_found": not_found, "already_locked": already_locked}
+
+
+@router.post("/transactions/batch-unlock", response_model=dict)
+async def batch_unlock_transactions(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """批量解锁交易记录
+
+    请求体: {"ids": [1, 2, 3]}
+    返回: {"unlocked": 3, "not_found": 0, "not_locked": 0}
+    """
+    from sqlalchemy import select
+    from app.models import TransactionRecord
+
+    ids = data.get("ids", [])
+    if not ids or not isinstance(ids, list):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ids 不能为空且必须是数组")
+
+    valid_ids = [int(i) for i in ids if isinstance(i, int) or (isinstance(i, str) and i.isdigit())]
+    if not valid_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ids 中无有效整数")
+
+    result = await db.execute(select(TransactionRecord).where(TransactionRecord.id.in_(valid_ids)))
+    records = result.scalars().all()
+
+    unlocked = 0
+    not_locked = 0
+    found_ids = {r.id for r in records}
+    not_found = len(valid_ids) - len(found_ids)
+
+    for r in records:
+        if not r.is_locked:
+            not_locked += 1
+        else:
+            r.is_locked = False
+            unlocked += 1
+
+    if unlocked > 0:
+        await db.commit()
+
+    return {"unlocked": unlocked, "not_found": not_found, "not_locked": not_locked}
+
+
+@router.post("/transactions/{record_id}/lock", response_model=TransactionRecordResponse)
+async def lock_transaction(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """锁定交易记录"""
+    from sqlalchemy import select
+    from app.models import TransactionRecord
+    result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交易记录不存在")
+    record.is_locked = True
+    await db.commit()
+    await db.refresh(record)
+    return TransactionRecordResponse.model_validate(record)
+
+
+@router.post("/transactions/{record_id}/unlock", response_model=TransactionRecordResponse)
+async def unlock_transaction(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """解锁交易记录"""
+    from sqlalchemy import select
+    from app.models import TransactionRecord
+    result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="交易记录不存在")
+    record.is_locked = False
+    await db.commit()
+    await db.refresh(record)
+    return TransactionRecordResponse.model_validate(record)
 
 
 @router.post("/transactions/batch-delete", response_model=dict)
