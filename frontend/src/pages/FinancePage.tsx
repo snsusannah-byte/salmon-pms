@@ -80,6 +80,12 @@ const fmt = (v?: number | string | null) => {
   })}`;
 };
 
+// 进口费用列表专用：费用为 0 时显示 "-"，表示没有这笔费用
+const fmtFee = (v?: number | string | null) => {
+  if (v === undefined || v === null || v === "" || Number.isNaN(Number(v)) || Number(v) === 0) return "-";
+  return fmt(v);
+};
+
 const fmtUSD = (v?: number | string | null) => {
   if (v === undefined || v === null || v === "" || Number.isNaN(Number(v))) return "-";
   return `$${Number(v).toLocaleString("zh-CN", {
@@ -947,16 +953,16 @@ function ImportFeesTab() {
                   <TableCell className="font-medium">{f.invoice_no}</TableCell>
                   <TableCell>{f.expense_date || "-"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{f.customs_broker_name || "-"}</TableCell>
-                  <TableCell>{fmt(f.import_duty)}</TableCell>
-                  <TableCell>{fmt(f.import_vat)}</TableCell>
-                  <TableCell className="font-semibold text-amber-700 bg-amber-50/30">{fmt(f.tax_total)}</TableCell>
-                  <TableCell>{fmt(f.pickup_fee)}</TableCell>
-                  <TableCell>{fmt(f.freight)}</TableCell>
-                  <TableCell>{fmt(f.clearance_service_fee)}</TableCell>
-                  <TableCell>{fmt(f.yard_fee)}</TableCell>
-                  <TableCell>{fmt(f.cold_storage_fee)}</TableCell>
-                  <TableCell className="font-semibold text-blue-700 bg-blue-50/30">{fmt(f.clearance_total)}</TableCell>
-                  <TableCell className="font-bold">{fmt(f.grand_total)}</TableCell>
+                  <TableCell>{fmtFee(f.import_duty)}</TableCell>
+                  <TableCell>{fmtFee(f.import_vat)}</TableCell>
+                  <TableCell className="font-semibold text-amber-700 bg-amber-50/30">{fmtFee(f.tax_total)}</TableCell>
+                  <TableCell>{fmtFee(f.pickup_fee)}</TableCell>
+                  <TableCell>{fmtFee(f.freight)}</TableCell>
+                  <TableCell>{fmtFee(f.clearance_service_fee)}</TableCell>
+                  <TableCell>{fmtFee(f.yard_fee)}</TableCell>
+                  <TableCell>{fmtFee(f.cold_storage_fee)}</TableCell>
+                  <TableCell className="font-semibold text-blue-700 bg-blue-50/30">{fmtFee(f.clearance_total)}</TableCell>
+                  <TableCell className="font-bold">{fmtFee(f.grand_total)}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       <Button
@@ -994,16 +1000,16 @@ function ImportFeesTab() {
               {importFees.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">
                   <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
-                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.import_duty || 0), 0))}</TableCell>
-                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.import_vat || 0), 0))}</TableCell>
-                  <TableCell className="font-semibold text-amber-700">{fmt(importFees.reduce((s, f) => s + Number(f.tax_total || 0), 0))}</TableCell>
-                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.pickup_fee || 0), 0))}</TableCell>
-                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.freight || 0), 0))}</TableCell>
-                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.clearance_service_fee || 0), 0))}</TableCell>
-                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.yard_fee || 0), 0))}</TableCell>
-                  <TableCell>{fmt(importFees.reduce((s, f) => s + Number(f.cold_storage_fee || 0), 0))}</TableCell>
-                  <TableCell className="font-semibold text-blue-700">{fmt(importFees.reduce((s, f) => s + Number(f.clearance_total || 0), 0))}</TableCell>
-                  <TableCell className="font-bold">{fmt(importFees.reduce((s, f) => s + Number(f.grand_total || 0), 0))}</TableCell>
+                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.import_duty || 0), 0))}</TableCell>
+                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.import_vat || 0), 0))}</TableCell>
+                  <TableCell className="font-semibold text-amber-700">{fmtFee(importFees.reduce((s, f) => s + Number(f.tax_total || 0), 0))}</TableCell>
+                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.pickup_fee || 0), 0))}</TableCell>
+                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.freight || 0), 0))}</TableCell>
+                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.clearance_service_fee || 0), 0))}</TableCell>
+                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.yard_fee || 0), 0))}</TableCell>
+                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.cold_storage_fee || 0), 0))}</TableCell>
+                  <TableCell className="font-semibold text-blue-700">{fmtFee(importFees.reduce((s, f) => s + Number(f.clearance_total || 0), 0))}</TableCell>
+                  <TableCell className="font-bold">{fmtFee(importFees.reduce((s, f) => s + Number(f.grand_total || 0), 0))}</TableCell>
                   <TableCell />
                 </TableRow>
               )}
