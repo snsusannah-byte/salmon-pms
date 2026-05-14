@@ -12,7 +12,7 @@ const Checkbox = React.forwardRef<
   HTMLInputElement,
   CheckboxProps
 >(({ className, checked, onCheckedChange, ...props }, ref) => (
-  <div className="relative inline-flex items-center" onClick={() => onCheckedChange?.(!checked)}>
+  <div className="relative inline-flex items-center">
     <input
       type="checkbox"
       ref={ref}

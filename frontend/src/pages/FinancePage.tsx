@@ -101,8 +101,10 @@ const transactionCategoryMap: Record<string, string> = {
   other_business_revenue: "其他业务收入",
   non_business_revenue: "营业外收入",
   fund_pooling: "资金归集",
+  customer_deposit: "客户预付款",
 
-  // 支出-销售费用
+  // 内部划转
+  balance_deduction: "余额抵扣",
   marketing_fee: "市场推广费",
   packaging_consumables: "包装物及低值易耗品",
   gift_fee: "赠品费用",
@@ -1899,6 +1901,7 @@ function TransactionsTab() {
     "other_business_revenue",
     "non_business_revenue",
     "fund_pooling",
+    "customer_deposit",
   ];
 
   const incomeCategories = Object.entries(transactionCategoryMap).filter(([k]) =>

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     ExchangeRecord, ImportTax, ClearanceCost,
-    TransactionRecord, TransactionType,
+    TransactionRecord, TransactionType, TransactionCategory,
     ImportInvoice, BatchInvoice, Batch,
 )
 
@@ -736,6 +736,17 @@ class FinanceService:
                     
                     remaining_amount -= allocate
         
+        # 客户预付款：更新客户余额
+        if data.get("category") == TransactionCategory.CUSTOMER_DEPOSIT and data.get("counterparty_id"):
+            from app.models import Company
+            company_result = await db.execute(
+                select(Company).where(Company.id == data["counterparty_id"])
+            )
+            company = company_result.scalar_one_or_none()
+            if company:
+                deposit = Decimal(str(data.get("amount", 0)))
+                company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + deposit
+        
         await db.commit()
         await db.refresh(record)
         return record
@@ -814,6 +825,20 @@ class FinanceService:
                     if Decimal(str(sale.paid_amount or 0)) == 0:
                         sale.rounding_adjustment = Decimal("0")
                         await db.commit()
+
+        # 客户预付款删除：恢复客户余额
+        if record.category == TransactionCategory.CUSTOMER_DEPOSIT and record.counterparty_id:
+            from app.models import Company
+            company_result = await db.execute(
+                select(Company).where(Company.id == record.counterparty_id)
+            )
+            company = company_result.scalar_one_or_none()
+            if company:
+                deposit = Decimal(str(record.amount or 0))
+                company.prepaid_balance = max(
+                    Decimal("0"),
+                    Decimal(str(company.prepaid_balance or 0)) - deposit
+                )
 
         await db.delete(record)
         await db.commit()

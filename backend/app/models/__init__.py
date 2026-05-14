@@ -77,6 +77,10 @@ class TransactionCategory(str, PyEnum):
     OTHER_BUSINESS_REVENUE = "other_business_revenue"     # 其他业务收入（废料）
     NON_BUSINESS_REVENUE = "non_business_revenue"         # 营业外收入（投资/借款/利息）
     FUND_POOLING = "fund_pooling"                         # 资金归集（银行/线上零售）
+    CUSTOMER_DEPOSIT = "customer_deposit"                 # 客户预付款
+
+    # === 内部划转 ===
+    BALANCE_DEDUCTION = "balance_deduction"               # 余额抵扣销售单
 
     # === 支出-销售费用 ===
     MARKETING_FEE = "marketing_fee"                         # 市场推广费
@@ -188,6 +192,8 @@ class Company(Base, TimestampMixin):
     salesperson_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))  # 业务员
     customer_category: Mapped[Optional[CustomerCategory]] = mapped_column(Enum(CustomerCategory))  # 客户分类
     supplier_category: Mapped[Optional[str]] = mapped_column(String(50))  # 供应商分类: raw_material/material_supply/customs_broker/service_provider
+    # 客户预付余额（仅 customer 类型有效）
+    prepaid_balance: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 

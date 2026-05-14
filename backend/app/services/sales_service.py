@@ -316,6 +316,26 @@ class SalesService:
         if received_amount <= 0:
             raise HTTPException(status_code=400, detail="收款金额必须大于0")
 
+        # 余额抵扣：校验客户余额充足
+        is_balance_payment = data.get("payment_method") == "balance"
+        if is_balance_payment:
+            if not sale.customer_id:
+                raise HTTPException(status_code=400, detail="销售单未绑定客户，无法使用余额抵扣")
+            company_result = await db.execute(
+                select(Company).where(Company.id == sale.customer_id)
+            )
+            company = company_result.scalar_one_or_none()
+            if not company:
+                raise HTTPException(status_code=404, detail="客户不存在")
+            available_balance = Decimal(str(company.prepaid_balance or 0))
+            if available_balance < received_amount:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"客户预付款余额不足（当前余额 ¥{available_balance}，需扣款 ¥{received_amount}）"
+                )
+            # 余额抵扣不关联银行账户
+            data["bank_account_id"] = None
+
         # 获取用户指定的抹零（默认0）
         user_rounding = Decimal(str(data.pop("rounding_adjustment", 0) or 0))
         if user_rounding > 0:
@@ -348,32 +368,56 @@ class SalesService:
         
         # 构建描述：只保留类型 + 用户输入的收款描述
         user_notes = data.get("notes")
-        desc = "销售收款"
+        if is_balance_payment:
+            desc = "余额抵扣"
+        else:
+            desc = "销售收款"
         if user_notes:
             desc = f"{desc} - {user_notes}"
         
-        transaction = TransactionRecord(
-            transaction_date=data.get("receipt_date"),
-            type=TransactionType.INCOME,
-            category=TransactionCategory.MAIN_BUSINESS_REVENUE,
-            amount=data.get("amount"),
-            currency="CNY",
-            to_account_id=bank_account_id,
-            counterparty_id=sale.customer_id,
-            counterparty_name=customer_name,
-            reference_no=data.get("reference_no") or sale.sale_no or f"#{sale.id}",
-            description=desc,
-            notes=user_notes,
-            is_confirmed=True,
-        )
+        if is_balance_payment:
+            # 余额抵扣：创建内部划转流水，不关联银行账户
+            transaction = TransactionRecord(
+                transaction_date=data.get("receipt_date"),
+                type=TransactionType.TRANSFER,
+                category=TransactionCategory.BALANCE_DEDUCTION,
+                amount=data.get("amount"),
+                currency="CNY",
+                to_account_id=None,
+                from_account_id=None,
+                counterparty_id=sale.customer_id,
+                counterparty_name=customer_name,
+                reference_no=data.get("reference_no") or sale.sale_no or f"#{sale.id}",
+                description=desc,
+                notes=user_notes,
+                is_confirmed=True,
+            )
+        else:
+            transaction = TransactionRecord(
+                transaction_date=data.get("receipt_date"),
+                type=TransactionType.INCOME,
+                category=TransactionCategory.MAIN_BUSINESS_REVENUE,
+                amount=data.get("amount"),
+                currency="CNY",
+                to_account_id=bank_account_id,
+                counterparty_id=sale.customer_id,
+                counterparty_name=customer_name,
+                reference_no=data.get("reference_no") or sale.sale_no or f"#{sale.id}",
+                description=desc,
+                notes=user_notes,
+                is_confirmed=True,
+            )
         # 设置关联销售单（JSON 数组）
-        import json
-        transaction.related_sale_ids = json.dumps([sale.id])
+        transaction.related_sale_ids = [sale.id]
         db.add(transaction)
         await db.flush()
         
         # 关联交易流水到收款记录
         receipt.transaction_id = transaction.id
+        
+        # 余额抵扣：扣减客户预付余额
+        if is_balance_payment:
+            company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) - received_amount
         
         await db.commit()
         await db.refresh(receipt)
@@ -404,6 +448,16 @@ class SalesService:
             transaction = trans_result.scalar_one_or_none()
             if transaction:
                 await db.delete(transaction)
+
+        # 余额抵扣删除：恢复客户预付余额
+        if receipt.payment_method == "balance" and sale and sale.customer_id:
+            company_result = await db.execute(
+                select(Company).where(Company.id == sale.customer_id)
+            )
+            company = company_result.scalar_one_or_none()
+            if company:
+                refund = Decimal(str(receipt.amount or 0))
+                company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + refund
 
         await db.delete(receipt)
         await db.commit()

@@ -45,6 +45,7 @@ class CompanyBase(BaseModel):
     salesperson_id: Optional[int] = Field(None, description="业务员ID")
     customer_category: Optional[CustomerCategory] = Field(None, description="客户分类: wholesaler/distributor/retailer/platform/group_buying")
     supplier_category: Optional[SupplierCategory] = Field(None, description="供应商分类: raw_material/material_supply/customs_broker/service_provider")
+    prepaid_balance: Optional[Decimal] = Field(Decimal("0"), ge=0, description="客户预付款余额")
     is_active: Optional[bool] = Field(True, description="是否启用")
     notes: Optional[str] = Field(None, description="备注")
 

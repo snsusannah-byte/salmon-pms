@@ -1336,6 +1336,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
     check: "支票",
     wechat: "微信",
     alipay: "支付宝",
+    balance: "余额抵扣",
     other: "其他",
   };
 
@@ -1478,16 +1479,18 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <Label className="text-xs">收款方式</Label>
-                    <Select value={receiptMethod} onValueChange={(v) => setReceiptMethod(v ?? "")}>
+                    <Select value={receiptMethod} onValueChange={(v) => { setReceiptMethod(v ?? ""); if (v === "balance") setReceiptBankAccountId(""); }}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="bank_transfer">银行转账</SelectItem>
                         <SelectItem value="cash">现金</SelectItem>
                         <SelectItem value="check">支票</SelectItem>
                         <SelectItem value="scan">扫码</SelectItem>
+                        <SelectItem value="balance">余额抵扣</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
+                  {receiptMethod !== "balance" ? (
                   <div className="space-y-1">
                     <Label className="text-xs">收款银行</Label>
                     <Select value={receiptBankAccountId} onValueChange={(v) => setReceiptBankAccountId(v ?? "")}>
@@ -1506,6 +1509,22 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
                       </SelectContent>
                     </Select>
                   </div>
+                  ) : (
+                  <div className="space-y-1">
+                    <Label className="text-xs">客户余额</Label>
+                    <div className="h-8 flex items-center px-3 rounded-md border bg-muted/30 text-xs">
+                      {(() => {
+                        const c = (customersData?.items || []).find((c: any) => c.id === receiptSale?.customer_id);
+                        const bal = Number(c?.prepaid_balance || 0);
+                        return (
+                          <span className={bal > 0 ? "text-green-600 font-medium" : "text-muted-foreground"}>
+                            {c ? `¥${bal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—"}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">参考号</Label>

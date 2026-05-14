@@ -55,6 +55,7 @@ interface Company {
   bank_account: string | null;
   cooperation_date: string | null;
   credit_limit: string;
+  prepaid_balance?: string;
   logistics_info?: string | null;
   salesperson_id?: number | null;
   customer_category?: string | null;
@@ -217,6 +218,7 @@ export function CompaniesPage() {
               <TableHead>网址</TableHead>
               <TableHead>合作日期</TableHead>
               <TableHead>信用额度</TableHead>
+              <TableHead>预付款余额</TableHead>
               <TableHead className="w-[200px]">备注</TableHead>
               <TableHead className="w-[120px]">操作</TableHead>
             </TableRow>
@@ -296,6 +298,13 @@ export function CompaniesPage() {
                         : "-"}
                     </TableCell>
                     <TableCell>¥{Number(company.credit_limit).toLocaleString()}</TableCell>
+                    <TableCell>
+                      {company.type === "customer" ? (
+                        <span className={Number(company.prepaid_balance || 0) > 0 ? "text-green-600 font-medium" : "text-muted-foreground"}>
+                          ¥{Number(company.prepaid_balance || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      ) : "-"}
+                    </TableCell>
                     <TableCell className="max-w-[200px]">
                       <div className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-3">
                         {company.notes ?? "-"}
