@@ -849,14 +849,14 @@ export function SalesPage() {
 
       {/* 汇总行 */}
       {data?.items && data.items.length > 0 && (
-        <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
-          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">记录条数</p><p className="text-xl font-bold">{summary.totalCount.toLocaleString()}</p></CardContent></Card>
-          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">总箱数</p><p className="text-xl font-bold">{summary.totalBoxes.toLocaleString()}</p></CardContent></Card>
-          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">总重量</p><p className="text-xl font-bold">{summary.totalWeight.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p></CardContent></Card>
-          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">总销售金额</p><p className="text-xl font-bold">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
-          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">净金额</p><p className="text-xl font-bold text-blue-600">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
-          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">售后金额</p><p className="text-xl font-bold text-red-500">¥{summary.totalAfterSales.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
-          <Card><CardContent className="p-2 text-sm"><p className="text-muted-foreground text-xs">已收金额</p><p className="text-xl font-bold text-green-600">¥{summary.totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+        <div className="flex flex-wrap gap-2">
+          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">记录条数</p><p className="text-xl font-bold">{summary.totalCount.toLocaleString()}</p></CardContent></Card>
+          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总箱数</p><p className="text-xl font-bold">{summary.totalBoxes.toLocaleString()}</p></CardContent></Card>
+          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总重量</p><p className="text-xl font-bold">{summary.totalWeight.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p></CardContent></Card>
+          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总销售金额</p><p className="text-xl font-bold">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">净金额</p><p className="text-xl font-bold text-blue-600">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">售后金额</p><p className="text-xl font-bold text-red-500">¥{summary.totalAfterSales.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">已收金额</p><p className="text-xl font-bold text-green-600">¥{summary.totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
         </div>
       )}
 
