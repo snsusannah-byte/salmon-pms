@@ -112,7 +112,7 @@ export function ReceivableStatementsTab() {
         @media print {
           nav, aside, .sidebar, [role="navigation"] { display: none !important; }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .print-content { width: 100% !important; margin: 0 !important; padding: 0 !important; }
+          .print-content { display: block !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
           .print-content table { font-size: 9px; width: 100%; border-collapse: collapse; }
           .print-content th, .print-content td { padding: 1px 3px !important; border: 1px solid #ccc !important; }
           .print-content h4 { font-size: 10px; margin: 4px 0 2px 0; }
