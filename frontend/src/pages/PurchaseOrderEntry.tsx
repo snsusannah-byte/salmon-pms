@@ -33,6 +33,7 @@ interface PurchaseOrder {
   total_amount: number;
   total_weight: number;
   total_boxes: number;
+  factories?: string[];
   remark: string;
   status: string;
   created_at: string;
@@ -297,6 +298,7 @@ export function PurchaseOrderEntry() {
                     <th className="px-4 py-2 text-left">采购单号</th>
                     <th className="px-4 py-2 text-left">日期</th>
                     <th className="px-4 py-2 text-left">供应商</th>
+                    <th className="px-4 py-2 text-left">加工厂</th>
                     <th className="px-4 py-2 text-right">箱数</th>
                     <th className="px-4 py-2 text-right">重量(kg)</th>
                     <th className="px-4 py-2 text-right">金额(元)</th>
@@ -305,13 +307,14 @@ export function PurchaseOrderEntry() {
                 </thead>
                 <tbody>
                   {filteredOrders.length === 0 && (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">暂无采购入库单</td></tr>
+                    <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">暂无采购入库单</td></tr>
                   )}
                   {filteredOrders.map(o => (
                     <tr key={o.id} className="border-t hover:bg-gray-50">
                       <td className="px-4 py-2 font-mono text-blue-600 cursor-pointer hover:underline" onClick={() => handleViewDetail(o)}>{o.purchase_no}</td>
                       <td className="px-4 py-2">{o.purchase_date}</td>
                       <td className="px-4 py-2">{o.supplier_name}</td>
+                      <td className="px-4 py-2 text-xs text-gray-500">{o.factories?.length ? o.factories.join('、') : '-'}</td>
                       <td className="px-4 py-2 text-right">{o.total_boxes || '-'}</td>
                       <td className="px-4 py-2 text-right">{o.total_weight ? o.total_weight.toFixed(2) : '-'}</td>
                       <td className="px-4 py-2 text-right font-medium">{o.total_amount ? o.total_amount.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' }) : '-'}</td>

@@ -263,6 +263,13 @@ async def api_get_purchase_orders(db: AsyncSession = Depends(get_db)):
     orders = result.scalars().all()
     data = []
     for o in orders:
+        # 提取该订单的加工厂（去重）
+        products_result = await db.execute(
+            select(PurchaseOrderProductV2.factory)
+            .where(PurchaseOrderProductV2.purchase_order_id == o.id)
+            .distinct()
+        )
+        factories = [f for f in products_result.scalars().all() if f]
         data.append({
             "id": o.id,
             "purchase_no": o.purchase_no,
@@ -273,6 +280,7 @@ async def api_get_purchase_orders(db: AsyncSession = Depends(get_db)):
             "total_amount": float(o.total_amount) if o.total_amount else 0,
             "total_weight": float(o.total_weight) if o.total_weight else 0,
             "total_boxes": o.total_boxes,
+            "factories": factories,
             "remark": o.remark,
             "status": o.status,
             "created_at": o.created_at.isoformat() if o.created_at else None,

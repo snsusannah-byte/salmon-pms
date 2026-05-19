@@ -15,7 +15,7 @@ import {
   CreditCard, Eye, Package, DollarSign
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { apiFetch, apiPost, apiDelete } from '@/lib/api';
+import { api, apiFetch, apiPost, apiDelete } from '@/lib/api';
 
 interface FinishedSale {
   id: number;
@@ -46,7 +46,9 @@ interface FinishedSale {
 
 interface FinishedSaleProduct {
   id?: number;
+  product_name: string;
   product_spec: string;
+  factory: string;
   box_count: number;
   weight_kg: number;
   unit_price: number;
@@ -67,7 +69,7 @@ interface PurchaseOrder {
 }
 
 const emptyProduct: FinishedSaleProduct = {
-  product_spec: '', box_count: 0, weight_kg: 0, unit_price: 0,
+  product_name: '', product_spec: '', factory: '', box_count: 0, weight_kg: 0, unit_price: 0,
   total_amount: 0, commission_rate: 0, commission_amount: 0, after_sales_adjustment: 0
 };
 
@@ -139,10 +141,13 @@ export function FinishedProductSales() {
   };
 
   const loadSalespeople = async () => {
-    const res = await apiFetch('v1/salespersons/?limit=500');
-    if (res.ok && res.data) {
+    // 旧版 API 返回 {total, items} 没有 success 字段，直接用 axios
+    try {
+      const res = await api.get('v1/salespersons/?limit=500');
       const items = Array.isArray(res.data) ? res.data : (res.data.items || []);
       setSalespeople(items.map((s: any) => ({ name: s.name || s.full_name, commission_rate: s.commission_rate || 0 })));
+    } catch (e) {
+      console.error('loadSalespeople failed', e);
     }
   };
 
@@ -173,20 +178,24 @@ export function FinishedProductSales() {
   const removeProduct = (idx: number) => setForm(prev => ({ ...prev, products: prev.products.filter((_, i) => i !== idx) }));
 
   const handleSave = async () => {
-    if (!form.sale_no.trim() || !form.customer.trim()) return;
+    if (!form.customer.trim()) {
+      toast.error('客户名称不能为空');
+      return;
+    }
     const payload = {
       ...form,
+      sale_no: form.sale_no.trim() || undefined,
       paid: form.paid ? 1 : 0,
       products: form.products.filter(p => p.product_spec.trim())
     };
     try {
       if (editingId) {
-        await apiFetch(`/finished-product-sales/${editingId}`, {
+        await apiFetch('finished-product-sales/' + editingId, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         }, '更新成功');
       } else {
-        await apiPost('/v4/finished-product-sales', payload, '创建成功');
+        await apiPost('v4/finished-product-sales', payload, '创建成功');
       }
       setShowModal(false);
       setForm(emptyForm);
@@ -493,7 +502,9 @@ export function FinishedProductSales() {
                       const res = await apiFetch(`v4/purchase-orders/${orderId}`);
                       if (res.ok && res.data?.products?.length) {
                         const products = res.data.products.map((p: any) => ({
+                          product_name: p.product_name || '',
                           product_spec: p.product_spec || '',
+                          factory: p.factory || '',
                           box_count: p.box_count || 0,
                           weight_kg: p.weight_kg || 0,
                           unit_price: 0,
@@ -539,32 +550,40 @@ export function FinishedProductSales() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 py-2 text-left">产品名称/规格</th>
-                      <th className="px-3 py-2 text-right w-24">箱数</th>
-                      <th className="px-3 py-2 text-right w-28">重量(kg)</th>
-                      <th className="px-3 py-2 text-right w-28">单价(元/kg)</th>
-                      <th className="px-3 py-2 text-right w-28">金额</th>
-                      <th className="px-3 py-2 text-center w-12"></th>
+                      <th className="px-3 py-2 text-left w-[18%]">产品名称</th>
+                      <th className="px-3 py-2 text-left w-[14%]">规格</th>
+                      <th className="px-3 py-2 text-left w-[14%]">加工厂</th>
+                      <th className="px-3 py-2 text-right w-[10%]">箱数</th>
+                      <th className="px-3 py-2 text-right w-[12%]">重量(kg)</th>
+                      <th className="px-3 py-2 text-right w-[12%]">单价(元/kg)</th>
+                      <th className="px-3 py-2 text-right w-[12%]">金额</th>
+                      <th className="px-3 py-2 text-center w-[4%]"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {form.products.map((p, idx) => (
                       <tr key={idx} className="border-t">
                         <td className="px-3 py-2">
-                          <Input size={1} value={p.product_spec} onChange={e => handleProductChange(idx, 'product_spec', e.target.value)} placeholder={form.sale_type === 'whole_fish' ? '如: 三文鱼 6-7kg/条' : '如: 三文鱼刺身 200g/包'} />
+                          <Input className="h-8 text-sm" value={p.product_name || ''} onChange={e => handleProductChange(idx, 'product_name', e.target.value)} placeholder="产品名称" />
                         </td>
                         <td className="px-3 py-2">
-                          <Input type="number" className="text-right" value={p.box_count || ''} onChange={e => handleProductChange(idx, 'box_count', parseInt(e.target.value) || 0)} />
+                          <Input className="h-8 text-sm" value={p.product_spec} onChange={e => handleProductChange(idx, 'product_spec', e.target.value)} placeholder={form.sale_type === 'whole_fish' ? '如: 6-7kg' : '如: 200g/包'} />
                         </td>
                         <td className="px-3 py-2">
-                          <Input type="number" step="0.01" className="text-right" value={p.weight_kg || ''} onChange={e => handleProductChange(idx, 'weight_kg', parseFloat(e.target.value) || 0)} />
+                          <Input className="h-8 text-sm" value={p.factory || ''} onChange={e => handleProductChange(idx, 'factory', e.target.value)} placeholder="加工厂" />
                         </td>
                         <td className="px-3 py-2">
-                          <Input type="number" step="0.01" className="text-right" value={p.unit_price || ''} onChange={e => handleProductChange(idx, 'unit_price', parseFloat(e.target.value) || 0)} />
+                          <Input type="number" className="h-8 text-sm text-right" value={String(p.box_count || '')} onChange={e => handleProductChange(idx, 'box_count', parseInt(e.target.value) || 0)} />
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input type="number" step="0.01" className="h-8 text-sm text-right" value={String(p.weight_kg || '')} onChange={e => handleProductChange(idx, 'weight_kg', parseFloat(e.target.value) || 0)} />
+                        </td>
+                        <td className="px-3 py-2">
+                          <Input type="number" step="0.01" className="h-8 text-sm text-right" value={String(p.unit_price || '')} onChange={e => handleProductChange(idx, 'unit_price', parseFloat(e.target.value) || 0)} />
                         </td>
                         <td className="px-3 py-2 text-right font-medium">{p.total_amount ? p.total_amount.toFixed(2) : '-'}</td>
                         <td className="px-3 py-2 text-center">
-                          <Button size="sm" variant="ghost" className="text-red-500" disabled={form.products.length <= 1} onClick={() => removeProduct(idx)}>
+                          <Button size="sm" variant="ghost" className="text-red-500 h-7 w-7 p-0" disabled={form.products.length <= 1} onClick={() => removeProduct(idx)}>
                             <X className="w-4 h-4" />
                           </Button>
                         </td>
