@@ -117,14 +117,14 @@ export function PayableStatementsTab() {
           .print-content th, .print-content td { padding: 1px 3px !important; border: 1px solid #ccc !important; }
           .print-content h4 { font-size: 10px; margin: 4px 0 2px 0; }
           .print-empty { display: none !important; }
-          .print-hide-note { display: none !important; }
+          //  removed
           .print-content .grid { gap: 2px !important; }
           .print-content .rounded-lg { border: 1px solid #ccc !important; padding: 4px !important; }
         }
       `}</style>
       <div className="space-y-4">
         {/* 查询条件 */}
-        <Card className="print-hidden-query">
+        <Card className="print-hidden-query print:hidden">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <FileText className="h-5 w-5 text-blue-500" />
@@ -350,7 +350,7 @@ export function PayableStatementsTab() {
                               <TableHead className="text-xs py-1.5">日期</TableHead>
                               <TableHead className="text-xs py-1.5">付款类型</TableHead>
                               <TableHead className="text-xs py-1.5 text-right">付款金额</TableHead>
-                              <TableHead className="text-xs py-1.5 print-hide-note">备注</TableHead>
+                              <TableHead className="text-xs py-1.5 ">备注</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -364,14 +364,14 @@ export function PayableStatementsTab() {
                                     {d.payment_type === "exchange" ? "购汇付款" : d.payment_type === "clearance_payment" ? "清关费付款" : d.payment_type || "-"}
                                   </TableCell>
                                   <TableCell className="text-xs py-1.5 text-right">{fmt$(d.amount)}</TableCell>
-                                  <TableCell className="text-xs py-1.5 print-hide-note">{d.description || d.reference_no || "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5 ">{d.description || d.reference_no || "-"}</TableCell>
                                 </TableRow>
                               ))
                             )}
                             <TableRow className="bg-muted/30 font-medium">
                               <TableCell className="text-xs py-1.5" colSpan={1}>付款合计</TableCell>
                               <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.payment_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0))}</TableCell>
-                              <TableCell className="text-xs py-1.5 print-hide-note"></TableCell>
+                              <TableCell className="text-xs py-1.5 "></TableCell>
                             </TableRow>
                           </TableBody>
                         </Table>

@@ -120,18 +120,18 @@ export function FinishedProductSales() {
 
   const loadSales = async () => {
     setLoading(true);
-    const res = await apiFetch('/v4/finished-product-sales');
+    const res = await apiFetch('v4/finished-product-sales');
     if (res.ok && res.data) setSales(res.data);
     setLoading(false);
   };
 
   const loadPurchaseOrders = async () => {
-    const res = await apiFetch('/v4/purchase-orders');
+    const res = await apiFetch('v4/purchase-orders');
     if (res.ok && res.data) setPurchaseOrders(res.data);
   };
 
   const loadCustomers = async () => {
-    const res = await apiFetch('/v4/customers?limit=500');
+    const res = await apiFetch('v4/customers?limit=500');
     if (res.ok && res.data) {
       const items = Array.isArray(res.data) ? res.data : (res.data.data || []);
       setCustomers(items.map((c: any) => c.name));
@@ -139,7 +139,7 @@ export function FinishedProductSales() {
   };
 
   const loadSalespeople = async () => {
-    const res = await apiFetch('/v1/salespersons/?limit=500');
+    const res = await apiFetch('v1/salespersons/?limit=500');
     if (res.ok && res.data) {
       const items = Array.isArray(res.data) ? res.data : (res.data.items || []);
       setSalespeople(items.map((s: any) => ({ name: s.name || s.full_name, commission_rate: s.commission_rate || 0 })));

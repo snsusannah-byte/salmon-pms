@@ -310,7 +310,9 @@ async def api_get_purchase_order(order_id: int, db: AsyncSession = Depends(get_d
             "products": [
                 {
                     "id": p.id,
+                    "product_name": p.product_name,
                     "product_spec": p.product_spec,
+                    "factory": p.factory,
                     "box_count": p.box_count,
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
                     "unit_price": float(p.unit_price) if p.unit_price else 0,
@@ -362,7 +364,9 @@ async def api_create_purchase_order(data: dict, db: AsyncSession = Depends(get_d
     for p in data.get("products", []):
         product = PurchaseOrderProductV2(
             purchase_order_id=order.id,
+            product_name=p.get("product_name"),
             product_spec=p.get("product_spec", ""),
+            factory=p.get("factory"),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
             unit_price=Decimal(str(p.get("unit_price", 0))),

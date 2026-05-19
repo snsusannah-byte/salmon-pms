@@ -41,8 +41,9 @@ interface PurchaseOrder {
 
 interface PurchaseProduct {
   id?: number;
-  product_name: string;    // 产品名称
-  product_spec: string;    // 规格
+  product_name: string;
+  product_spec: string;
+  factory: string;
   box_count: number;
   weight_kg: number;
   unit_price: number;
@@ -65,6 +66,7 @@ interface Supplier {
 const emptyProduct: PurchaseProduct = {
   product_name: '',
   product_spec: '',
+  factory: '',
   box_count: 0,
   weight_kg: 0,
   unit_price: 0,
@@ -221,6 +223,7 @@ export function PurchaseOrderEntry() {
         products: (o.products?.length ? o.products : [emptyProduct]).map((p: any) => ({
           product_name: p.product_name || '',
           product_spec: p.product_spec || '',
+          factory: p.factory || '',
           box_count: p.box_count || 0,
           weight_kg: p.weight_kg || 0,
           unit_price: p.unit_price || 0,
@@ -387,8 +390,9 @@ export function PurchaseOrderEntry() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 py-2 text-left w-[25%]">产品名称</th>
-                      <th className="px-3 py-2 text-left w-[15%]">规格</th>
+                      <th className="px-3 py-2 text-left w-[20%]">产品名称</th>
+                      <th className="px-3 py-2 text-left w-[14%]">规格</th>
+                      <th className="px-3 py-2 text-left w-[14%]">加工厂</th>
                       <th className="px-3 py-2 text-right w-[10%]">箱数</th>
                       <th className="px-3 py-2 text-right w-[12%]">重量(kg)</th>
                       <th className="px-3 py-2 text-right w-[12%]">单价(元/kg)</th>
@@ -531,6 +535,9 @@ export function PurchaseOrderEntry() {
                             </div>,
                             document.body
                           )}
+                          <td className="px-3 py-2">
+                            <Input className="h-8 text-sm" value={p.factory || ''} onChange={e => handleProductChange(idx, 'factory', e.target.value)} placeholder="加工厂" />
+                          </td>
                           <td className="px-3 py-2">
                             <Input type="number" className="h-8 text-sm text-right" value={String(p.box_count || '')} onChange={e => handleProductChange(idx, 'box_count', parseInt(e.target.value) || 0)} placeholder="箱" />
                           </td>
