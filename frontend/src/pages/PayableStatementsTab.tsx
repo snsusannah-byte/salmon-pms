@@ -111,6 +111,7 @@ export function PayableStatementsTab() {
       <style>{`
         @media print {
           nav, aside, .sidebar, [role="navigation"] { display: none !important; }
+          .print-hidden-query { display: none !important; }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .print-content { display: block !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
           .print-content table { font-size: 9px; width: 100%; border-collapse: collapse; }

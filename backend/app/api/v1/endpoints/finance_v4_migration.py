@@ -77,8 +77,47 @@ async def _get_or_create_product(db: AsyncSession, name: str, spec: str, unit: s
     return product.id
 
 
+async def _update_stock_inbound(db: AsyncSession, warehouse_id: int, product_id: int, qty: Decimal, unit_cost: Decimal = None, total_cost: Decimal = None) -> None:
+    """更新库存：入库时增加数量"""
+    from app.models import Stock
+    result = await db.execute(
+        select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id)
+    )
+    stock = result.scalar_one_or_none()
+    if not stock:
+        stock = Stock(
+            warehouse_id=warehouse_id,
+            product_id=product_id,
+            current_qty=Decimal("0"),
+            available_qty=Decimal("0"),
+            unit=unit_cost and "kg" or "kg",
+        )
+        db.add(stock)
+    stock.current_qty = stock.current_qty + qty
+    stock.available_qty = stock.available_qty + qty
+    if unit_cost:
+        stock.unit_cost = unit_cost
+    if total_cost:
+        stock.total_cost = (stock.total_cost or Decimal("0")) + total_cost
+    stock.last_in_date = _date.today()
+
+async def _update_stock_outbound(db: AsyncSession, warehouse_id: int, product_id: int, qty: Decimal) -> None:
+    """更新库存：出库时减少数量"""
+    from app.models import Stock
+    result = await db.execute(
+        select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id)
+    )
+    stock = result.scalar_one_or_none()
+    if not stock:
+        raise HTTPException(status_code=500, detail=f"仓库 {warehouse_id} 中没有该产品库存")
+    if stock.available_qty < qty:
+        raise HTTPException(status_code=400, detail=f"库存不足：可用 {stock.available_qty}，需要 {qty}")
+    stock.current_qty = stock.current_qty - qty
+    stock.available_qty = stock.available_qty - qty
+    stock.last_out_date = _date.today()
+
 async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) -> list:
-    """采购入库后自动推仓库入库记录"""
+    """采购入库后自动推仓库入库记录 + 更新库存"""
     # 根据采购类型决定仓库
     warehouse_code = "ZB-DOMESTIC" if order.order_type == "raw_material" else "FL-MATERIAL"
     warehouse_id = await _get_warehouse_id(db, warehouse_code)
@@ -93,6 +132,10 @@ async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) 
             unit="kg",
             category="raw_material"
         )
+        
+        qty = Decimal(str(product.weight_kg or 0))
+        unit_cost_val = Decimal(str(product.unit_price or 0))
+        total_cost_val = Decimal(str(product.total_amount or 0))
         
         # 生成入库单号
         today = order.purchase_date or _date.today()
@@ -112,10 +155,10 @@ async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) 
             source_no=order.purchase_no,
             warehouse_id=warehouse_id,
             product_id=product_id,
-            qty=Decimal(str(product.weight_kg or 0)),
+            qty=qty,
             unit="kg",
-            unit_cost=Decimal(str(product.unit_price or 0)),
-            total_cost=Decimal(str(product.total_amount or 0)),
+            unit_cost=unit_cost_val,
+            total_cost=total_cost_val,
             supplier_id=supplier_id,
             detail={"box_count": product.box_count, "spec": product.product_spec},
             inbound_date=order.purchase_date or _date.today(),
@@ -123,6 +166,10 @@ async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) 
             notes=f"采购入库单 {order.purchase_no} 自动入库",
         )
         db.add(inbound)
+        
+        # 更新库存数量
+        await _update_stock_inbound(db, warehouse_id, product_id, qty, unit_cost_val, total_cost_val)
+        
         inbounds.append(inbound_no)
     
     return inbounds
@@ -170,6 +217,11 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
             notes=f"销售单 {sale.sale_no} 自动出库",
         )
         db.add(outbound)
+        
+        # 扣减库存
+        qty = Decimal(str(product.weight_kg or 0))
+        await _update_stock_outbound(db, warehouse_id, p.id, qty)
+        
         outbounds.append(outbound_no)
     
     return outbounds

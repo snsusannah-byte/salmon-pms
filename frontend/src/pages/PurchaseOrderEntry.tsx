@@ -238,7 +238,7 @@ export function PurchaseOrderEntry() {
 
   const handleDelete = async (id: number) => {
     if (!confirm('确定删除该采购入库单？')) return;
-    await apiDelete(`/purchase-orders/${id}`, '删除成功');
+    await apiDelete(`v4/purchase-orders/${id}`, '删除成功');
     loadOrders();
   };
 

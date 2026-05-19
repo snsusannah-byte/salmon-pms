@@ -15,7 +15,7 @@ export function ReportsPage() {
           批次财报、单票财报、应收/应付对账单、三大财务报表
         </p>
       </div>
-      <div className="mt-4 print:hidden">
+      <div className="mt-4">
         {pathname === "/reports/invoices" ? (
           <InvoiceReportsTab />
         ) : pathname === "/reports/receivable" ? (
