@@ -202,7 +202,33 @@ async def list_exchange_records(
 ):
     """购汇记录列表（支持按发票或批次筛选）"""
     items, total = await FinanceService.list_exchange_records(db, invoice_id=invoice_id, batch_id=batch_id, skip=skip, limit=limit)
-    return [ExchangeRecordResponse.model_validate(r) for r in items]
+    
+    # 收集所有需要查询的发票ID
+    all_invoice_ids = set()
+    for r in items:
+        if r.related_invoice_ids:
+            all_invoice_ids.update(r.related_invoice_ids)
+    
+    # 查询发票号映射
+    invoice_no_map = {}
+    if all_invoice_ids:
+        from app.models import ImportInvoice
+        from sqlalchemy import select
+        result = await db.execute(
+            select(ImportInvoice.id, ImportInvoice.invoice_no).where(ImportInvoice.id.in_(list(all_invoice_ids)))
+        )
+        invoice_no_map = {row[0]: row[1] for row in result.all()}
+    
+    # 构建响应
+    responses = []
+    for r in items:
+        resp_data = {
+            **r.__dict__,
+            "related_invoice_nos": [invoice_no_map.get(iid, str(iid)) for iid in (r.related_invoice_ids or [])] if r.related_invoice_ids else None,
+        }
+        responses.append(ExchangeRecordResponse.model_validate(resp_data))
+    
+    return responses
 
 
 @router.post("/exchange", response_model=ExchangeRecordResponse, status_code=status.HTTP_201_CREATED)
@@ -432,7 +458,7 @@ async def delete_clearance_cost(
 
 # ==================== 统一交易流水 ====================
 
-@router.get("/transactions", response_model=List[TransactionRecordResponse])
+@router.get("/transactions")
 async def list_transactions(
     type: Optional[str] = Query(None, description="类型"),
     category: Optional[str] = Query(None, description="分类"),
@@ -447,12 +473,17 @@ async def list_transactions(
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    """交易流水列表"""
+    """交易流水列表（分页）"""
     from datetime import date
     sd = date.fromisoformat(start_date) if start_date else None
     ed = date.fromisoformat(end_date) if end_date else None
     items, total = await FinanceService.list_transactions(db, type=type, category=category, related_sale_id=related_sale_id, sale_no=sale_no, is_locked=is_locked, start_date=sd, end_date=ed, search=search, bank_account_id=bank_account_id, skip=skip, limit=limit)
-    return [TransactionRecordResponse.model_validate(r) for r in items]
+    return {
+        "total": total,
+        "items": [TransactionRecordResponse.model_validate(r).model_dump() for r in items],
+        "skip": skip,
+        "limit": limit,
+    }
 
 
 @router.post("/transactions", response_model=TransactionRecordResponse, status_code=status.HTTP_201_CREATED)

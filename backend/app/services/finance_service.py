@@ -40,20 +40,124 @@ class FinanceService:
         return list(result.scalars().all()), count_result.scalar()
 
     @staticmethod
+    async def _generate_exchange_no(db: AsyncSession, exchange_date: str) -> str:
+        """生成购汇单号: GHYYYYMMDD-NNN"""
+        from datetime import date
+        d = date.fromisoformat(exchange_date)
+        prefix = f"GH{d.strftime('%Y%m%d')}"
+        
+        # 查询当天最大序号
+        from sqlalchemy import func
+        result = await db.execute(
+            select(func.max(ExchangeRecord.exchange_no)).where(ExchangeRecord.exchange_no.like(f"{prefix}-%"))
+        )
+        max_no = result.scalar() or f"{prefix}-000"
+        
+        try:
+            seq = int(max_no.split("-")[-1]) + 1
+        except (ValueError, IndexError):
+            seq = 1
+        
+        return f"{prefix}-{seq:03d}"
+
+    @staticmethod
     async def create_exchange_record(db: AsyncSession, data: dict) -> ExchangeRecord:
+        from datetime import date
+        
+        # 日期字符串转 date 对象
+        if isinstance(data.get("exchange_date"), str):
+            data["exchange_date"] = date.fromisoformat(data["exchange_date"])
+        
+        # 生成购汇单号
+        if not data.get("exchange_no") and isinstance(data.get("exchange_date"), (date, str)):
+            exchange_date_str = str(data["exchange_date"]) if isinstance(data["exchange_date"], date) else data["exchange_date"]
+            data["exchange_no"] = await FinanceService._generate_exchange_no(db, exchange_date_str)
+        
         record = ExchangeRecord(**data)
         db.add(record)
         await db.commit()
         await db.refresh(record)
         
-        # 更新发票购汇状态（支持按发票ID或批次ID）
-        await FinanceService._update_invoice_exchange_status(
-            db, 
-            invoice_id=data.get("invoice_id"), 
-            batch_id=data.get("batch_id")
-        )
+        # 更新发票购汇状态（支持单张发票、批次级、或跨批次合并购汇）
+        related_invoice_ids = data.get("related_invoice_ids")
+        if related_invoice_ids:
+            # 合并购汇：按金额比例分摊，更新所有关联发票状态
+            await FinanceService._update_multi_invoice_exchange_status(
+                db, related_invoice_ids
+            )
+        else:
+            await FinanceService._update_invoice_exchange_status(
+                db, 
+                invoice_id=data.get("invoice_id"), 
+                batch_id=data.get("batch_id")
+            )
         
         return record
+
+    @staticmethod
+    async def _update_multi_invoice_exchange_status(db: AsyncSession, invoice_ids: list) -> None:
+        """合并购汇状态更新：按发票金额比例分摊购汇金额，更新所有关联发票状态"""
+        from app.models import ImportInvoice, ExchangeStatus
+        from sqlalchemy import func
+        from decimal import Decimal
+
+        # 查询所有关联发票
+        result = await db.execute(
+            select(ImportInvoice).where(ImportInvoice.id.in_(invoice_ids))
+        )
+        invoices = list(result.scalars().all())
+        if not invoices:
+            return
+
+        # 计算各发票金额及总金额
+        total_invoice_amount = sum(Decimal(str(inv.total_amount_usd or 0)) for inv in invoices)
+        if total_invoice_amount <= 0:
+            return
+
+        # 遍历每张发票，计算其累计购汇金额（直接关联 + 合并购汇分摊）
+        for inv in invoices:
+            inv_amount = Decimal(str(inv.total_amount_usd or 0))
+            inv_id = inv.id
+
+            # 1. 直接关联该发票的购汇金额
+            direct_ex = await db.execute(
+                select(func.sum(ExchangeRecord.amount_usd))
+                .where(ExchangeRecord.invoice_id == inv_id)
+            )
+            direct_total = direct_ex.scalar() or Decimal("0")
+
+            # 2. 通过合并购汇关联到该发票的金额（按比例分摊）
+            batch_share = Decimal("0")
+            batch_ex_result = await db.execute(
+                select(ExchangeRecord)
+                .where(ExchangeRecord.related_invoice_ids.isnot(None))
+            )
+            batch_records = batch_ex_result.scalars().all()
+            for br in batch_records:
+                if inv_id in (br.related_invoice_ids or []):
+                    # 获取该记录关联的所有发票总金额
+                    br_result = await db.execute(
+                        select(func.sum(ImportInvoice.total_amount_usd))
+                        .where(ImportInvoice.id.in_(br.related_invoice_ids))
+                    )
+                    br_total = br_result.scalar() or Decimal("0")
+                    if br_total > 0:
+                        proportion = inv_amount / br_total
+                        batch_share += Decimal(str(br.amount_usd or 0)) * proportion
+
+            total_exchanged = direct_total + batch_share
+
+            # 判断购汇状态
+            if total_exchanged >= inv_amount and inv_amount > 0:
+                status = ExchangeStatus.COMPLETED
+            elif total_exchanged > 0:
+                status = ExchangeStatus.PARTIAL
+            else:
+                status = ExchangeStatus.NOT_EXCHANGED
+
+            inv.exchange_status = status
+
+        await db.commit()
 
     @staticmethod
     async def _update_invoice_exchange_status(db: AsyncSession, invoice_id: Optional[int], batch_id: Optional[int] = None) -> None:
@@ -136,13 +240,17 @@ class FinanceService:
 
     @staticmethod
     async def delete_exchange_record(db: AsyncSession, record: ExchangeRecord) -> None:
+        related_invoice_ids = record.related_invoice_ids
         invoice_id = record.invoice_id
         batch_id = record.batch_id
         await db.delete(record)
         await db.commit()
         
         # 更新发票购汇状态
-        await FinanceService._update_invoice_exchange_status(db, invoice_id=invoice_id, batch_id=batch_id)
+        if related_invoice_ids:
+            await FinanceService._update_multi_invoice_exchange_status(db, related_invoice_ids)
+        else:
+            await FinanceService._update_invoice_exchange_status(db, invoice_id=invoice_id, batch_id=batch_id)
 
     # ============== 进口税费 ==============
 
@@ -588,7 +696,6 @@ class FinanceService:
                 TransactionRecord.counterparty_name.ilike(f"%{search}%"),
                 TransactionRecord.description.ilike(f"%{search}%"),
                 TransactionRecord.reference_no.ilike(f"%{search}%"),
-                TransactionRecord.transaction_date.cast(str).ilike(f"%{search}%"),
             ]
             if amount_filter is not None:
                 search_conditions.append(amount_filter)
@@ -596,13 +703,11 @@ class FinanceService:
             # 如果搜索关键词像销售单号，也搜索关联销售单
             if search and len(search) >= 4:
                 from app.models import WholeFishSale
+                sale_conditions = [WholeFishSale.sale_no.ilike(f"%{search}%")]
+                if hasattr(WholeFishSale, 'customer_name'):
+                    sale_conditions.append(WholeFishSale.customer_name.ilike(f"%{search}%"))
                 sale_result = await db.execute(
-                    select(WholeFishSale.id, WholeFishSale.sale_no).where(
-                        or_(
-                            WholeFishSale.sale_no.ilike(f"%{search}%"),
-                            WholeFishSale.customer_name.ilike(f"%{search}%") if hasattr(WholeFishSale, 'customer_name') else False,
-                        )
-                    )
+                    select(WholeFishSale.id, WholeFishSale.sale_no).where(or_(*sale_conditions))
                 )
                 sale_rows = sale_result.all()
                 if sale_rows:
@@ -622,6 +727,25 @@ class FinanceService:
         return list(result.scalars().all()), count_result.scalar()
 
     @staticmethod
+    async def _generate_transaction_no(db: AsyncSession, transaction_date: str) -> str:
+        """生成交易流水单号: LSYYYYMMDD-NNN"""
+        from datetime import date
+        d = date.fromisoformat(transaction_date)
+        prefix = f"LS{d.strftime('%Y%m%d')}"
+        
+        result = await db.execute(
+            select(func.max(TransactionRecord.reference_no)).where(TransactionRecord.reference_no.like(f"{prefix}-%"))
+        )
+        max_no = result.scalar() or f"{prefix}-000"
+        
+        try:
+            seq = int(max_no.split("-")[-1]) + 1
+        except (ValueError, IndexError):
+            seq = 1
+        
+        return f"{prefix}-{seq:03d}"
+
+    @staticmethod
     async def create_transaction(db: AsyncSession, data: dict) -> TransactionRecord:
         from app.models import WholeFishSale  # 提前导入
         from datetime import date
@@ -629,6 +753,11 @@ class FinanceService:
         # 日期字符串转 date 对象
         if isinstance(data.get("transaction_date"), str):
             data["transaction_date"] = date.fromisoformat(data["transaction_date"])
+        
+        # 自动生成流水单号
+        if not data.get("reference_no") and isinstance(data.get("transaction_date"), (date, str)):
+            date_str = str(data["transaction_date"]) if isinstance(data["transaction_date"], date) else data["transaction_date"]
+            data["reference_no"] = await FinanceService._generate_transaction_no(db, date_str)
         
         # 提取关联销售单列表（合并收款或多笔付款支持多选）
         related_sale_ids = data.pop("related_sale_ids", None)
@@ -667,8 +796,8 @@ class FinanceService:
         db.add(record)
         await db.flush()  # 获取 record.id
         
-        # 如果关联了销售单，处理收款记录（FIFO：先填日期久的单）
-        if related_sale_ids:
+        # 如果关联了销售单且分类不是客户预付款，处理收款记录（FIFO：先填日期久的单）
+        if related_sale_ids and data.get("category") != TransactionCategory.CUSTOMER_DEPOSIT:
             from app.models import SalesReceipt
             from app.services.sales_service import SalesService
             

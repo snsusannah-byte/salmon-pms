@@ -47,7 +47,7 @@ class InvoiceService:
     async def list_invoices(
         db: AsyncSession,
         customs_status: Optional[InvoiceStatus] = None,
-        exchange_status: Optional[ExchangeStatus] = None,
+        exchange_status: Optional[str] = None,
         processing_plant_id: Optional[int] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -66,7 +66,12 @@ class InvoiceService:
         if customs_status:
             filters.append(ImportInvoice.customs_status == customs_status)
         if exchange_status:
-            filters.append(ImportInvoice.exchange_status == exchange_status)
+            # 支持逗号分隔的多选状态
+            status_list = [s.strip() for s in exchange_status.split(",") if s.strip()]
+            if len(status_list) == 1:
+                filters.append(ImportInvoice.exchange_status == status_list[0])
+            elif len(status_list) > 1:
+                filters.append(ImportInvoice.exchange_status.in_(status_list))
         if processing_plant_id:
             filters.append(ImportInvoice.processing_plant_id == processing_plant_id)
         if start_date:

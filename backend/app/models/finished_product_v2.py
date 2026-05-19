@@ -13,6 +13,7 @@ from sqlalchemy import (
     Date,
     ForeignKey,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
@@ -111,6 +112,80 @@ class DailySlaughterRecord(Base, TimestampMixin):
     
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)  # 锁定后不可修改
     notes: Mapped[Optional[str]] = mapped_column(Text)
+    
+    # ===== 原料来源关联（新增） =====
+    source_sale_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("whole_fish_sales.id"), nullable=True
+    )  # 关联整鱼销售单（加工厂）
+    source_batch_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("batches.id"), nullable=True
+    )  # 关联进口批次
+    source_invoice_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("import_invoices.id"), nullable=True
+    )  # 关联进口发票
+    
+    # 原料详情（JSONB）
+    source_detail: Mapped[Optional[dict]] = mapped_column(JSON)  # { invoice_no, batch_no, sale_no, customer_name, total_boxes, total_pieces, avg_weight_kg, unit_cost_per_kg }
+    
+    # 成本计算方式（固定加权平均）
+    cost_calculation_method: Mapped[str] = mapped_column(
+        String(20), default="weighted_average"
+    )  # weighted_average(加权平均)
+    
+    # 副产品自动生成标志
+    auto_byproduct: Mapped[bool] = mapped_column(Boolean, default=True)  # 是否自动按 fish_count 生成副产品数量
+    
+    # 关联成品产出
+    finished_products: Mapped[List["SlaughterFinishedProduct"]] = relationship(
+        "SlaughterFinishedProduct", back_populates="slaughter_record",
+        lazy="selectin", cascade="all, delete-orphan"
+    )
+
+
+# ==================== 新增：宰杀成品产出记录 ====================
+
+class SlaughterFinishedProduct(Base, TimestampMixin):
+    """宰杀/分切后的成品产出记录
+    
+    记录每天分切产出了哪些成品，以及成品对应的原料来源
+    """
+    __tablename__ = "slaughter_finished_products"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    
+    # 关联宰杀记录
+    slaughter_record_id: Mapped[int] = mapped_column(
+        ForeignKey("daily_slaughter_records.id"), nullable=False
+    )
+    
+    # 成品信息
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    product_name: Mapped[Optional[str]] = mapped_column(String(100))  # 成品名称（冗余）
+    
+    # 产出数量
+    produced_weight_kg: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3))  # 产出重量(kg)
+    produced_quantity: Mapped[Optional[int]] = mapped_column(Integer)  # 产出数量（盘/盒/份）
+    unit: Mapped[str] = mapped_column(String(20), default="kg")  # kg / plate / box / portion
+    
+    # 成本
+    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))  # 单位成本
+    total_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 总成本
+    
+    # 入库状态
+    is_stocked: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否已入库
+    stock_inbound_id: Mapped[Optional[int]] = mapped_column(Integer)  # 关联入库单ID
+    
+    # 销售状态
+    is_sold: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否已销售
+    sold_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))  # 已售重量
+    sold_quantity: Mapped[int] = mapped_column(Integer, default=0)  # 已售数量
+    
+    # 关联
+    slaughter_record: Mapped["DailySlaughterRecord"] = relationship(
+        "DailySlaughterRecord", back_populates="finished_products"
+    )
+    product: Mapped["Product"] = relationship("Product", lazy="raise")
 
 
 # ==================== 新增：成品仓库采购入库 ====================
@@ -267,3 +342,39 @@ class FinishedProductCommission(Base, TimestampMixin):
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
     salesperson: Mapped["Salesperson"] = relationship("Salesperson", lazy="raise")
+
+
+# ==================== 新增：原料追溯链 ====================
+
+class MaterialTraceability(Base, TimestampMixin):
+    """原料追溯链
+    
+    记录：进口鱼 → 销售单 → 宰杀记录 → 成品 → 终端销售
+    用于追踪"这批进口鱼最终卖给了谁"
+    """
+    __tablename__ = "material_traceability"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    
+    # 原料端（进口）
+    source_type: Mapped[str] = mapped_column(String(20), default="import")  # import(进口), domestic(国内采购)
+    source_invoice_id: Mapped[Optional[int]] = mapped_column(ForeignKey("import_invoices.id"))
+    source_batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+    source_product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))  # 原料产品ID（整鱼）
+    
+    # 中间环节（内部流转）
+    internal_sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("whole_fish_sales.id"))  # 内部销售单（亘昌贸易/绍兴优逸）
+    slaughter_record_id: Mapped[Optional[int]] = mapped_column(ForeignKey("daily_slaughter_records.id"))
+    
+    # 成品端
+    finished_product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("slaughter_finished_products.id"))
+    finished_product_sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales.id"))  # 成品销售单
+    
+    # 追溯状态
+    trace_status: Mapped[str] = mapped_column(String(20), default="in_progress")  # in_progress(进行中), completed(已完成)
+    
+    # 重量流转
+    source_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    finished_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
+    sold_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))

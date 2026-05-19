@@ -955,48 +955,64 @@ export default function ProductsPage() {
           setFilterLowStock(false);
         }}
       >
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="whole_fish">进口规格</TabsTrigger>
-          <TabsTrigger value="finished_product">成品定义</TabsTrigger>
           <TabsTrigger value="byproduct">副产品</TabsTrigger>
-          <TabsTrigger value="stats">跨品牌统计</TabsTrigger>
+          <TabsTrigger value="stats">库存预警</TabsTrigger>
         </TabsList>
 
-        {["whole_fish", "finished_product", "byproduct"].map(
-          (cat) => (
-            <TabsContent key={cat} value={cat} className="space-y-4">
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1 max-w-sm">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="搜索编码或名称..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-9"
-                  />
-                </div>
+        {/* 成品定义引导卡片 */}
+        <TabsContent value="whole_fish" className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Layers className="h-5 w-5 text-blue-600" />
+              <div>
+                <p className="text-sm font-medium text-blue-900">需要管理成品模板和变体？</p>
+                <p className="text-xs text-blue-700">前往成品定义页面管理部位配置、BOM、包装和品牌变体</p>
               </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-blue-300 text-blue-700 hover:bg-blue-100"
+              onClick={() => window.location.href = "/finished-products"}
+            >
+              前往成品定义 →
+            </Button>
+          </div>
 
-              {/* 低库存预警横幅 */}
-              {cat === "finished_product" && lowStockCount > 0 && (
-                <button
-                  onClick={() => setFilterLowStock((v) => !v)}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-4 py-3 rounded-lg border text-sm transition-colors",
-                    filterLowStock
-                      ? "bg-red-100 border-red-300 text-red-800"
-                      : "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
-                  )}
-                >
-                  <AlertTriangle className="h-4 w-4" />
-                  <span className="font-medium">
-                    {lowStockCount}个产品库存低于安全线
-                  </span>
-                  <span className="ml-auto text-xs underline">
-                    {filterLowStock ? "显示全部" : "仅看低库存"}
-                  </span>
-                </button>
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索编码或名称..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          </div>
+
+          {/* 低库存预警横幅 */}
+          {lowStockCount > 0 && (
+            <button
+              onClick={() => setFilterLowStock((v) => !v)}
+              className={cn(
+                "w-full flex items-center gap-2 px-4 py-3 rounded-lg border text-sm transition-colors",
+                filterLowStock
+                  ? "bg-red-100 border-red-300 text-red-800"
+                  : "bg-red-50 border-red-200 text-red-700 hover:bg-red-100"
               )}
+            >
+              <AlertTriangle className="h-4 w-4" />
+              <span className="font-medium">
+                {lowStockCount}个产品库存低于安全线
+              </span>
+              <span className="ml-auto text-xs underline">
+                {filterLowStock ? "显示全部" : "仅看低库存"}
+              </span>
+            </button>
+          )}
 
               {/* 批量操作栏 */}
               {selectedIds.size > 0 && (
@@ -1058,10 +1074,74 @@ export default function ProductsPage() {
                 </Table>
               </div>
             </TabsContent>
-          )
-        )}
 
-        {/* 跨品牌统计Tab */}
+        {/* 副产品Tab */}
+        <TabsContent value="byproduct" className="space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索编码或名称..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          </div>
+
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 px-4 py-2 bg-muted rounded-lg border">
+              <span className="text-sm text-muted-foreground">
+                已选中 {selectedIds.size} 个产品
+              </span>
+              <div className="ml-auto flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleBatchEnable}
+                  disabled={batchToggleMutation.isPending}
+                >
+                  批量启用
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleBatchDisable}
+                  disabled={batchToggleMutation.isPending}
+                >
+                  批量停用
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="border rounded-lg">
+            <Table>
+              <TableHeader>
+                <TableRow>{renderTableColumns()}</TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8">
+                      加载中...
+                    </TableCell>
+                  </TableRow>
+                ) : filteredItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      暂无数据
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredItems.map((product) => renderProductRow(product))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        {/* 库存预警Tab */}
         <TabsContent value="stats" className="space-y-4">
           <div className="flex items-center gap-2">
             <div className="relative flex-1 max-w-sm">

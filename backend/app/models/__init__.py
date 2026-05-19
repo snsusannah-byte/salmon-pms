@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -112,6 +113,7 @@ class TransactionCategory(str, PyEnum):
     TAX_PAYMENT = "tax_payment"                             # 税费支付
     CLEARANCE_PAYMENT = "clearance_payment"                 # 清关费支付
     INTERNATIONAL_FREIGHT = "international_freight"         # 国际运费支付
+    SALES_REFUND = "sales_refund"                           # 销售退货退款
 
     # === 旧分类（兼容已有数据，已废弃）===
     SALES_INCOME = "sales_income"                           # [废弃] 销售收入
@@ -142,6 +144,40 @@ class MovementType(str, PyEnum):
     TRANSFER = "transfer"                      # 转移
 
 
+# ==================== 仓库模块V2 枚举 ====================
+
+class WarehouseType(str, PyEnum):
+    """仓库类型"""
+    WHOLE_PACKAGE = "whole_package"   # 整包仓
+    SUB_PACKAGE = "sub_package"       # 分包仓
+    ACCESSORY = "accessory"           # 辅料仓
+    BYPRODUCT = "byproduct"           # 副产品仓
+    FINISHED = "finished"             # 成品仓
+
+
+class WarehouseBusinessScope(str, PyEnum):
+    """仓库业务范围"""
+    IMPORT = "import"       # 进口单证
+    DOMESTIC = "domestic"   # 国内业务
+    ALL = "all"             # 通用
+
+
+class StockStatus(str, PyEnum):
+    """单据状态"""
+    PENDING = "pending"     # 待确认
+    COMPLETED = "completed" # 已完成
+    CANCELLED = "cancelled" # 已取消
+
+
+class StockMovementType(str, PyEnum):
+    """库存变动类型"""
+    INBOUND = "inbound"           # 入库
+    OUTBOUND = "outbound"         # 出库
+    TRANSFER_IN = "transfer_in"   # 调拨入
+    TRANSFER_OUT = "transfer_out" # 调拨出
+    ADJUSTMENT = "adjustment"     # 盘点调整
+
+
 # ==================== 基础层 ====================
 
 class CustomerCategory(str, PyEnum):
@@ -170,7 +206,7 @@ class Company(Base, TimestampMixin):
     chinese_name: Mapped[Optional[str]] = mapped_column(String(200))
     company_full_name: Mapped[Optional[str]] = mapped_column(String(200))
     brands: Mapped[Optional[str]] = mapped_column(String(500))
-    type: Mapped[CompanyType] = mapped_column(Enum(CompanyType), nullable=False)
+    type: Mapped[CompanyType] = mapped_column(Enum(CompanyType, values_callable=lambda obj: [e.value for e in obj]), nullable=False)
     code: Mapped[Optional[str]] = mapped_column(String(50))
     cooperation_date: Mapped[Optional[Date]] = mapped_column(Date)
     contact_person: Mapped[Optional[str]] = mapped_column(String(100))
@@ -192,6 +228,9 @@ class Company(Base, TimestampMixin):
     salesperson_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))  # 业务员
     customer_category: Mapped[Optional[CustomerCategory]] = mapped_column(Enum(CustomerCategory))  # 客户分类
     supplier_category: Mapped[Optional[str]] = mapped_column(String(50))  # 供应商分类: raw_material/material_supply/customs_broker/service_provider
+    # 客户类型细分（用于区分内部加工厂和普通客户）
+    customer_type: Mapped[Optional[str]] = mapped_column(String(20))  # normal(普通客户), internal_processor(内部加工厂), oem(代工方)
+    is_internal: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否内部客户（加工厂/代工方）
     # 客户预付余额（仅 customer 类型有效）
     prepaid_balance: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -549,6 +588,8 @@ class ExchangeRecord(Base, TimestampMixin):
     bank_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bank_accounts.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="completed")
     notes: Mapped[Optional[str]] = mapped_column(Text)
+    related_invoice_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    exchange_no: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
 
 
 class ImportTax(Base, TimestampMixin):
@@ -612,12 +653,19 @@ class WholeFishSale(Base, TimestampMixin):
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     status: Mapped[SalesStatus] = mapped_column(Enum(SalesStatus), default=SalesStatus.PENDING)
     salesperson_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
+    is_internal_sale: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否内部销售（加工厂流转）
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
     receipts: Mapped[List["SalesReceipt"]] = relationship("SalesReceipt", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
     aftersales: Mapped[List["AftersalesRecord"]] = relationship("AftersalesRecord", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
     items: Mapped[List["WholeFishSaleItem"]] = relationship("WholeFishSaleItem", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
+    return_orders: Mapped[List["ReturnOrder"]] = relationship(
+        "ReturnOrder",
+        foreign_keys="ReturnOrder.whole_fish_sale_id",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
 
 
 class WholeFishSaleItem(Base, TimestampMixin):
@@ -676,6 +724,12 @@ class FinishedProductSale(Base, TimestampMixin):
         "FinishedProductSaleItem",
         foreign_keys="FinishedProductSaleItem.sale_id",
         lazy="raise",
+        cascade="all, delete-orphan",
+    )
+    return_orders: Mapped[List["ReturnOrder"]] = relationship(
+        "ReturnOrder",
+        foreign_keys="ReturnOrder.finished_product_sale_id",
+        lazy="selectin",
         cascade="all, delete-orphan",
     )
 
@@ -772,6 +826,253 @@ class TransactionRecord(Base, TimestampMixin):
     confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     confirmed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
     notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+# ==================== 采购入库模块 ====================
+
+class PurchaseOrderStatus(str, PyEnum):
+    """采购单状态"""
+    PENDING = "pending"           # 待入库
+    PARTIAL = "partial"         # 部分入库
+    COMPLETED = "completed"     # 已完成
+    CANCELLED = "cancelled"     # 已取消
+
+
+class PurchaseOrder(Base, TimestampMixin):
+    """采购单"""
+    __tablename__ = "purchase_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_no: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    order_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    
+    supplier_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    main_product_type: Mapped[str] = mapped_column(String(50), nullable=False)  # import_whole_fish / domestic_whole_fish / packaging / shrimp_whole
+    main_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    
+    has_accessories: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    total_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    
+    status: Mapped[PurchaseOrderStatus] = mapped_column(Enum(PurchaseOrderStatus), default=PurchaseOrderStatus.PENDING)
+    
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class PurchaseOrderItem(Base, TimestampMixin):
+    """采购单项"""
+    __tablename__ = "purchase_order_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+    
+    item_type: Mapped[str] = mapped_column(String(20), default="main")  # main / accessory / material
+    
+    qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    unit: Mapped[str] = mapped_column(String(20), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    
+    received_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
+    warehouse_id: Mapped[Optional[int]] = mapped_column(ForeignKey("warehouses.id"))
+    
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+# ==================== 仓库模块V2 ====================
+
+class Warehouse(Base, TimestampMixin):
+    """仓库定义"""
+    __tablename__ = "warehouses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)   # 仓库编码
+    name: Mapped[str] = mapped_column(String(50), nullable=False)               # 仓库名称
+    type: Mapped[WarehouseType] = mapped_column(Enum(WarehouseType), nullable=False)  # 仓库类型
+    business_scope: Mapped[WarehouseBusinessScope] = mapped_column(
+        Enum(WarehouseBusinessScope), default=WarehouseBusinessScope.ALL, nullable=False
+    )  # 业务范围
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    stocks: Mapped[List["Stock"]] = relationship("Stock", back_populates="warehouse")
+    movements: Mapped[List["StockMovement"]] = relationship("StockMovement", back_populates="warehouse")
+
+
+class Stock(Base, TimestampMixin):
+    """库存记录（按仓库+产品+批次）"""
+    __tablename__ = "stocks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"), nullable=True)
+
+    current_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False, default=Decimal("0"))
+    reserved_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
+    available_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False, default=Decimal("0"))
+
+    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
+    total_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
+    unit: Mapped[str] = mapped_column(String(20), nullable=False, default="kg")
+
+    warning_threshold: Mapped[int] = mapped_column(Integer, default=0)
+    is_below_warning: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    last_in_date: Mapped[Optional[Date]] = mapped_column(Date)
+    last_out_date: Mapped[Optional[Date]] = mapped_column(Date)
+    location: Mapped[Optional[str]] = mapped_column(String(100))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    warehouse: Mapped[Warehouse] = relationship("Warehouse", back_populates="stocks")
+    product: Mapped["Product"] = relationship("Product")
+    batch: Mapped[Optional["Batch"]] = relationship("Batch")
+
+    __table_args__ = (
+        UniqueConstraint("warehouse_id", "product_id", "batch_id", name="uq_stock_warehouse_product_batch"),
+    )
+
+
+class StockInbound(Base, TimestampMixin):
+    """入库记录（统一入口）"""
+    __tablename__ = "stock_inbounds"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    inbound_no: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_id: Mapped[Optional[int]] = mapped_column(Integer)
+    source_no: Mapped[Optional[str]] = mapped_column(String(100))
+
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+
+    qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    unit: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+
+    supplier_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"))
+
+    detail: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    status: Mapped[StockStatus] = mapped_column(Enum(StockStatus), default=StockStatus.PENDING)
+    inbound_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    confirmed_at: Mapped[Optional[DateTime]] = mapped_column(DateTime)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class StockOutbound(Base, TimestampMixin):
+    """出库记录"""
+    __tablename__ = "stock_outbounds"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    outbound_no: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+
+    dest_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    dest_id: Mapped[Optional[int]] = mapped_column(Integer)
+    dest_no: Mapped[Optional[str]] = mapped_column(String(100))
+
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+
+    qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    unit: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
+    total_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
+
+    outbound_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    status: Mapped[StockStatus] = mapped_column(Enum(StockStatus), default=StockStatus.PENDING)
+    confirmed_at: Mapped[Optional[DateTime]] = mapped_column(DateTime)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class StockTransfer(Base, TimestampMixin):
+    """调拨记录（整包仓 → 分包仓）"""
+    __tablename__ = "stock_transfers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    transfer_no: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+
+    from_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    to_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+
+    from_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    from_unit: Mapped[str] = mapped_column(String(20), nullable=False)
+    to_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    to_unit: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    conversion_ratio: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+
+    detail: Mapped[Optional[dict]] = mapped_column(JSON)
+
+    status: Mapped[StockStatus] = mapped_column(Enum(StockStatus), default=StockStatus.PENDING)
+    transfer_date: Mapped[Date] = mapped_column(Date, nullable=False)
+    confirmed_at: Mapped[Optional[DateTime]] = mapped_column(DateTime)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    from_warehouse: Mapped[Warehouse] = relationship("Warehouse", foreign_keys=[from_warehouse_id])
+    to_warehouse: Mapped[Warehouse] = relationship("Warehouse", foreign_keys=[to_warehouse_id])
+
+
+class StockMovement(Base, TimestampMixin):
+    """库存变动记录（每一笔异动都记录）"""
+    __tablename__ = "stock_movements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+
+    movement_type: Mapped[StockMovementType] = mapped_column(Enum(StockMovementType), nullable=False)
+    movement_date: Mapped[Date] = mapped_column(Date, nullable=False)
+
+    qty_change: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    qty_before: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    qty_after: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    unit: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
+    total_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
+
+    ref_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    ref_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    ref_no: Mapped[Optional[str]] = mapped_column(String(100))
+
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    warehouse: Mapped[Warehouse] = relationship("Warehouse", back_populates="movements")
+
+
+class ProductUnitConversion(Base, TimestampMixin):
+    """产品单位转换规则"""
+    __tablename__ = "product_unit_conversions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+
+    from_unit: Mapped[str] = mapped_column(String(20), nullable=False)
+    to_unit: Mapped[str] = mapped_column(String(20), nullable=False)
+    ratio: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+
+    is_default: Mapped[bool] = mapped_column(Boolean, default=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    product: Mapped["Product"] = relationship("Product")
+
+    __table_args__ = (
+        UniqueConstraint("product_id", "from_unit", "to_unit", name="uq_conversion_product_from_to"),
+    )
 
 
 # ==================== 库存层 ====================
@@ -872,6 +1173,8 @@ from app.models.finished_product_v2 import (  # noqa: E402
     FinishedProductSaleItem as FinishedProductSaleItem,
     LossRecord as LossRecord,
     FinishedProductCommission as FinishedProductCommission,
+    SlaughterFinishedProduct as SlaughterFinishedProduct,
+    MaterialTraceability as MaterialTraceability,
 )
 
 from app.models.finished_products import (  # noqa: E402
@@ -886,5 +1189,122 @@ from app.models.finished_products import (  # noqa: E402
 
 from app.models.material_supplier import MaterialSupplier as MaterialSupplier  # noqa: E402
 
+from app.models.returns import (
+    ReturnReason as ReturnReason,
+    ReturnStatus as ReturnStatus,
+    RefundMethod as RefundMethod,
+    ReturnAttachmentType as ReturnAttachmentType,
+    ReturnOrder as ReturnOrder,
+    ReturnItem as ReturnItem,
+    ReturnAttachment as ReturnAttachment,
+)
+
 # 这样现有代码可以通过 from app.models import ProductTemplate 等方式使用新模型
 
+
+
+# ==================== 国内采购与成品销售模块 (迁移自 salmon-finance-v4) ====================
+
+class DomesticSupplier(Base, TimestampMixin):
+    """国内供应商"""
+    __tablename__ = "domestic_suppliers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    contact_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="active")
+
+
+class PurchaseOrderV2(Base, TimestampMixin):
+    """采购入库单 (v2 - 迁移自 salmon-finance-v4)"""
+    __tablename__ = "purchase_orders_v2"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    purchase_no: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
+    purchase_date: Mapped[Optional[Date]] = mapped_column(Date, nullable=True)
+    supplier_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    supplier_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    total_weight: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    total_boxes: Mapped[int] = mapped_column(Integer, default=0)
+    order_type: Mapped[Optional[str]] = mapped_column(String(20), default="raw_material")  # raw_material=整鱼, accessories=辅料
+    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="completed")
+
+    products: Mapped[List["PurchaseOrderProductV2"]] = relationship(
+        "PurchaseOrderProductV2",
+        back_populates="order",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+
+class PurchaseOrderProductV2(Base, TimestampMixin):
+    """采购入库产品明细 (v2)"""
+    __tablename__ = "purchase_order_products_v2"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    purchase_order_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders_v2.id"), nullable=False)
+    product_spec: Mapped[str] = mapped_column(String(100), nullable=False)
+    box_count: Mapped[int] = mapped_column(Integer, default=0)
+    weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+
+    order: Mapped["PurchaseOrderV2"] = relationship("PurchaseOrderV2", back_populates="products")
+
+
+class FinishedProductSaleV2(Base, TimestampMixin):
+    """成品销售记录 (v2 - 迁移自 salmon-finance-v4)"""
+    __tablename__ = "finished_product_sales_v2"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sale_no: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
+    sale_type: Mapped[Optional[str]] = mapped_column(String(20), default="whole_fish")
+    source_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    source_no: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    customer: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    salesperson: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    product_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    quantity: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    weight: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    unit_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), nullable=True)
+    total_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    sale_date: Mapped[Optional[Date]] = mapped_column(Date, nullable=True)
+    discount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    scan_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    rounding: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    after_sales_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    commission: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    actual_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    net_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    paid: Mapped[int] = mapped_column(Integer, default=0)
+    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    products: Mapped[List["FinishedSaleProductV2"]] = relationship(
+        "FinishedSaleProductV2",
+        back_populates="sale",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+
+class FinishedSaleProductV2(Base, TimestampMixin):
+    """成品销售产品明细 (v2)"""
+    __tablename__ = "finished_sale_products_v2"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("finished_product_sales_v2.id"), nullable=False)
+    product_spec: Mapped[str] = mapped_column(String(100), nullable=False)
+    box_count: Mapped[int] = mapped_column(Integer, default=0)
+    weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    commission_rate: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("0"))
+    commission_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    after_sales_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+
+    sale: Mapped["FinishedProductSaleV2"] = relationship("FinishedProductSaleV2", back_populates="products")

@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -20,7 +21,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -37,6 +37,9 @@ import {
   Printer,
   Languages,
   FileText,
+  X,
+  Search,
+  Download,
 } from "lucide-react";
 
 // ==================== 工具函数 ====================
@@ -1413,6 +1416,104 @@ function ReceivableStatementsTab() {
                                 </TableBody>
                               </Table>
                             </div>
+                            {/* 采购明细 */}
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium">采购明细</h4>
+                              <div className="border rounded-md">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/50">
+                                      <TableHead className="text-xs">日期</TableHead>
+                                      <TableHead className="text-xs">发票号</TableHead>
+                                      <TableHead className="text-xs text-right">金额(USD)</TableHead>
+                                      <TableHead className="text-xs text-right">汇率</TableHead>
+                                      <TableHead className="text-xs text-right">金额(CNY)</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {(item.purchase_details || []).length === 0 ? (
+                                      <TableRow><TableCell colSpan={5} className="text-xs text-center py-2">无采购明细</TableCell></TableRow>
+                                    ) : (
+                                      (item.purchase_details || []).map((d: any, idx: number) => (
+                                        <TableRow key={idx}>
+                                          <TableCell className="text-xs">{fmtDate(d.date)}</TableCell>
+                                          <TableCell className="text-xs">{d.invoice_no || "-"}</TableCell>
+                                          <TableCell className="text-xs text-right">${Number(d.amount_usd || 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
+                                          <TableCell className="text-xs text-right">{d.exchange_rate || "-"}</TableCell>
+                                          <TableCell className="text-xs text-right">{fmt$(d.amount_cny)}</TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
+                            {/* 费用明细 */}
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium">费用明细</h4>
+                              <div className="border rounded-md">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/50">
+                                      <TableHead className="text-xs">日期</TableHead>
+                                      <TableHead className="text-xs">发票号</TableHead>
+                                      <TableHead className="text-xs">费用类型</TableHead>
+                                      <TableHead className="text-xs">说明</TableHead>
+                                      <TableHead className="text-xs text-right">金额</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {(item.expense_details || []).length === 0 ? (
+                                      <TableRow><TableCell colSpan={5} className="text-xs text-center py-2">无费用明细</TableCell></TableRow>
+                                    ) : (
+                                      (item.expense_details || []).map((d: any, idx: number) => (
+                                        <TableRow key={idx}>
+                                          <TableCell className="text-xs">{fmtDate(d.date)}</TableCell>
+                                          <TableCell className="text-xs">{d.invoice_no || "-"}</TableCell>
+                                          <TableCell className="text-xs">
+                                            {d.expense_type === "import_duty" ? "进口关税" : d.expense_type === "import_vat" ? "进口增值税" : d.expense_type === "clearance_fee" ? "清关费" : d.expense_type || "-"}
+                                          </TableCell>
+                                          <TableCell className="text-xs">{d.description || "-"}</TableCell>
+                                          <TableCell className="text-xs text-right">{fmt$(d.amount)}</TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
+                            {/* 付款明细 */}
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium">付款明细</h4>
+                              <div className="border rounded-md">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/50">
+                                      <TableHead className="text-xs">日期</TableHead>
+                                      <TableHead className="text-xs">付款类型</TableHead>
+                                      <TableHead className="text-xs text-right">付款金额</TableHead>
+                                      <TableHead className="text-xs">备注</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {(item.payment_details || []).length === 0 ? (
+                                      <TableRow><TableCell colSpan={4} className="text-xs text-center py-2">无付款明细</TableCell></TableRow>
+                                    ) : (
+                                      (item.payment_details || []).map((d: any, idx: number) => (
+                                        <TableRow key={idx}>
+                                          <TableCell className="text-xs">{fmtDate(d.date)}</TableCell>
+                                          <TableCell className="text-xs">
+                                            {d.payment_type === "exchange" ? "购汇付款" : d.payment_type === "clearance_payment" ? "清关费付款" : d.payment_type || "-"}
+                                          </TableCell>
+                                          <TableCell className="text-xs text-right">{fmt$(d.amount)}</TableCell>
+                                          <TableCell className="text-xs">{d.description || d.reference_no || "-"}</TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
                           </div>
                         </DialogContent>
                       </Dialog>
@@ -1576,6 +1677,104 @@ function PayableStatementsTab() {
                                   ))}
                                 </TableBody>
                               </Table>
+                            </div>
+                            {/* 采购明细 */}
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium">采购明细</h4>
+                              <div className="border rounded-md">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/50">
+                                      <TableHead className="text-xs">日期</TableHead>
+                                      <TableHead className="text-xs">发票号</TableHead>
+                                      <TableHead className="text-xs text-right">金额(USD)</TableHead>
+                                      <TableHead className="text-xs text-right">汇率</TableHead>
+                                      <TableHead className="text-xs text-right">金额(CNY)</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {(item.purchase_details || []).length === 0 ? (
+                                      <TableRow><TableCell colSpan={5} className="text-xs text-center py-2">无采购明细</TableCell></TableRow>
+                                    ) : (
+                                      (item.purchase_details || []).map((d: any, idx: number) => (
+                                        <TableRow key={idx}>
+                                          <TableCell className="text-xs">{fmtDate(d.date)}</TableCell>
+                                          <TableCell className="text-xs">{d.invoice_no || "-"}</TableCell>
+                                          <TableCell className="text-xs text-right">${Number(d.amount_usd || 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
+                                          <TableCell className="text-xs text-right">{d.exchange_rate || "-"}</TableCell>
+                                          <TableCell className="text-xs text-right">{fmt$(d.amount_cny)}</TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
+                            {/* 费用明细 */}
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium">费用明细</h4>
+                              <div className="border rounded-md">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/50">
+                                      <TableHead className="text-xs">日期</TableHead>
+                                      <TableHead className="text-xs">发票号</TableHead>
+                                      <TableHead className="text-xs">费用类型</TableHead>
+                                      <TableHead className="text-xs">说明</TableHead>
+                                      <TableHead className="text-xs text-right">金额</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {(item.expense_details || []).length === 0 ? (
+                                      <TableRow><TableCell colSpan={5} className="text-xs text-center py-2">无费用明细</TableCell></TableRow>
+                                    ) : (
+                                      (item.expense_details || []).map((d: any, idx: number) => (
+                                        <TableRow key={idx}>
+                                          <TableCell className="text-xs">{fmtDate(d.date)}</TableCell>
+                                          <TableCell className="text-xs">{d.invoice_no || "-"}</TableCell>
+                                          <TableCell className="text-xs">
+                                            {d.expense_type === "import_duty" ? "进口关税" : d.expense_type === "import_vat" ? "进口增值税" : d.expense_type === "clearance_fee" ? "清关费" : d.expense_type || "-"}
+                                          </TableCell>
+                                          <TableCell className="text-xs">{d.description || "-"}</TableCell>
+                                          <TableCell className="text-xs text-right">{fmt$(d.amount)}</TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
+                            {/* 付款明细 */}
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium">付款明细</h4>
+                              <div className="border rounded-md">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/50">
+                                      <TableHead className="text-xs">日期</TableHead>
+                                      <TableHead className="text-xs">付款类型</TableHead>
+                                      <TableHead className="text-xs text-right">付款金额</TableHead>
+                                      <TableHead className="text-xs">备注</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {(item.payment_details || []).length === 0 ? (
+                                      <TableRow><TableCell colSpan={4} className="text-xs text-center py-2">无付款明细</TableCell></TableRow>
+                                    ) : (
+                                      (item.payment_details || []).map((d: any, idx: number) => (
+                                        <TableRow key={idx}>
+                                          <TableCell className="text-xs">{fmtDate(d.date)}</TableCell>
+                                          <TableCell className="text-xs">
+                                            {d.payment_type === "exchange" ? "购汇付款" : d.payment_type === "clearance_payment" ? "清关费付款" : d.payment_type || "-"}
+                                          </TableCell>
+                                          <TableCell className="text-xs text-right">{fmt$(d.amount)}</TableCell>
+                                          <TableCell className="text-xs">{d.description || d.reference_no || "-"}</TableCell>
+                                        </TableRow>
+                                      ))
+                                    )}
+                                  </TableBody>
+                                </Table>
+                              </div>
                             </div>
                           </div>
                         </DialogContent>
@@ -1832,6 +2031,7 @@ function FinancialStatementsTab() {
 // ==================== 主页面 ====================
 
 export function ReportsPage() {
+  const { pathname } = useLocation();
   return (
     <div className="space-y-4">
       <div>
@@ -1841,46 +2041,19 @@ export function ReportsPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="batches" className="w-full">
-        <TabsList className="grid w-full grid-cols-5 h-10">
-          <TabsTrigger value="batches" className="text-xs gap-1">
-            <Package className="h-3.5 w-3.5" />
-            批次财报
-          </TabsTrigger>
-          <TabsTrigger value="invoices" className="text-xs gap-1">
-            <FileText className="h-3.5 w-3.5" />
-            单票财报
-          </TabsTrigger>
-          <TabsTrigger value="receivable" className="text-xs gap-1">
-            <ArrowDownLeft className="h-3.5 w-3.5" />
-            应收对账
-          </TabsTrigger>
-          <TabsTrigger value="payable" className="text-xs gap-1">
-            <ArrowUpRight className="h-3.5 w-3.5" />
-            应付对账
-          </TabsTrigger>
-          <TabsTrigger value="financial" className="text-xs gap-1">
-            <TrendingUp className="h-3.5 w-3.5" />
-            三大报表
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="batches" className="mt-4">
-          <BatchReportsTab />
-        </TabsContent>
-        <TabsContent value="invoices" className="mt-4">
+      <div className="mt-4">
+        {pathname === "/reports/invoices" ? (
           <InvoiceReportsTab />
-        </TabsContent>
-        <TabsContent value="receivable" className="mt-4">
+        ) : pathname === "/reports/receivable" ? (
           <ReceivableStatementsTab />
-        </TabsContent>
-        <TabsContent value="payable" className="mt-4">
+        ) : pathname === "/reports/payable" ? (
           <PayableStatementsTab />
-        </TabsContent>
-        <TabsContent value="financial" className="mt-4">
+        ) : pathname === "/reports/financial" ? (
           <FinancialStatementsTab />
-        </TabsContent>
-      </Tabs>
+        ) : (
+          <BatchReportsTab />
+        )}
+      </div>
     </div>
   );
 }

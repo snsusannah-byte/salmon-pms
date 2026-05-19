@@ -8,10 +8,10 @@ import ProductsPage from "@/pages/ProductsPage";
 import { InvoicesPage } from "@/pages/InvoicesPage";
 import { BatchesPage } from "@/pages/BatchesPage";
 import { SalesPage as WholeFishSalesPage } from "@/pages/SalesPage";
-import { FinishedProductSalesPage } from "@/pages/FinishedProductSalesPage";
 import { ProductionManagementPage } from "@/pages/ProductionManagementPage";
 import { MaterialManagementPage } from "@/pages/MaterialManagementPage";
 import { WarehousePage } from "@/pages/WarehousePage";
+import { WarehouseV2Page } from "@/pages/WarehouseV2Page";
 import { FinishedProductReportsPage } from "@/pages/FinishedProductReportsPage";
 import { FinancePage } from "@/pages/FinancePage";
 import { ReportsPage } from "@/pages/ReportsPage";
@@ -25,7 +25,13 @@ import NotificationsPage from "@/pages/NotificationsPage";
 import { BankAccountsPage } from "@/pages/BankAccountsPage";
 import { BrandsPage } from "@/pages/BrandsPage";
 import { FinishedProductsPage } from "@/pages/FinishedProductsPage";
+import { TraceabilityPage } from "@/pages/TraceabilityPage";
+import ReturnsPage from "@/pages/ReturnsPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
+
+// V4 迁移页面 (salmon-finance-v4)
+import { PurchaseOrderEntry } from "@/pages/PurchaseOrderEntry";
+import { FinishedProductSales } from "@/pages/FinishedProductSales";
 
 const router = createBrowserRouter([
   {
@@ -42,25 +48,36 @@ const router = createBrowserRouter([
       { path: "customers", element: <CustomersPage /> },
       { path: "products", element: <ProductsPage /> },
       { path: "finished-products", element: <FinishedProductsPage /> },
+      { path: "traceability", element: <TraceabilityPage /> },
+      { path: "returns", element: <ReturnsPage /> },
       { path: "brands", element: <BrandsPage /> },
       { path: "invoices", element: <InvoicesPage /> },
       { path: "batches", element: <BatchesPage /> },
       { path: "whole-fish-sales", element: <WholeFishSalesPage /> },
-      { path: "finished-product-sales", element: <FinishedProductSalesPage /> },
+      { path: "finished-product-sales", element: <FinishedProductSales /> },
       { path: "production", element: <ProductionManagementPage /> },
       { path: "materials", element: <MaterialManagementPage /> },
       { path: "warehouse", element: <WarehousePage /> },
+      { path: "warehouse-v2", element: <WarehouseV2Page /> },
+      { path: "purchase-orders", element: <PurchaseOrderEntry /> },
       { path: "finished-product-reports", element: <FinishedProductReportsPage /> },
       { path: "finance", element: <FinancePage /> },
       { path: "reports", element: <ReportsPage /> },
+      { path: "reports/batches", element: <ReportsPage /> },
+      { path: "reports/invoices", element: <ReportsPage /> },
+      { path: "reports/receivable", element: <ReportsPage /> },
+      { path: "reports/payable", element: <ReportsPage /> },
+      { path: "reports/financial", element: <ReportsPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "suppliers", element: <SuppliersPage /> },
       { path: "salespersons", element: <SalespersonPage /> },
       { path: "commissions", element: <CommissionPage /> },
-      { path: "bank-accounts", element: <BankAccountsPage /> },
       { path: "daily-slaughter", element: <DailySlaughterPage /> },
       { path: "loss-records", element: <LossRecordsPage /> },
       { path: "notifications", element: <NotificationsPage /> },
+      { path: "bank-accounts", element: <BankAccountsPage /> },
+      // V4 迁移路由
+      { path: "domestic-suppliers", element: <Navigate to="/suppliers" replace /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },
@@ -69,3 +86,5 @@ const router = createBrowserRouter([
 export function AppRouter() {
   return <RouterProvider router={router} />;
 }
+
+export { router };

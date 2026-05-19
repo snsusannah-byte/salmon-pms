@@ -1,12 +1,16 @@
 from typing import List, Optional, Tuple
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import WholeFishSale, WholeFishSaleItem, SalesReceipt, AftersalesRecord, SalesStatus, Company, Batch
+from app.models import (
+    WholeFishSale, WholeFishSaleItem, SalesReceipt, AftersalesRecord,
+    SalesStatus, Company, Batch, ReturnOrder, ImportInvoice, BatchInvoice
+)
+from app.models import Company as CompanyModel
 
 
 class SalesService:
@@ -20,6 +24,7 @@ class SalesService:
                 selectinload(WholeFishSale.items),
                 selectinload(WholeFishSale.receipts),
                 selectinload(WholeFishSale.aftersales),
+                selectinload(WholeFishSale.return_orders).selectinload(ReturnOrder.items),
             )
             .where(WholeFishSale.id == sale_id)
         )
@@ -31,7 +36,7 @@ class SalesService:
         batch_id: Optional[int] = None,
         customer_id: Optional[int] = None,
         ids: Optional[List[int]] = None,
-        status: Optional[SalesStatus] = None,
+        status: Optional[str] = None,
         search: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
@@ -42,6 +47,7 @@ class SalesService:
             selectinload(WholeFishSale.items),
             selectinload(WholeFishSale.receipts),
             selectinload(WholeFishSale.aftersales),
+            selectinload(WholeFishSale.return_orders).selectinload(ReturnOrder.items),
         )
         count_query = select(func.count(WholeFishSale.id))
 
@@ -53,7 +59,16 @@ class SalesService:
         if ids:
             filters.append(WholeFishSale.id.in_(ids))
         if status:
-            filters.append(WholeFishSale.status == status)
+            # 支持逗号分隔的多选状态
+            status_list = [s.strip() for s in status.split(",") if s.strip()]
+            has_aftersales = "has_aftersales" in status_list
+            status_list = [s for s in status_list if s != "has_aftersales"]
+            if len(status_list) == 1:
+                filters.append(WholeFishSale.status == status_list[0])
+            elif len(status_list) > 1:
+                filters.append(WholeFishSale.status.in_(status_list))
+            if has_aftersales:
+                filters.append(WholeFishSale.after_sales_adjustment > 0)
 
         if search:
             search_filter = or_(
@@ -119,6 +134,17 @@ class SalesService:
                     data["unit_price"] = total_amount / total_weight
         
         sale = WholeFishSale(**data)
+        
+        # 如果客户是内部加工厂，自动标记为内部销售
+        if sale.customer_id:
+            from app.models import Company
+            customer_result = await db.execute(
+                select(Company).where(Company.id == sale.customer_id)
+            )
+            customer = customer_result.scalar_one_or_none()
+            if customer and customer.customer_type == "internal_processor":
+                sale.is_internal_sale = True
+        
         db.add(sale)
         await db.flush()  # 获取 sale.id
         
@@ -355,44 +381,24 @@ class SalesService:
         db.add(receipt)
         await db.flush()  # 获取 receipt.id
 
-        # 同步创建交易流水
-        # 获取客户名称
-        customer_name = None
-        if sale.customer_id:
-            result = await db.execute(
-                select(Company.name).where(Company.id == sale.customer_id)
-            )
-            customer_name = result.scalar()
-        
-        bank_account_id = data.get("bank_account_id")
-        
-        # 构建描述：只保留类型 + 用户输入的收款描述
-        user_notes = data.get("notes")
-        if is_balance_payment:
-            desc = "余额抵扣"
-        else:
+        # 非余额抵扣：同步创建交易流水（银行实际收支）
+        if not is_balance_payment:
+            # 获取客户名称
+            customer_name = None
+            if sale.customer_id:
+                result = await db.execute(
+                    select(Company.name).where(Company.id == sale.customer_id)
+                )
+                customer_name = result.scalar()
+            
+            bank_account_id = data.get("bank_account_id")
+            
+            # 构建描述：只保留类型 + 用户输入的收款描述
+            user_notes = data.get("notes")
             desc = "销售收款"
-        if user_notes:
-            desc = f"{desc} - {user_notes}"
-        
-        if is_balance_payment:
-            # 余额抵扣：创建内部划转流水，不关联银行账户
-            transaction = TransactionRecord(
-                transaction_date=data.get("receipt_date"),
-                type=TransactionType.TRANSFER,
-                category=TransactionCategory.BALANCE_DEDUCTION,
-                amount=data.get("amount"),
-                currency="CNY",
-                to_account_id=None,
-                from_account_id=None,
-                counterparty_id=sale.customer_id,
-                counterparty_name=customer_name,
-                reference_no=data.get("reference_no") or sale.sale_no or f"#{sale.id}",
-                description=desc,
-                notes=user_notes,
-                is_confirmed=True,
-            )
-        else:
+            if user_notes:
+                desc = f"{desc} - {user_notes}"
+            
             transaction = TransactionRecord(
                 transaction_date=data.get("receipt_date"),
                 type=TransactionType.INCOME,
@@ -407,13 +413,13 @@ class SalesService:
                 notes=user_notes,
                 is_confirmed=True,
             )
-        # 设置关联销售单（JSON 数组）
-        transaction.related_sale_ids = [sale.id]
-        db.add(transaction)
-        await db.flush()
-        
-        # 关联交易流水到收款记录
-        receipt.transaction_id = transaction.id
+            # 设置关联销售单（JSON 数组）
+            transaction.related_sale_ids = [sale.id]
+            db.add(transaction)
+            await db.flush()
+            
+            # 关联交易流水到收款记录
+            receipt.transaction_id = transaction.id
         
         # 余额抵扣：扣减客户预付余额
         if is_balance_payment:
@@ -421,7 +427,6 @@ class SalesService:
         
         await db.commit()
         await db.refresh(receipt)
-        await db.refresh(transaction)
 
         # 更新已付金额和状态
         await SalesService._update_paid_amount(db, sale)
@@ -516,6 +521,11 @@ class SalesService:
         db.add(record)
         await db.commit()
         await db.refresh(record)
+
+        # 同步销售单售后金额和状态
+        await SalesService._sync_sale_after_sales(db, sale_id)
+        await db.commit()
+
         return record
 
     @staticmethod
@@ -525,6 +535,12 @@ class SalesService:
                 setattr(record, field, value)
         await db.commit()
         await db.refresh(record)
+
+        # 如果金额或状态变化，同步销售单
+        if "amount" in data or "status" in data:
+            await SalesService._sync_sale_after_sales(db, record.sale_id)
+            await db.commit()
+
         return record
 
     @staticmethod
@@ -534,8 +550,111 @@ class SalesService:
         if not record:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="售后记录不存在")
+
+        sale_id = record.sale_id
         await db.delete(record)
+        await db.flush()  # 确保删除生效
+
+        # 重新同步销售单的售后金额和状态
+        await SalesService._sync_sale_after_sales(db, sale_id)
         await db.commit()
+
+    @staticmethod
+    async def _sync_sale_after_sales(db: AsyncSession, sale_id: int) -> None:
+        """同步销售单的 after_sales_adjustment, net_amount, status（使用直接 SQL 避免 ORM 缓存）"""
+        # 直接查询基础字段
+        result = await db.execute(
+            select(
+                WholeFishSale.gross_amount,
+                WholeFishSale.scan_fee,
+                WholeFishSale.rounding_adjustment,
+                WholeFishSale.discount,
+                WholeFishSale.commission,
+                WholeFishSale.paid_amount,
+            ).where(WholeFishSale.id == sale_id)
+        )
+        row = result.one_or_none()
+        if not row:
+            return
+
+        gross, scan_fee, rounding, discount, commission, paid = row
+
+        # 查询实际售后金额
+        aftersales_result = await db.execute(
+            select(func.coalesce(func.sum(AftersalesRecord.amount), Decimal("0")))
+            .where(AftersalesRecord.sale_id == sale_id)
+        )
+        aftersales_amount = aftersales_result.scalar() or Decimal("0")
+
+        # 查询退货单金额
+        return_amount = Decimal("0")
+        try:
+            from app.models import ReturnOrder, ReturnStatus
+            return_result = await db.execute(
+                select(func.coalesce(func.sum(ReturnOrder.total_amount), Decimal("0")))
+                .where(
+                    ReturnOrder.whole_fish_sale_id == sale_id,
+                    ReturnOrder.status.notin_([ReturnStatus.CANCELLED, ReturnStatus.REJECTED])
+                )
+            )
+            return_amount = return_result.scalar() or Decimal("0")
+        except Exception:
+            pass
+
+        new_aftersales = aftersales_amount + return_amount
+
+        # 重新计算净金额
+        new_net = max(
+            Decimal("0"),
+            (gross or Decimal("0"))
+            - (scan_fee or Decimal("0"))
+            - (rounding or Decimal("0"))
+            - new_aftersales
+            - (discount or Decimal("0"))
+            - (commission or Decimal("0"))
+        )
+
+        # 确定正确状态
+        if paid >= new_net and new_net > 0:
+            new_status = SalesStatus.FULLY_PAID
+        elif paid > 0:
+            new_status = SalesStatus.PARTIAL_PAID
+        else:
+            new_status = SalesStatus.PENDING
+
+        # 检查进行中的退货
+        try:
+            from app.models import ReturnOrder, ReturnStatus
+            in_progress = await db.execute(
+                select(func.count(ReturnOrder.id))
+                .where(
+                    ReturnOrder.whole_fish_sale_id == sale_id,
+                    ReturnOrder.status.in_([
+                        ReturnStatus.DRAFT,
+                        ReturnStatus.PENDING_APPROVAL,
+                        ReturnStatus.APPROVED,
+                        ReturnStatus.REFUNDING,
+                    ])
+                )
+            )
+            if in_progress.scalar() > 0:
+                new_status = SalesStatus.AFTER_SALES
+        except Exception:
+            pass
+
+        # 使用直接 SQL UPDATE 避免 ORM 缓存问题
+        await db.execute(
+            update(WholeFishSale)
+            .where(WholeFishSale.id == sale_id)
+            .values(
+                after_sales_adjustment=float(new_aftersales),
+                net_amount=float(new_net),
+                status=new_status,
+                updated_at=datetime.now(),
+            )
+        )
+
+        print(f"[SYNC] sale_id={sale_id} aftersales={new_aftersales} net={new_net} paid={paid} status={new_status}")
 
     # ============== 汇总 ==============
 

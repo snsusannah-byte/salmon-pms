@@ -133,7 +133,10 @@ class WholeFishSaleBase(BaseModel):
     paid_amount: Decimal = Field(0, ge=0, description="已付金额")
     status: Optional[SalesStatus] = Field(SalesStatus.PENDING, description="收款状态")
     salesperson_id: Optional[int] = Field(None, description="销售员ID")
+    is_internal_sale: Optional[bool] = Field(False, description="是否内部销售（加工厂流转）")
     notes: Optional[str] = Field(None, description="备注")
+
+from .returns import ReturnOrderSummary
 
 
 class WholeFishSaleCreate(WholeFishSaleBase):
@@ -167,6 +170,7 @@ class WholeFishSaleResponse(WholeFishSaleBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     is_locked: bool
+    batch_is_locked: Optional[bool] = False  # 批次是否已锁定
     created_at: datetime
     updated_at: datetime
     customer_name: Optional[str] = None
@@ -176,6 +180,9 @@ class WholeFishSaleResponse(WholeFishSaleBase):
     items: List[WholeFishSaleItemResponse] = []
     receipts: List[SalesReceiptResponse] = []
     aftersales: List[AftersalesRecordResponse] = []
+    return_orders: List[ReturnOrderSummary] = []  # 退货单列表
+    _aftersales_count: int = 0  # 合并后的售后记录数（用于前端徽章）
+    processing_plant_eu_no: Optional[str] = None  # 加工厂EU注册号
 
 
 class WholeFishSaleListResponse(BaseModel):

@@ -172,16 +172,40 @@ async def lock_batch(
     batch_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """锁定批次（级联锁定关联发票）"""
+    """锁定批次（级联锁定关联发票）
+    
+    **前置检查：** 批次下所有销售单必须已结清（状态为 fully_paid 或已锁定），否则不能锁定
+    """
+    from app.models import WholeFishSale, SalesStatus
+    from sqlalchemy import select as sa_select, func
+    
     batch = await BatchService.get_by_id(db, batch_id)
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="批次不存在")
+    
+    # 检查是否有未结清的销售单
+    pending_sales_result = await db.execute(
+        sa_select(WholeFishSale.id, WholeFishSale.sale_no, WholeFishSale.status, WholeFishSale.net_amount, WholeFishSale.paid_amount)
+        .where(WholeFishSale.batch_id == batch_id)
+        .where(WholeFishSale.status.in_([SalesStatus.PENDING, SalesStatus.PARTIAL_PAID, SalesStatus.AFTER_SALES]))
+    )
+    pending_sales = pending_sales_result.all()
+    
+    if pending_sales:
+        # 构建错误信息
+        sale_list = ", ".join([f"{s.sale_no}({s.status.value})" for s in pending_sales[:5]])
+        if len(pending_sales) > 5:
+            sale_list += f" 等共{len(pending_sales)}条"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"该批次有未结清的销售单，请先完成收款后再锁定: {sale_list}"
+        )
+    
     batch.status = BatchStatus.LOCKED
     batch.is_locked = True
     
     # 级联锁定关联的发票
     from app.models import ImportInvoice, BatchInvoice
-    from sqlalchemy import select as sa_select
     batch_invoice_result = await db.execute(
         sa_select(ImportInvoice)
         .join(BatchInvoice, BatchInvoice.invoice_id == ImportInvoice.id)

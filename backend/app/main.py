@@ -1,7 +1,9 @@
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.database import engine
@@ -37,6 +39,15 @@ app.add_middleware(
 # Register API routers
 from app.api.v1 import api_router  # noqa: E402
 app.include_router(api_router, prefix="/api/v1")
+
+# V4 迁移路由单独挂载
+from app.api.v1.endpoints import finance_v4_migration  # noqa: E402
+app.include_router(finance_v4_migration.router, prefix="/api/v4")
+
+# Static files for uploads
+uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
+if os.path.exists(uploads_dir):
+    app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 # Health check
 @app.get("/api/health", tags=["health"])

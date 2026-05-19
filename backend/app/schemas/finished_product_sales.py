@@ -126,6 +126,11 @@ class FinishedProductSaleBase(BaseModel):
     notes: Optional[str] = None
     slaughter_date: Optional[date] = None
     total_weight_kg: Optional[Decimal] = None  # V3: 新增总重量(kg)
+    # V4: 支持整鱼销售模式
+    sale_type: Optional[str] = "finished_product"  # "finished_product" | "whole_fish"
+    spec: Optional[str] = None  # 整鱼规格
+    box_count: Optional[int] = None  # 整鱼箱数
+    purchase_order_id: Optional[int] = None  # 关联采购入库单
 
 
 class FinishedProductSaleCreate(FinishedProductSaleBase):
@@ -150,6 +155,11 @@ class FinishedProductSaleUpdate(BaseModel):
     notes: Optional[str] = None
     slaughter_date: Optional[date] = None
     total_weight_kg: Optional[Decimal] = None  # V3: 新增
+    # V4: 支持整鱼销售模式
+    sale_type: Optional[str] = None
+    spec: Optional[str] = None
+    box_count: Optional[int] = None
+    purchase_order_id: Optional[int] = None
 
 
 class FinishedProductSaleResponse(FinishedProductSaleBase):
@@ -165,6 +175,9 @@ class FinishedProductSaleResponse(FinishedProductSaleBase):
     salesperson_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # 退货模块兼容字段
+    return_orders: List[dict] = []
+    _aftersales_count: int = 0
 
 
 class FinishedProductSaleListResponse(BaseModel):

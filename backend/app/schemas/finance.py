@@ -7,8 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class ExchangeRecordBase(BaseModel):
     """购汇记录基础"""
+    exchange_no: Optional[str] = Field(None, description="购汇单号")
     invoice_id: Optional[int] = Field(None, description="发票ID")
     batch_id: Optional[int] = Field(None, description="批次ID")
+    related_invoice_ids: Optional[List[int]] = Field(None, description="合并购汇关联的多张发票ID")
     exchange_date: date = Field(..., description="购汇日期")
     amount_usd: Decimal = Field(..., gt=0, description="购汇金额(USD)")
     exchange_rate: Decimal = Field(..., gt=0, description="汇率")
@@ -40,6 +42,7 @@ class ExchangeRecordResponse(ExchangeRecordBase):
     """购汇记录响应"""
     model_config = ConfigDict(from_attributes=True)
     id: int
+    related_invoice_nos: Optional[List[str]] = None
     created_at: datetime
     updated_at: datetime
 

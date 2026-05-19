@@ -15,6 +15,7 @@ from app.models import (
     Company,
     Product,
     ProductPackaging,
+    ReturnOrder,
 )
 
 
@@ -29,6 +30,7 @@ class FinishedProductSaleService:
                 selectinload(FinishedProductSale.receipts),
                 selectinload(FinishedProductSale.aftersales_records),
                 selectinload(FinishedProductSale.items),
+                selectinload(FinishedProductSale.return_orders).selectinload(ReturnOrder.items),
             )
             .where(FinishedProductSale.id == sale_id)
         )
@@ -47,6 +49,7 @@ class FinishedProductSaleService:
             selectinload(FinishedProductSale.receipts),
             selectinload(FinishedProductSale.aftersales_records),
             selectinload(FinishedProductSale.items),
+            selectinload(FinishedProductSale.return_orders).selectinload(ReturnOrder.items),
         )
         count_query = select(func.count(FinishedProductSale.id))
 

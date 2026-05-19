@@ -43,8 +43,10 @@ import {
   Upload,
   FileSpreadsheet,
   Download,
+  ArrowLeftRight,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ReturnOrderForm } from "@/components/returns/ReturnOrderForm";
 
 // ==================== 状态映射 ====================
 
@@ -121,6 +123,8 @@ interface Sale {
   receipts: Receipt[];
   aftersales: Aftersales[];
   items?: SaleItem[]; // V3新增
+  return_orders?: any[];
+  _aftersales_count?: number;
 }
 
 interface SaleItem {
@@ -166,6 +170,11 @@ export function FinishedProductSalesPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailSale, setDetailSale] = useState<Sale | null>(null);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
+
+  // 退货表单状态
+  const [returnFormOpen, setReturnFormOpen] = useState(false);
+  const [returnPrefillSale, setReturnPrefillSale] = useState<{ type: "whole_fish" | "finished_product"; sale: any } | undefined>();
+
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery<SaleListResponse>({
@@ -224,6 +233,12 @@ export function FinishedProductSalesPage() {
         }}
       />
 
+      <ReturnOrderForm
+        open={returnFormOpen}
+        onClose={() => { setReturnFormOpen(false); setReturnPrefillSale(undefined); }}
+        prefillSale={returnPrefillSale}
+      />
+
       {/* 详情弹窗 */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-[800px] max-h-[90vh] overflow-y-auto">
@@ -240,7 +255,7 @@ export function FinishedProductSalesPage() {
           </DialogHeader>
 
           {detailSale && (
-            <SaleDetailDialog sale={detailSale} onClose={() => setDetailOpen(false)} />
+            <SaleDetailDialog sale={detailSale} onClose={() => setDetailOpen(false)} onCreateReturn={() => { setReturnPrefillSale({ type: "finished_product", sale: detailSale }); setReturnFormOpen(true); }} />
           )}
         </DialogContent>
       </Dialog>
@@ -335,9 +350,9 @@ export function FinishedProductSalesPage() {
                       ${unpaid.toLocaleString()}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={statusInfo.color}>
+                      <span className={cn("text-sm font-medium", statusInfo.color.replace('bg-', '').split(' ')[0])}>
                         {statusInfo.label}
-                      </Badge>
+                      </span>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
@@ -346,6 +361,9 @@ export function FinishedProductSalesPage() {
                         </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(sale)} title="编辑" disabled={sale.is_locked}>
                           <Pencil className={cn("h-4 w-4", sale.is_locked && "text-muted-foreground")} />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-8 text-orange-600 px-2" onClick={() => { setReturnPrefillSale({ type: "finished_product", sale }); setReturnFormOpen(true); }} title="售后/退货">
+                          <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />售后
                         </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleDelete(sale)} title="删除" disabled={sale.is_locked}>
                           <Trash2 className={cn("h-4 w-4", sale.is_locked && "text-muted-foreground")} />
@@ -379,7 +397,7 @@ export function FinishedProductSalesPage() {
 
 // ==================== 详情弹窗组件 ====================
 
-function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }) {
+function SaleDetailDialog({ sale, onClose, onCreateReturn }: { sale: Sale; onClose: () => void; onCreateReturn?: () => void }) {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("info");
 
@@ -576,7 +594,7 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
           </TabsTrigger>
           <TabsTrigger value="aftersales">
             <AlertTriangle className="h-3 w-3 mr-1" />
-            售后记录 ({sale.aftersales?.length ?? 0})
+            售后/退货 ({sale._aftersales_count ?? (sale.aftersales?.length ?? 0)})
           </TabsTrigger>
         </TabsList>
 
@@ -591,9 +609,9 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
             <div><span className="text-muted-foreground">单价:</span> <span className="ml-1">${Number(sale.unit_price).toLocaleString()}</span></div>
             <div><span className="text-muted-foreground">销售员:</span> <span className="ml-1">{sale.salesperson_name ?? "-"}</span></div>
             <div><span className="text-muted-foreground">状态:</span> <span className="ml-1">
-              <Badge variant="secondary" className={statusMap[sale.status]?.color}>
+              <span className={cn("text-sm font-medium", statusMap[sale.status]?.color?.replace('bg-', '').split(' ')[0] || "")}>
                 {statusMap[sale.status]?.label ?? sale.status}
-              </Badge>
+              </span>
             </span></div>
           </div>
           {sale.notes && (
@@ -726,6 +744,23 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
 
         {/* 售后记录 Tab */}
         <TabsContent value="aftersales" className="space-y-4 pt-4">
+          {/* 发起退货入口 */}
+          <div className="flex justify-end">
+            <Button size="sm" variant="outline" className="text-orange-600" onClick={() => { onClose(); onCreateReturn?.(); }}>
+              <ArrowLeftRight className="h-4 w-4 mr-1" />发起退货
+            </Button>
+          </div>
+
+          {/* 售后调整合计 */}
+          {Number(sale.after_sales_adjustment) > 0 && (
+            <div className="bg-orange-50 rounded-md p-3 text-sm">
+              <div className="flex justify-between text-orange-600">
+                <span>售后调整合计</span>
+                <span className="font-medium">-${Number(sale.after_sales_adjustment).toLocaleString()}</span>
+              </div>
+            </div>
+          )}
+
           {/* 添加/编辑售后表单 */}
           <div className="bg-muted/50 rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
@@ -793,57 +828,62 @@ function SaleDetailDialog({ sale, onClose }: { sale: Sale; onClose: () => void }
           </div>
 
           {/* 售后列表 */}
-          {sale.aftersales && sale.aftersales.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">日期</TableHead>
-                  <TableHead className="text-xs">类型</TableHead>
-                  <TableHead className="text-xs text-right">金额</TableHead>
-                  <TableHead className="text-xs">原因</TableHead>
-                  <TableHead className="text-xs">状态</TableHead>
-                  <TableHead className="text-xs text-right">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sale.aftersales.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="text-sm">{a.record_date}</TableCell>
-                    <TableCell className="text-sm">{aftersalesTypeMap[a.type] ?? a.type}</TableCell>
-                    <TableCell className="text-sm text-right">${Number(a.amount).toLocaleString()}</TableCell>
-                    <TableCell className="text-sm">{a.reason ?? "-"}</TableCell>
-                    <TableCell className="text-sm">{a.status}</TableCell>
-                    <TableCell className="text-sm text-right">
-                      <div className="flex gap-1 justify-end">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => startEditAftersales(a)}
-                          title="编辑"
-                        >
-                          <Pencil className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-red-500"
-                          onClick={() => {
-                            if (confirm("确定删除此售后记录？")) {
-                              deleteAftersalesMutation.mutate(a.id);
-                            }
-                          }}
-                          disabled={deleteAftersalesMutation.isPending}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
+          {sale.aftersales && sale.aftersales.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-muted-foreground mb-2">历史售后记录</h4>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">日期</TableHead>
+                    <TableHead className="text-xs">类型</TableHead>
+                    <TableHead className="text-xs text-right">金额</TableHead>
+                    <TableHead className="text-xs">原因</TableHead>
+                    <TableHead className="text-xs">状态</TableHead>
+                    <TableHead className="text-xs text-right">操作</TableHead>
                   </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sale.aftersales.map((a: any) => (
+                    <TableRow key={a.id}>
+                      <TableCell className="text-sm">{a.record_date}</TableCell>
+                      <TableCell className="text-sm">{aftersalesTypeMap[a.type] ?? a.type}</TableCell>
+                      <TableCell className="text-sm text-right">${Number(a.amount).toLocaleString()}</TableCell>
+                      <TableCell className="text-sm">{a.reason ?? "-"}</TableCell>
+                      <TableCell className="text-sm">{a.status}</TableCell>
+                      <TableCell className="text-sm text-right">
+                        <div className="flex gap-1 justify-end">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditAftersales(a)} title="编辑"><Pencil className="h-3 w-3" /></Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => { if (confirm("确定删除此售后记录？")) { deleteAftersalesMutation.mutate(a.id); } }} disabled={deleteAftersalesMutation.isPending}><Trash2 className="h-3 w-3" /></Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* 新退货单 */}
+          {sale.return_orders && sale.return_orders.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-muted-foreground mb-2">退货记录</h4>
+              <div className="space-y-2">
+                {sale.return_orders.map((ro: any) => (
+                  <div key={ro.id} className="border rounded-md p-3 text-sm">
+                    <div className="flex justify-between items-start">
+                      <div><span className="font-medium">{ro.return_no}</span><span className="text-muted-foreground ml-2">{ro.return_date}</span></div>
+                      <span className={cn("text-sm font-medium", ro.status === "completed" ? "text-green-600" : ro.status === "approved" ? "text-blue-600" : "text-yellow-600")}>{ro.status}</span>
+                    </div>
+                    {ro.processing_plant_name && <div className="text-muted-foreground mt-1">加工厂: {ro.processing_plant_name}</div>}
+                    <div className="mt-1">重量: {Number(ro.total_weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2 })} kg · 金额: <span className="text-red-500 font-medium">${Number(ro.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span></div>
+                    {ro.problem_description && <div className="text-muted-foreground mt-1">{ro.problem_description}</div>}
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
-          ) : (
+              </div>
+            </div>
+          )}
+
+          {(!sale.aftersales || sale.aftersales.length === 0) && (!sale.return_orders || sale.return_orders.length === 0) && (
             <div className="text-sm text-muted-foreground text-center py-8">暂无售后记录</div>
           )}
         </TabsContent>

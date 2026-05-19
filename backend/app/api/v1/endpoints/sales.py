@@ -1,12 +1,16 @@
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
 from datetime import date, datetime
+import io
+import csv
 
 from app.core.database import get_db
-from app.models import SalesStatus, WholeFishSale, AftersalesRecord, Company, Batch, BatchInvoice
+from app.models import SalesStatus, WholeFishSale, AftersalesRecord, Company, Batch, BatchInvoice, ImportInvoice
 from app.schemas.sales import (
     WholeFishSaleCreate,
     WholeFishSaleUpdate,
@@ -27,22 +31,33 @@ router = APIRouter()
 
 # ==================== 批次锁定检查 ====================
 
-async def _check_batch_locked(db: AsyncSession, batch_id: Optional[int] = None, invoice_id: Optional[int] = None):
-    """检查批次是否已锁定，如果锁定则抛出403"""
-    if batch_id:
-        batch = await db.get(Batch, batch_id)
-        if batch and batch.is_locked:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该批次已锁定，禁止修改")
-    elif invoice_id:
-        # 通过发票找到批次
+async def _check_batch_locked(db: AsyncSession, batch_id: Optional[int] = None, invoice_id: Optional[int] = None, sale_id: Optional[int] = None):
+    """检查批次是否已锁定，如果锁定则抛出403
+    
+    支持通过 batch_id / invoice_id / sale_id 三种方式检查
+    """
+    from app.models import WholeFishSale
+    
+    # 通过 sale_id 找到 batch_id
+    if sale_id and not batch_id:
+        sale = await db.get(WholeFishSale, sale_id)
+        if sale:
+            batch_id = sale.batch_id
+    
+    # 通过 invoice_id 找到 batch_id
+    if invoice_id and not batch_id:
         bi = await db.execute(
             select(BatchInvoice).where(BatchInvoice.invoice_id == invoice_id)
         )
         row = bi.scalar_one_or_none()
         if row:
-            batch = await db.get(Batch, row.batch_id)
-            if batch and batch.is_locked:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该批次已锁定，禁止修改")
+            batch_id = row.batch_id
+    
+    # 检查批次是否锁定
+    if batch_id:
+        batch = await db.get(Batch, batch_id)
+        if batch and batch.is_locked:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该批次已锁定，禁止修改")
 
 
 async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFishSaleResponse:
@@ -51,20 +66,43 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
     batch_name = None
     batch_code = None
     salesperson_name = None
+    batch_is_locked = False
 
     if sale.customer_id:
         r = await db.execute(select(Company.name).where(Company.id == sale.customer_id))
         customer_name = r.scalar()
     if sale.batch_id:
-        r = await db.execute(select(Batch.batch_name, Batch.batch_code).where(Batch.id == sale.batch_id))
+        r = await db.execute(select(Batch.batch_name, Batch.batch_code, Batch.is_locked).where(Batch.id == sale.batch_id))
         batch_row = r.one_or_none()
         if batch_row:
             batch_name = batch_row[0]
             batch_code = batch_row[1]
+            batch_is_locked = batch_row[2] or False
     if sale.salesperson_id:
         from app.models import Salesperson
         r = await db.execute(select(Salesperson.name).where(Salesperson.id == sale.salesperson_id))
         salesperson_name = r.scalar()
+
+    # 查询加工厂EU注册号（通过批次→发票→加工厂）
+    processing_plant_eu_no = None
+    if sale.batch_id:
+        try:
+            bi_r = await db.execute(
+                select(BatchInvoice).where(BatchInvoice.batch_id == sale.batch_id).limit(1)
+            )
+            bi = bi_r.scalar_one_or_none()
+            if bi:
+                inv_r = await db.execute(
+                    select(ImportInvoice.processing_plant_id).where(ImportInvoice.id == bi.invoice_id)
+                )
+                plant_id = inv_r.scalar_one_or_none()
+                if plant_id:
+                    code_r = await db.execute(
+                        select(Company.code).where(Company.id == plant_id)
+                    )
+                    processing_plant_eu_no = code_r.scalar()
+        except Exception:
+            pass
 
     receipts = [
         SalesReceiptResponse.model_validate(r) for r in (sale.receipts or [])
@@ -75,6 +113,21 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
     items = [
         WholeFishSaleItemResponse.model_validate(i) for i in (sale.items or [])
     ]
+
+    # 合并退货单数据到售后统计
+    from app.schemas.returns import ReturnOrderSummary
+    from app.models import ReturnStatus
+    return_orders = []
+    total_return_amount = Decimal("0")
+    for ro in (sale.return_orders or []):
+        return_orders.append(ro)  # Pass raw ORM object, let Pydantic validate
+        if ro.status not in [ReturnStatus.CANCELLED, ReturnStatus.REJECTED]:
+            total_return_amount += ro.total_amount or Decimal("0")
+
+    # 合并售后金额 = 旧 aftersales + 新退货单
+    old_aftersales_amount = sum(a.amount for a in (sale.aftersales or []))
+    combined_aftersales = old_aftersales_amount + total_return_amount
+    combined_aftersales_count = len(sale.aftersales or []) + len(sale.return_orders or [])
 
     return WholeFishSaleResponse(
         id=sale.id,
@@ -89,7 +142,7 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
         gross_amount=sale.gross_amount,
         scan_fee=sale.scan_fee,
         rounding_adjustment=sale.rounding_adjustment,
-        after_sales_adjustment=sale.after_sales_adjustment,
+        after_sales_adjustment=combined_aftersales,
         discount=sale.discount,
         commission=sale.commission,
         net_amount=sale.net_amount,
@@ -98,6 +151,7 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
         salesperson_id=sale.salesperson_id,
         notes=sale.notes,
         is_locked=sale.is_locked,
+        batch_is_locked=batch_is_locked,
         created_at=sale.created_at,
         updated_at=sale.updated_at,
         customer_name=customer_name,
@@ -107,6 +161,9 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
         items=items,
         receipts=receipts,
         aftersales=aftersales,
+        return_orders=return_orders,
+        _aftersales_count=combined_aftersales_count,
+        processing_plant_eu_no=processing_plant_eu_no,
     )
 
 
@@ -117,7 +174,7 @@ async def list_whole_fish_sales(
     batch_id: Optional[int] = Query(None, description="批次ID"),
     customer_id: Optional[int] = Query(None, description="客户ID"),
     ids: Optional[str] = Query(None, description="销售单ID列表(逗号分隔)"),
-    status: Optional[SalesStatus] = Query(None, description="收款状态"),
+    status: Optional[str] = Query(None, description="收款状态(支持逗号分隔多选: pending,partial_paid,fully_paid,after_sales)"),
     search: Optional[str] = Query(None, description="搜索客户名称、批次名称或销售单号"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -132,6 +189,83 @@ async def list_whole_fish_sales(
     for sale in items:
         result_items.append(await _build_sale_response(db, sale))
     return WholeFishSaleListResponse(total=total, items=result_items, skip=skip, limit=limit)
+
+
+@router.get("/whole-fish/export")
+async def export_whole_fish_sales(
+    batch_id: Optional[int] = Query(None, description="批次ID"),
+    customer_id: Optional[int] = Query(None, description="客户ID"),
+    status: Optional[str] = Query(None, description="收款状态(支持逗号分隔多选)"),
+    search: Optional[str] = Query(None, description="搜索客户名称、批次名称或销售单号"),
+    db: AsyncSession = Depends(get_db),
+):
+    """导出整鱼销售记录为 CSV"""
+    items, total = await SalesService.list_sales(
+        db=db, batch_id=batch_id, customer_id=customer_id, status=status, search=search, skip=0, limit=5000
+    )
+
+    # 状态映射
+    status_label_map = {
+        "pending": "待收款",
+        "partial_paid": "部分收款",
+        "fully_paid": "全部收款",
+        "after_sales": "售后中",
+    }
+
+    # 构建 CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # 表头
+    headers = [
+        "销售单号", "日期", "客户", "业务员", "批次", "批次编码", "加工厂(EU)",
+        "规格", "箱数", "重量(kg)", "单价", "销售金额", "扫码费", "抹零调整",
+        "售后调整", "折扣", "提成", "净金额", "已付金额", "未付金额", "付款状态", "备注",
+    ]
+    writer.writerow(headers)
+
+    for sale in items:
+        resp = await _build_sale_response(db, sale)
+        unpaid = max(0, float(resp.net_amount or 0) - float(resp.paid_amount or 0))
+        status_label = status_label_map.get(str(resp.status), str(resp.status))
+
+        writer.writerow([
+            resp.sale_no or f"#{resp.id}",
+            resp.sale_date,
+            resp.customer_name or "-",
+            resp.salesperson_name or "-",
+            resp.batch_name or "-",
+            resp.batch_code or "-",
+            resp.processing_plant_eu_no or "-",
+            resp.spec or "-",
+            resp.box_count or 0,
+            float(resp.weight_kg or 0),
+            float(resp.unit_price or 0),
+            float(resp.gross_amount or 0),
+            float(resp.scan_fee or 0),
+            float(resp.rounding_adjustment or 0),
+            float(resp.after_sales_adjustment or 0),
+            float(resp.discount or 0),
+            float(resp.commission or 0),
+            float(resp.net_amount or 0),
+            float(resp.paid_amount or 0),
+            unpaid,
+            status_label,
+            resp.notes or "",
+        ])
+
+    csv_content = output.getvalue()
+    output.close()
+
+    # 生成文件名
+    today = date.today().strftime("%Y%m%d")
+    filename = f"whole_fish_sales_{today}.csv"
+
+    return StreamingResponse(
+        io.BytesIO(csv_content.encode("utf-8-sig")),  # utf-8-sig for Excel compatibility
+        media_type="text/csv; charset=utf-8-sig",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 async def _generate_sale_no(db: AsyncSession, sale_date: str) -> str:
@@ -444,6 +578,23 @@ async def get_sales_summary(
     """销售汇总统计"""
     summary = await SalesService.get_summary(db)
     return SaleSummary(**summary)
+
+
+@router.post("/whole-fish/{sale_id}/recalculate", response_model=WholeFishSaleResponse)
+async def recalculate_sale_status(
+    sale_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """重新计算销售单状态（修复售后删除后不同步的问题）"""
+    sale = await SalesService.get_sale_by_id(db, sale_id)
+    if not sale:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="销售记录不存在")
+    
+    await SalesService._sync_sale_after_sales(db, sale_id)
+    await db.commit()
+    await db.refresh(sale)
+    
+    return await _build_sale_response(db, sale)
 
 
 # ==================== 重新计算收款状态（管理用） ====================

@@ -50,7 +50,7 @@ class CompanyService:
         # 查找同名活跃客户
         result = await db.execute(
             select(Company)
-            .where(Company.type == CompanyType.CUSTOMER)
+            .where(Company.type == CompanyType.CUSTOMER.value)
             .where(Company.is_active)
             .where(Company.name == name)
             .limit(1)
@@ -112,6 +112,7 @@ class CompanyService:
         exclude_type: Optional[List[CompanyType]] = None,
         business_role: Optional[str] = None,
         supplier_category: Optional[str] = None,
+        customer_category: Optional[str] = None,
         search: Optional[str] = None,
         is_active: Optional[bool] = None,
         skip: int = 0,
@@ -127,18 +128,24 @@ class CompanyService:
         count_query = select(func.count(Company.id))
         
         if type:
-            query = query.where(Company.type == type)
-            count_query = count_query.where(Company.type == type)
+            # 使用字符串值比较，避免 PostgreSQL ENUM 大小写问题
+            query = query.where(Company.type == type.value)
+            count_query = count_query.where(Company.type == type.value)
         
         if exclude_type:
             for et in exclude_type:
-                query = query.where(Company.type != et)
-                count_query = count_query.where(Company.type != et)
+                query = query.where(Company.type != et.value)
+                count_query = count_query.where(Company.type != et.value)
         
         # 供应商分类筛选
         if supplier_category:
             query = query.where(Company.supplier_category == supplier_category)
             count_query = count_query.where(Company.supplier_category == supplier_category)
+        
+        # 客户分类筛选
+        if customer_category:
+            query = query.where(Company.customer_category == customer_category)
+            count_query = count_query.where(Company.customer_category == customer_category)
         
         # 业务角色筛选（上游溯源 vs 业务往来）
         if business_role:

@@ -71,6 +71,21 @@ async def _build_sale_response(
         FinishedProductSaleItemResponse.model_validate(i) for i in (sale.items or [])
     ]
 
+    # 合并退货单数据到售后统计
+    from app.schemas.returns import ReturnOrderSummary
+    from app.models import ReturnStatus
+    return_orders = []
+    total_return_amount = Decimal("0")
+    for ro in (sale.return_orders or []):
+        return_orders.append(ReturnOrderSummary.model_validate(ro))
+        if ro.status not in [ReturnStatus.CANCELLED, ReturnStatus.REJECTED]:
+            total_return_amount += ro.total_amount or Decimal("0")
+
+    # 合并售后金额 = 旧 aftersales + 新退货单
+    old_aftersales_amount = sum(a.amount for a in (sale.aftersales_records or []))
+    combined_aftersales = old_aftersales_amount + total_return_amount
+    combined_aftersales_count = len(sale.aftersales_records or []) + len(sale.return_orders or [])
+
     return FinishedProductSaleResponse(
         id=sale.id,
         sale_date=sale.sale_date,
@@ -97,6 +112,12 @@ async def _build_sale_response(
         items=items,
         receipts=receipts,
         aftersales=aftersales,
+        return_orders=return_orders,
+        _aftersales_count=combined_aftersales_count,
+        sale_type=sale.sale_type,
+        spec=sale.spec,
+        box_count=sale.box_count,
+        purchase_order_id=sale.purchase_order_id,
     )
 
 

@@ -26,7 +26,7 @@ router = APIRouter()
 @router.get("/", response_model=InvoiceListResponse)
 async def list_invoices(
     customs_status: Optional[InvoiceStatus] = Query(None, description="报关状态"),
-    exchange_status: Optional[ExchangeStatus] = Query(None, description="购汇状态"),
+    exchange_status: Optional[str] = Query(None, description="购汇状态(支持逗号分隔多选: not_exchanged,partial,completed)"),
     processing_plant_id: Optional[int] = Query(None, description="加工厂ID"),
     start_date: Optional[date] = Query(None, description="开始日期"),
     end_date: Optional[date] = Query(None, description="结束日期"),

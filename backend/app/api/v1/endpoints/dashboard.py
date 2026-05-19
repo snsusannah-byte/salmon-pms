@@ -52,7 +52,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
     # 4. 客户数
     customer_result = await db.execute(
         select(func.count(Company.id)).where(
-            and_(Company.type == CompanyType.CUSTOMER, Company.is_active)
+            and_(Company.type == CompanyType.CUSTOMER.value, Company.is_active)
         )
     )
     total_customers = customer_result.scalar()

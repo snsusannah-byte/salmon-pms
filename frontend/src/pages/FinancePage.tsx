@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BatchImportButton } from "@/components/BatchImportButton";
+import { BatchExchangeDialog } from "@/components/BatchExchangeDialog";
 import {
   Plus,
   Trash2,
@@ -140,6 +142,9 @@ const transactionCategoryMap: Record<string, string> = {
   tax_payment: "税费支付",
   clearance_payment: "清关费支付",
   international_freight: "国际运费支付",
+
+  // 售后退款
+  sales_refund: "售后退款",
 };
 
 interface InvoiceOpt {
@@ -159,8 +164,11 @@ interface BatchOpt {
 
 interface ExchangeRecord {
   id: number;
+  exchange_no?: string;
   invoice_id?: number;
   batch_id?: number;
+  related_invoice_ids?: number[];
+  related_invoice_nos?: string[];
   exchange_date: string;
   amount_usd: string;
   exchange_rate: string;
@@ -179,6 +187,7 @@ interface Transaction {
   from_account_id: number | null;
   to_account_id: number | null;
   counterparty_name: string | null;
+  counterparty_id: number | null;
   reference_no: string | null;
   description: string | null;
   is_locked: boolean;
@@ -209,7 +218,16 @@ interface ImportFeeItem {
    ═══════════════════════════════════════════ */
 export function FinancePage() {
   const [page, setPage] = useState(1);
-  const [activeTab, setActiveTab] = useState("import");
+  const [searchParams] = useSearchParams();
+  const tabFromUrl = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState(tabFromUrl || "import");
+
+  // 同步 URL 参数变化
+  useEffect(() => {
+    if (tabFromUrl && ["import", "exchange", "transactions"].includes(tabFromUrl)) {
+      setActiveTab(tabFromUrl);
+    }
+  }, [tabFromUrl]);
   const PAGE_SIZE = 20;
 
   const queryClient = useQueryClient();
@@ -226,72 +244,83 @@ export function FinancePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">财务管理</h1>
-          <p className="text-sm text-muted-foreground">进口费用 / 购汇登记 / 交易流水</p>
+          <h1 className="text-2xl font-bold">
+            {tabFromUrl === "exchange" ? "购汇登记" : tabFromUrl === "transactions" ? "交易流水" : "进口费用"}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {!tabFromUrl || !["import", "exchange", "transactions"].includes(tabFromUrl)
+              ? "进口费用 / 购汇登记 / 交易流水"
+              : tabFromUrl === "exchange"
+                ? "外汇兑换记录与统计"
+                : tabFromUrl === "transactions"
+                  ? "日常收支、银行转账与资金流水"
+                  : "进口清关、关税、运费等费用登记"}
+          </p>
         </div>
-        <BatchImportButton type="finance" />
       </div>
 
-      {/* 汇总卡片 */}
+      {/* 汇总卡片 - 根据当前Tab只显示相关数据 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">进口费用合计</CardTitle>
-            <Ship className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {fmt(Number(summary?.total_tax || 0) + Number(summary?.total_clearance_cost || 0))}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">购汇总额(USD)</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {fmtUSD(Number(summary?.total_exchange_usd || 0))}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">购汇总(CNY)</CardTitle>
-            <Receipt className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {fmt(Number(summary?.total_exchange_cny || 0))}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">资金净流入</CardTitle>
-            <FileText className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {fmt(Number(summary?.net_flow || 0))}
-            </div>
-          </CardContent>
-        </Card>
+        {/* 进口费用 - 只在进口费用页或总览页显示 */}
+        {(!tabFromUrl || tabFromUrl === "import") && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">进口费用合计</CardTitle>
+              <Ship className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {fmt(Number(summary?.total_tax || 0) + Number(summary?.total_clearance_cost || 0))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* 购汇 - 只在购汇登记页或总览页显示 */}
+        {(!tabFromUrl || tabFromUrl === "exchange") && (
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">购汇总额(USD)</CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {fmtUSD(Number(summary?.total_exchange_usd || 0))}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium">购汇总(CNY)</CardTitle>
+                <Receipt className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {fmt(Number(summary?.total_exchange_cny || 0))}
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
+
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="import" className="flex items-center gap-1">
-            <Ship className="h-4 w-4" /> 进口费用
-          </TabsTrigger>
-          <TabsTrigger value="exchange" className="flex items-center gap-1">
-            <DollarSign className="h-4 w-4" /> 购汇登记
-          </TabsTrigger>
-          <TabsTrigger value="transactions" className="flex items-center gap-1">
-            <List className="h-4 w-4" /> 交易流水
-          </TabsTrigger>
-        </TabsList>
+        {/* Tab 栏只在直接访问 /finance 时显示（无 tab 参数或非法 tab） */}
+        {(!tabFromUrl || !["import", "exchange", "transactions"].includes(tabFromUrl)) && (
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="import" className="flex items-center gap-1">
+              <Ship className="h-4 w-4" /> 进口费用
+            </TabsTrigger>
+            <TabsTrigger value="exchange" className="flex items-center gap-1">
+              <DollarSign className="h-4 w-4" /> 购汇登记
+            </TabsTrigger>
+            <TabsTrigger value="transactions" className="flex items-center gap-1">
+              <List className="h-4 w-4" /> 交易流水
+            </TabsTrigger>
+          </TabsList>
+        )}
 
         <TabsContent value="import" className="pt-4">
           <ImportFeesTab />
@@ -1064,6 +1093,7 @@ function ExchangeTab() {
   const [exchangeRate, setExchangeRate] = useState("");
   const [amountCny, setAmountCny] = useState("");
   const [feeCny, setFeeCny] = useState("");
+  const [multiExchangeOpen, setMultiExchangeOpen] = useState(false);
 
   // Reset on open (only for new record, not edit)
   useEffect(() => {
@@ -1189,6 +1219,37 @@ function ExchangeTab() {
 
   const [editingRecord, setEditingRecord] = useState<ExchangeRecord | null>(null);
 
+  // 搜索和分页状态
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
+
+  // 前端过滤
+  const filteredExchanges = React.useMemo(() => {
+    let result = exchanges;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter((r) => {
+        const no = (r.exchange_no || "").toLowerCase();
+        const date = (r.exchange_date || "").toLowerCase();
+        const invoices = (r.related_invoice_nos || []).join(" ").toLowerCase();
+        const batch = batches.find((b) => b.id === r.batch_id);
+        const batchInfo = (batch?.batch_code || batch?.batch_name || "").toLowerCase();
+        return no.includes(q) || date.includes(q) || invoices.includes(q) || batchInfo.includes(q);
+      });
+    }
+    return result;
+  }, [exchanges, search, batches]);
+
+  // 分页
+  const totalPages = Math.ceil(filteredExchanges.length / PAGE_SIZE) || 1;
+  const pagedExchanges = filteredExchanges.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearch(e.target.value);
+    setPage(1);
+  };
+
   const handleOpenDetail = (record: ExchangeRecord) => {
     setDetailRecord(record);
     setDetailOpen(true);
@@ -1233,11 +1294,21 @@ function ExchangeTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => setFormOpen(true)}>
-          <Plus className="h-4 w-4 mr-1" />
-          新增购汇
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="搜索购汇单号、日期、发票号..."
+            value={search}
+            onChange={handleSearchChange}
+            className="pl-9"
+          />
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setMultiExchangeOpen(true)}>
+          <DollarSign className="h-4 w-4 mr-1" />
+          合并购汇
         </Button>
+        
       </div>
 
       <Dialog open={formOpen} onOpenChange={(v) => { if (!v) { setFormOpen(false); setEditingRecord(null); }}}>
@@ -1471,7 +1542,7 @@ function ExchangeTab() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>批次</TableHead>
+              <TableHead>购汇单号</TableHead>
               <TableHead>关联发票</TableHead>
               <TableHead>日期</TableHead>
               <TableHead>USD</TableHead>
@@ -1489,7 +1560,7 @@ function ExchangeTab() {
                   加载中...
                 </TableCell>
               </TableRow>
-            ) : !exchanges.length ? (
+            ) : !pagedExchanges.length ? (
               <TableRow>
                 <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   暂无数据
@@ -1497,15 +1568,21 @@ function ExchangeTab() {
               </TableRow>
             ) : (
               <>
-              {exchanges.map((r) => (
+              {pagedExchanges.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell>
-                    {batches.find((b) => b.id === r.batch_id)?.batch_code ||
-                      r.batch_id ||
-                      "-"}
+                    <div className="font-mono font-medium">{r.exchange_no || "-"}</div>
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     {(() => {
+                      if (r.related_invoice_nos?.length > 0) {
+                        return (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="text-blue-600 font-medium">合并 {r.related_invoice_nos.length} 张</span>
+                            <span className="text-muted-foreground">{r.related_invoice_nos.join(", ")}</span>
+                          </span>
+                        );
+                      }
                       const b = batches.find((b) => b.id === r.batch_id);
                       if (!b) return "-";
                       return b.invoice_nos?.replace(/&/g, ", ") || "-";
@@ -1551,14 +1628,14 @@ function ExchangeTab() {
                 </TableRow>
               ))}
               {/* 页汇总行 */}
-              {exchanges.length > 0 && (
+              {pagedExchanges.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">
                   <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
-                  <TableCell className="font-bold">{fmtUSD(exchanges.reduce((s, r) => s + Number(r.amount_usd || 0), 0))}</TableCell>
+                  <TableCell className="font-bold">{fmtUSD(pagedExchanges.reduce((s, r) => s + Number(r.amount_usd || 0), 0))}</TableCell>
                   <TableCell />
-                  <TableCell className="font-bold">{fmt(exchanges.reduce((s, r) => s + Number(r.amount_cny || 0), 0))}</TableCell>
-                  <TableCell>{fmt(exchanges.reduce((s, r) => s + Number(r.fee_cny || 0), 0))}</TableCell>
-                  <TableCell className="font-bold">{fmt(exchanges.reduce((s, r) => s + Number(r.amount_cny || 0) + Number(r.fee_cny || 0), 0))}</TableCell>
+                  <TableCell className="font-bold">{fmt(pagedExchanges.reduce((s, r) => s + Number(r.amount_cny || 0), 0))}</TableCell>
+                  <TableCell>{fmt(pagedExchanges.reduce((s, r) => s + Number(r.fee_cny || 0), 0))}</TableCell>
+                  <TableCell className="font-bold">{fmt(pagedExchanges.reduce((s, r) => s + Number(r.amount_cny || 0) + Number(r.fee_cny || 0), 0))}</TableCell>
                   <TableCell />
                 </TableRow>
               )}
@@ -1567,6 +1644,21 @@ function ExchangeTab() {
           </TableBody>
         </Table>
       </div>
+
+      {/* 分页 */}
+      {filteredExchanges.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            共 {filteredExchanges.length} 条，第 {page} / {totalPages} 页
+          </div>
+          <div className="flex gap-1">
+            <Button variant="outline" size="sm" onClick={() => setPage(1)} disabled={page === 1}>首页</Button>
+            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>上一页</Button>
+            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>下一页</Button>
+            <Button variant="outline" size="sm" onClick={() => setPage(totalPages)} disabled={page === totalPages}>末页</Button>
+          </div>
+        </div>
+      )}
       {/* 删除确认弹窗 */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
@@ -1586,6 +1678,9 @@ function ExchangeTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 合并购汇弹窗 */}
+      <BatchExchangeDialog open={multiExchangeOpen} onOpenChange={setMultiExchangeOpen} />
     </div>
   );
 }
@@ -1600,6 +1695,9 @@ function TransactionsTab() {
   const [category, setCategory] = useState("other");
   const [amount, setAmount] = useState("");
   const [counterparty, setCounterparty] = useState("");
+  const [companySearch, setCompanySearch] = useState("");
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
   const [description, setDescription] = useState("");
   const [referenceNo, setReferenceNo] = useState("");
   const [currency, setCurrency] = useState("CNY");
@@ -1633,8 +1731,17 @@ function TransactionsTab() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
 
-  const { data, isLoading } = useQuery<Transaction[]>({
-    queryKey: ["transactions", debouncedSearch, filterType, filterCategory, filterSaleId, filterLocked, filterBankAccountId],
+  // 交易流水分页
+  const [transactionPage, setTransactionPage] = useState(1);
+  const TRANSACTION_PAGE_SIZE = 30;
+
+  // 筛选条件变化时重置页码
+  useEffect(() => {
+    setTransactionPage(1);
+  }, [debouncedSearch, filterType, filterCategory, filterSaleId, filterLocked, filterBankAccountId]);
+
+  const { data: transactionsData, isLoading: transactionsLoading } = useQuery<{ total: number; items: Transaction[]; skip: number; limit: number }>({
+    queryKey: ["transactions", debouncedSearch, filterType, filterCategory, filterSaleId, filterLocked, filterBankAccountId, transactionPage],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (debouncedSearch.trim()) params.append("search", debouncedSearch.trim());
@@ -1645,10 +1752,15 @@ function TransactionsTab() {
       if (filterLocked === "locked") params.append("is_locked", "true");
       else if (filterLocked === "unlocked") params.append("is_locked", "false");
       if (filterBankAccountId) params.append("bank_account_id", filterBankAccountId);
+      params.append("skip", String((transactionPage - 1) * TRANSACTION_PAGE_SIZE));
+      params.append("limit", String(TRANSACTION_PAGE_SIZE));
       const res = await api.get(`/v1/finance/transactions?${params.toString()}`);
       return res.data;
     },
   });
+  const transactions = transactionsData?.items || [];
+  const transactionsTotal = transactionsData?.total || 0;
+  const transactionsTotalPages = Math.ceil(transactionsTotal / TRANSACTION_PAGE_SIZE) || 1;
 
   // Fetch bank accounts
   const { data: bankAccountsData } = useQuery({
@@ -1662,14 +1774,14 @@ function TransactionsTab() {
 
   // Fetch all sales for displaying related sale numbers in list
   const { data: allSalesData } = useQuery({
-    queryKey: ["all-sales-for-transaction-list", data?.flatMap((t) => t.related_sale_ids || [])],
+    queryKey: ["all-sales-for-transaction-list", transactions?.flatMap((t) => t.related_sale_ids || [])],
     queryFn: async () => {
-      const ids = data?.flatMap((t) => t.related_sale_ids || []).filter((id, i, arr) => arr.indexOf(id) === i) || [];
+      const ids = transactions?.flatMap((t) => t.related_sale_ids || []).filter((id, i, arr) => arr.indexOf(id) === i) || [];
       if (ids.length === 0) return [];
       const res = await api.get(`/v1/sales/whole-fish?ids=${ids.join(",")}&limit=500`);
       return res.data?.items || [];
     },
-    enabled: !!(data && data.length > 0),
+    enabled: !!(transactions && transactions.length > 0),
   });
   const allSalesMap = React.useMemo(() => {
     const map: Record<number, string> = {};
@@ -1686,9 +1798,20 @@ function TransactionsTab() {
       const res = await api.get("/v1/companies?type=customer");
       return res.data?.items || [];
     },
-    enabled: category === "main_business_revenue" && formOpen,
+    enabled: (category === "main_business_revenue" || category === "customer_deposit") && formOpen,
   });
   const customersList = customersData || [];
+
+  // Fetch companies (for expense counterparty selection)
+  const { data: companiesData } = useQuery({
+    queryKey: ["companies-for-transaction"],
+    queryFn: async () => {
+      const res = await api.get("/v1/companies?limit=500");
+      return res.data?.items || [];
+    },
+    enabled: type === "expense" && formOpen,
+  });
+  const companiesList = companiesData || [];
 
   // Fetch sales for counterparty auto-fill (按客户筛选)
   const { data: salesData } = useQuery({
@@ -1700,7 +1823,7 @@ function TransactionsTab() {
       const res = await api.get(`/v1/sales/whole-fish?${params.toString()}`);
       return res.data?.items || [];
     },
-    enabled: type === "income" && category === "main_business_revenue" && formOpen,
+    enabled: type === "income" && (category === "main_business_revenue" || category === "customer_deposit") && formOpen,
   });
   const salesList = (salesData || []).filter((s: any) => {
     const remaining = Number(s.net_amount ?? 0) - Number(s.paid_amount ?? 0);
@@ -1791,11 +1914,11 @@ function TransactionsTab() {
   };
 
   const toggleSelectAll = () => {
-    if (!data || data.length === 0) return;
-    if (selectedIds.length === data.length) {
+    if (!transactions || transactions.length === 0) return;
+    if (selectedIds.length === transactions.length) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(data.map((r) => r.id));
+      setSelectedIds(transactions.map((r) => r.id));
     }
   };
 
@@ -1838,6 +1961,12 @@ function TransactionsTab() {
       if (selectedSaleIds.length > 0) {
         payload.related_sale_ids = selectedSaleIds;
       }
+      if (selectedCustomerId && type === "income") {
+        payload.counterparty_id = Number(selectedCustomerId);
+      }
+      if (selectedCompanyId && type === "expense") {
+        payload.counterparty_id = Number(selectedCompanyId);
+      }
 
       if (editingTransaction) {
         await api.put(`/v1/finance/transactions/${editingTransaction.id}`, payload);
@@ -1864,6 +1993,8 @@ function TransactionsTab() {
       setSelectedSaleIds([]);
       setSelectedCustomerId("");
       setCustomerSearch("");
+      setSelectedCompanyId("");
+      setCompanySearch("");
     } catch (error: any) {
       console.error("创建交易记录失败:", error);
       console.error("Response data:", error.response?.data);
@@ -1897,6 +2028,10 @@ function TransactionsTab() {
     setReferenceNo(transaction.reference_no || "");
     setDescription(transaction.description || "");
     setBankAccountId(transaction.from_account_id ? String(transaction.from_account_id) : transaction.to_account_id ? String(transaction.to_account_id) : "");
+    setSelectedCustomerId(transaction.counterparty_id ? String(transaction.counterparty_id) : "");
+    setCustomerSearch(transaction.counterparty_name || "");
+    setSelectedCompanyId(transaction.counterparty_id ? String(transaction.counterparty_id) : "");
+    setCompanySearch(transaction.counterparty_name || "");
     setSelectedSaleIds(transaction.related_sale_ids ?? []);
     setFormOpen(true);
   };
@@ -2010,19 +2145,19 @@ function TransactionsTab() {
             size="sm"
             variant="outline"
             onClick={() => {
-              if (!data || data.length === 0) {
+              if (!transactions || transactions.length === 0) {
                 toast.info("暂无数据可导出");
                 return;
               }
               const ok = exportExcel(
-                data,
+                transactions,
                 [
                   { header: "日期", key: "transaction_date" },
                   { header: "类型", key: "type", format: (v) => transactionTypeMap[v] || v },
                   { header: "分类", key: "category", format: (v) => transactionCategoryMap[v] || v },
                   { header: "金额", key: "amount" },
                   { header: "币种", key: "currency" },
-                  { header: "银行账户", key: "from_account_id", format: (v) => getBankAccountName(v || data.find((r: any) => r.from_account_id === v)?.to_account_id) },
+                  { header: "银行账户", key: "from_account_id", format: (v) => getBankAccountName(v || transactions.find((r: any) => r.from_account_id === v)?.to_account_id) },
                   { header: "对方", key: "counterparty_name" },
                   { header: "描述", key: "description" },
                   { header: "关联销售单", key: "related_sale_ids", format: (v) => v?.length > 0 ? Array.from(new Set(v as number[])).map((id) => allSalesMap[id]).filter(Boolean).join(", ") : "-" },
@@ -2041,7 +2176,7 @@ function TransactionsTab() {
               variant="outline"
               className="border-green-600 text-green-600 hover:bg-green-50"
               onClick={() => {
-                const unlockIds = selectedIds.filter((id) => !data?.find((r) => r.id === id)?.is_locked);
+                const unlockIds = selectedIds.filter((id) => !transactions.find((r: any) => r.id === id)?.is_locked);
                 if (unlockIds.length === 0) {
                   toast.info("选中的记录已全部锁定");
                   return;
@@ -2051,7 +2186,7 @@ function TransactionsTab() {
               disabled={batchLockMutation.isPending}
             >
               <CheckCircle className="h-4 w-4 mr-1" />
-              批量核对 ({selectedIds.filter((id) => !data?.find((r) => r.id === id)?.is_locked).length})
+              批量核对 ({selectedIds.filter((id) => !transactions.find((r: any) => r.id === id)?.is_locked).length})
             </Button>
           )}
           {selectedIds.length > 0 && (
@@ -2060,7 +2195,7 @@ function TransactionsTab() {
               variant="outline"
               className="border-amber-600 text-amber-600 hover:bg-amber-50"
               onClick={() => {
-                const lockedIds = selectedIds.filter((id) => data?.find((r) => r.id === id)?.is_locked);
+                const lockedIds = selectedIds.filter((id) => transactions.find((r: any) => r.id === id)?.is_locked);
                 if (lockedIds.length === 0) {
                   toast.info("选中的记录已全部未锁定");
                   return;
@@ -2070,7 +2205,7 @@ function TransactionsTab() {
               disabled={batchUnlockMutation.isPending}
             >
               <Unlock className="h-4 w-4 mr-1" />
-              批量解锁 ({selectedIds.filter((id) => data?.find((r) => r.id === id)?.is_locked).length})
+              批量解锁 ({selectedIds.filter((id) => transactions.find((r: any) => r.id === id)?.is_locked).length})
             </Button>
           )}
           {selectedIds.length > 0 && (
@@ -2171,7 +2306,7 @@ function TransactionsTab() {
                 </Select>
               </div>
             </div>
-            {type === "income" && category === "main_business_revenue" && (
+            {type === "income" && (category === "main_business_revenue" || category === "customer_deposit") && (
               <div className="space-y-3">
                 <div>
                   <Label>选择客户</Label>
@@ -2225,7 +2360,7 @@ function TransactionsTab() {
                   )}
                 </div>
                 
-                {selectedCustomerId && (
+                {selectedCustomerId && category === "main_business_revenue" && (
                   <div>
                     <Label>关联销售单（可多选）</Label>
                     <div className="border rounded-md p-2 space-y-1 max-h-[200px] overflow-y-auto">
@@ -2298,7 +2433,55 @@ function TransactionsTab() {
 
             <div>
               <Label>对方名称</Label>
-              <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder={type === "income" ? "选择销售单后自动填充" : "可选"} />
+              {type === "income" ? (
+                <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder="选择销售单后自动填充" disabled />
+              ) : (
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="搜索公司名称..."
+                    value={companySearch}
+                    onChange={(e) => {
+                      setCompanySearch(e.target.value);
+                      setCompanyDropdownOpen(true);
+                    }}
+                    onFocus={() => setCompanyDropdownOpen(true)}
+                    className="pl-9"
+                  />
+                  {companyDropdownOpen && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border rounded-md shadow-lg max-h-[200px] overflow-y-auto">
+                      {(() => {
+                        const filtered = companySearch.trim()
+                          ? companiesList.filter((c: any) => c.name.toLowerCase().includes(companySearch.toLowerCase()))
+                          : companiesList;
+                        if (filtered.length === 0) return (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">未找到公司</div>
+                        );
+                        return filtered.map((c: any) => (
+                          <div
+                            key={c.id}
+                            className={cn(
+                              "px-3 py-2 text-sm cursor-pointer hover:bg-accent",
+                              selectedCompanyId === String(c.id) && "bg-accent font-medium"
+                            )}
+                            onClick={() => {
+                              setSelectedCompanyId(String(c.id));
+                              setCounterparty(c.name);
+                              setCompanySearch(c.name);
+                              setCompanyDropdownOpen(false);
+                            }}
+                          >
+                            {c.name}
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  )}
+                  {companyDropdownOpen && (
+                    <div className="fixed inset-0 z-40" onClick={() => setCompanyDropdownOpen(false)} />
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <Label>参考号</Label>
@@ -2364,7 +2547,7 @@ function TransactionsTab() {
             <TableRow>
               <TableHead className="w-[40px]">
                 <Checkbox
-                  checked={data && data.length > 0 && selectedIds.length === data.length}
+                  checked={transactions && transactions.length > 0 && selectedIds.length === transactions.length}
                   onCheckedChange={toggleSelectAll}
                 />
               </TableHead>
@@ -2381,13 +2564,13 @@ function TransactionsTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {isLoading ? (
+            {transactionsLoading ? (
               <TableRow>
                 <TableCell colSpan={11} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
-            ) : !data?.length ? (
+            ) : !transactions?.length ? (
               <TableRow>
                 <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                   暂无数据
@@ -2395,7 +2578,7 @@ function TransactionsTab() {
               </TableRow>
             ) : (
               <>
-                {data.map((r) => (
+                {transactions.map((r) => (
                 <TableRow key={r.id} className={r.is_locked ? "bg-muted/30" : ""}>
                   <TableCell>
                     <Checkbox
@@ -2491,12 +2674,14 @@ function TransactionsTab() {
                 </TableRow>
               ))}
               {/* 页汇总行 */}
-              {data.length > 0 && (
+              {transactions.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">
                   <TableCell />
-                  <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
+                  <TableCell colSpan={3} className="text-right">
+                    本页合计 ({transactions.length} / {transactionsTotal} 条):
+                  </TableCell>
                   <TableCell className="text-right font-bold">
-                    {data.reduce((s, r) => s + (r.type === "income" ? Number(r.amount || 0) : -Number(r.amount || 0)), 0).toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    {transactions.reduce((s, r) => s + (r.type === "income" ? Number(r.amount || 0) : -Number(r.amount || 0)), 0).toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                   </TableCell>
                   <TableCell colSpan={5} />
                 </TableRow>
@@ -2506,6 +2691,47 @@ function TransactionsTab() {
           </TableBody>
         </Table>
       </div>
+      
+      {/* 分页 */}
+      {transactionsTotal > TRANSACTION_PAGE_SIZE && (
+        <div className="flex items-center justify-center gap-2 py-4">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTransactionPage(1)}
+            disabled={transactionPage === 1 || transactionsLoading}
+          >
+            首页
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTransactionPage((p) => Math.max(1, p - 1))}
+            disabled={transactionPage === 1 || transactionsLoading}
+          >
+            上一页
+          </Button>
+          <span className="text-sm text-muted-foreground px-2">
+            第 {transactionPage} / {transactionsTotalPages} 页
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTransactionPage((p) => Math.min(transactionsTotalPages, p + 1))}
+            disabled={transactionPage === transactionsTotalPages || transactionsLoading}
+          >
+            下一页
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTransactionPage(transactionsTotalPages)}
+            disabled={transactionPage === transactionsTotalPages || transactionsLoading}
+          >
+            尾页
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
