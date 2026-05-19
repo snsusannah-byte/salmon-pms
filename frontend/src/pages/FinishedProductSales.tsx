@@ -41,6 +41,8 @@ interface FinishedSale {
   paid: number;
   remark: string;
   created_at: string;
+  first_product_name?: string;
+  first_product_factory?: string;
   products?: FinishedSaleProduct[];
 }
 
@@ -381,7 +383,9 @@ export function FinishedProductSales() {
                     <th className="px-4 py-2 text-left">日期</th>
                     <th className="px-4 py-2 text-left">客户</th>
                     <th className="px-4 py-2 text-left">业务员</th>
-                    <th className="px-4 py-2 text-right">重量(kg)</th>
+                    <th className="px-4 py-2 text-left">产品名称</th>
+                    <th className="px-4 py-2 text-left">加工厂</th>
+                    <th className="px-4 py-2 text-right">箱数</th>
                     <th className="px-4 py-2 text-right">金额</th>
                     <th className="px-4 py-2 text-center">状态</th>
                     <th className="px-4 py-2 text-center">操作</th>
@@ -389,7 +393,7 @@ export function FinishedProductSales() {
                 </thead>
                 <tbody>
                   {filteredSales.length === 0 && (
-                    <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">暂无销售记录</td></tr>
+                    <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">暂无销售记录</td></tr>
                   )}
                   {filteredSales.map(s => (
                     <tr key={s.id} className="border-t hover:bg-gray-50">
@@ -402,7 +406,9 @@ export function FinishedProductSales() {
                       <td className="px-4 py-2">{s.sale_date}</td>
                       <td className="px-4 py-2">{s.customer}</td>
                       <td className="px-4 py-2">{s.salesperson || '-'}</td>
-                      <td className="px-4 py-2 text-right">{s.weight ? s.weight.toFixed(2) : '-'}</td>
+                      <td className="px-4 py-2 text-xs text-gray-600">{s.first_product_name || '-'}</td>
+                      <td className="px-4 py-2 text-xs text-gray-500">{s.first_product_factory || '-'}</td>
+                      <td className="px-4 py-2 text-right">{s.quantity ? s.quantity : '-'}</td>
                       <td className="px-4 py-2 text-right font-medium">{s.total_amount ? s.total_amount.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' }) : '-'}</td>
                       <td className="px-4 py-2 text-center">
                         <span className={cn("px-2 py-0.5 rounded text-xs", paymentStatusMap[s.paid]?.color || paymentStatusMap[0].color)}>

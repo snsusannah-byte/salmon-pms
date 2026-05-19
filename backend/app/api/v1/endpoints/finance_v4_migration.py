@@ -460,6 +460,14 @@ async def api_get_finished_sales(db: AsyncSession = Depends(get_db)):
     sales = result.scalars().all()
     data = []
     for s in sales:
+        # 查询该销售单的第一个产品（用于列表页展示）
+        products_result = await db.execute(
+            select(FinishedSaleProductV2)
+            .where(FinishedSaleProductV2.sale_id == s.id)
+            .order_by(FinishedSaleProductV2.id)
+            .limit(1)
+        )
+        first_product = products_result.scalar_one_or_none()
         data.append({
             "id": s.id,
             "sale_no": s.sale_no,
@@ -484,6 +492,8 @@ async def api_get_finished_sales(db: AsyncSession = Depends(get_db)):
             "paid": s.paid,
             "remark": s.remark,
             "created_at": s.created_at.isoformat() if s.created_at else None,
+            "first_product_name": first_product.product_name if first_product else None,
+            "first_product_factory": first_product.factory if first_product else None,
         })
     return {"success": True, "data": data}
 
@@ -595,7 +605,9 @@ async def api_create_finished_sale(data: dict, db: AsyncSession = Depends(get_db
     for p in data.get("products", []):
         product = FinishedSaleProductV2(
             sale_id=sale.id,
+            product_name=p.get("product_name"),
             product_spec=p.get("product_spec", ""),
+            factory=p.get("factory"),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
             unit_price=Decimal(str(p.get("unit_price", 0))),

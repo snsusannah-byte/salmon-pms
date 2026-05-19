@@ -117,7 +117,6 @@ export function PayableStatementsTab() {
           .print-content th, .print-content td { padding: 1px 3px !important; border: 1px solid #ccc !important; }
           .print-content h4 { font-size: 10px; margin: 4px 0 2px 0; }
           .print-empty { display: none !important; }
-          //  removed
           .print-content .grid { gap: 2px !important; }
           .print-content .rounded-lg { border: 1px solid #ccc !important; padding: 4px !important; }
         }
@@ -236,7 +235,8 @@ export function PayableStatementsTab() {
                       )}
                     </div>
 
-                    {/* 采购明细 */}
+                    {/* 采购明细（报关行不显示） */}
+                    {(activeItem.supplier_type || '') !== "customs_broker" && (
                     <div className="space-y-1">
                       <h4 className="text-sm font-medium">采购明细</h4>
                       <div className="border rounded-md">
@@ -274,6 +274,7 @@ export function PayableStatementsTab() {
                         </Table>
                       </div>
                     </div>
+                    )}
 
                     {/* 费用明细 */}
                     <div className="space-y-1">

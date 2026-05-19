@@ -1300,7 +1300,9 @@ class FinishedSaleProductV2(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sale_id: Mapped[int] = mapped_column(ForeignKey("finished_product_sales_v2.id"), nullable=False)
+    product_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     product_spec: Mapped[str] = mapped_column(String(100), nullable=False)
+    factory: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     box_count: Mapped[int] = mapped_column(Integer, default=0)
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
