@@ -23,7 +23,7 @@ function fmtDate(d: string | null | undefined) {
 
 // ==================== Tab 4: 应付对账单 (Inline 展示模式) ====================
 
-export function PayableStatementsTab() {
+export export function PayableStatementsTab() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [supplierSearch, setSupplierSearch] = useState("");

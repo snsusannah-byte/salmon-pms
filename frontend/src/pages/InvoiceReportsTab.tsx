@@ -70,7 +70,7 @@ function DateFilter({ startDate, endDate, onStartChange, onEndChange, onSearch }
 
 // ==================== Tab 2: 单票财报 ====================
 
-function InvoiceReportsTab() {
+export function InvoiceReportsTab() {
   const [page, setPage] = useState(0);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");

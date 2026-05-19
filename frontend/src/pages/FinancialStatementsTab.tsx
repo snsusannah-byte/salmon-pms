@@ -51,7 +51,7 @@ function SimplePagination({ current, total, pageSize, onChange }: {
 
 // ==================== Tab 5: 三大报表 ====================
 
-function FinancialStatementsTab() {
+export function FinancialStatementsTab() {
   const [periodType, setPeriodType] = useState("current_quarter");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");

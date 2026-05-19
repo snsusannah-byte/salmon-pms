@@ -70,7 +70,7 @@ function DateFilter({ startDate, endDate, onStartChange, onEndChange, onSearch }
 
 // ==================== Tab 1: 批次财报 ====================
 
-function BatchReportsTab() {
+export function BatchReportsTab() {
   const [page, setPage] = useState(0);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");

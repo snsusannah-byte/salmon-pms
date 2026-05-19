@@ -23,7 +23,7 @@ function fmtDate(d: string | null | undefined) {
 
 // ==================== Tab 3: 应收对账单 (Inline 展示模式) ====================
 
-export function ReceivableStatementsTab() {
+export export function ReceivableStatementsTab() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
