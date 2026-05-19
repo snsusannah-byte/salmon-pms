@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Loader2, Eye, ChevronLeft, ChevronRight, Search, Download, Printer, X } from "lucide-react";
+import { Loader2, Eye, ChevronLeft, ChevronRight, Search, Download, Printer, X, FileText } from "lucide-react";
 
 function fmt$(v: number | string | null | undefined) {
   const n = Number(v ?? 0);
