@@ -3360,7 +3360,10 @@ async def get_financial_statements(
 
     # 存货 = 未报关发票金额 × 预估汇率（优先）或 7.0
     uncleared_result = await db.execute(
-        select(ImportInvoice).where(ImportInvoice.customs_status != "cleared")
+        select(ImportInvoice).where(
+            ImportInvoice.customs_status != "cleared",
+            ImportInvoice.invoice_date <= edt,
+        )
     )
     uncleared_invoices = uncleared_result.scalars().all()
     total_uncleared_usd = Decimal("0")
@@ -3382,7 +3385,10 @@ async def get_financial_statements(
 
     # 应付账款 = 已清关但未购汇的发票金额 × 预估汇率（优先）或 7.0
     unpaid_invoice_result = await db.execute(
-        select(ImportInvoice).where(ImportInvoice.exchange_status != "completed")
+        select(ImportInvoice).where(
+            ImportInvoice.exchange_status != "completed",
+            ImportInvoice.invoice_date <= edt,
+        )
     )
     unpaid_invoices = unpaid_invoice_result.scalars().all()
     total_owed_usd = Decimal("0")
@@ -3402,9 +3408,21 @@ async def get_financial_statements(
         accounts_payable += amount * rate
     accounts_payable = round(accounts_payable, 2)
 
-    # 累计利润
+    # 累计利润（截止到 end_date 的全部已购汇批次）
+    all_purchased_batch_result = await db.execute(
+        select(Batch.id)
+        .join(BatchInvoice, BatchInvoice.batch_id == Batch.id)
+        .join(ImportInvoice, ImportInvoice.id == BatchInvoice.invoice_id)
+        .where(
+            ImportInvoice.exchange_status == ExchangeStatus.COMPLETED,
+            ImportInvoice.invoice_date <= edt,
+        )
+        .distinct()
+    )
+    all_purchased_batch_ids = [r[0] for r in all_purchased_batch_result.all() if r[0]]
+
     cumulative_profit = Decimal("0")
-    for batch_id in purchased_batch_ids:
+    for batch_id in all_purchased_batch_ids:
         sales_result = await db.execute(
             select(WholeFishSale).where(WholeFishSale.batch_id == batch_id)
         )
@@ -3452,28 +3470,10 @@ async def get_financial_statements(
                 )
 
         total_exp = ex_payment + ex_fee + taxes + clearance_cost
-        # 损耗
-        shrink = Decimal("0")
-        if invoice_ids:
-            prod_result = await db.execute(
-                select(InvoiceProduct).where(InvoiceProduct.invoice_id.in_(invoice_ids))
-            )
-            prods = prod_result.scalars().all()
-            import_weight = sum(_to_decimal(p.net_weight_kg) for p in prods)
-            sales_weight = sum(_to_decimal(s.weight_kg) for s in sales_list)
-            if import_weight > sales_weight and sales_weight > 0:
-                diff = import_weight - sales_weight
-                rate = Decimal("7.0")
-                for er in exchange_records:
-                    if er and er.exchange_rate and er.exchange_rate > 0:
-                        rate = _to_decimal(er.exchange_rate)
-                        break
-                import_amount = sum(_to_decimal(p.total_amount) for p in prods)
-                if import_amount > 0 and import_weight > 0:
-                    unit_price = import_amount / import_weight
-                    shrink = diff * unit_price * rate
-        
-        cumulative_profit += (sales_net - commission_amount) - total_exp - round(shrink, 2)
+        # 损耗（使用公共函数）
+        shrink = await _calc_batch_shrinkage(db, batch_id, invoice_ids, sales_list)
+
+        cumulative_profit += (sales_net - commission_amount) - total_exp - shrink
 
     total_assets = cash_balance + accounts_receivable + inventory_value
     total_liabilities = accounts_payable
