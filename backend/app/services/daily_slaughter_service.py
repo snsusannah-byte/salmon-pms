@@ -227,7 +227,7 @@ class DailySlaughterService:
         if not raw_product:
             return
 
-        # 3. 创建出库单并自动确认
+        # 3. 创建出库单并自动确认（原料出库）
         try:
             outbound = await WarehouseV2Service.create_outbound(db, {
                 "dest_type": "production",
@@ -244,6 +244,62 @@ class DailySlaughterService:
             await WarehouseV2Service.confirm_outbound(db, outbound)
         except ValueError:
             pass
+
+        # 4. 成品肉和副产品入库到 FB-FISH（分包仓）
+        fb_result = await db.execute(
+            select(Warehouse).where(Warehouse.code == "FB-FISH")
+        )
+        fb_wh = fb_result.scalar_one_or_none()
+        if fb_wh:
+            # 成品肉
+            if record.meat_weight_kg and record.meat_weight_kg > 0:
+                meat_prod_result = await db.execute(
+                    select(Product).where(Product.category == "finished_product").limit(1)
+                )
+                meat_product = meat_prod_result.scalar_one_or_none()
+                if meat_product:
+                    try:
+                        meat_inbound = await WarehouseV2Service.create_inbound(db, {
+                            "source_type": "production",
+                            "source_id": record.id,
+                            "source_no": f"SLAUGHTER-{record.id}",
+                            "warehouse_id": fb_wh.id,
+                            "product_id": meat_product.id,
+                            "batch_id": record.source_batch_id,
+                            "qty": record.meat_weight_kg,
+                            "unit": "kg",
+                            "unit_cost": record.cost_price_per_kg or Decimal("0"),
+                            "inbound_date": record.slaughter_date,
+                            "notes": f"屠宰产出-成品肉 {record.slaughter_date} ({record.slaughter_type})",
+                        })
+                        await WarehouseV2Service.confirm_inbound(db, meat_inbound)
+                    except ValueError:
+                        pass
+
+            # 边角料/副产品
+            if record.byproduct_trim_weight_kg and record.byproduct_trim_weight_kg > 0:
+                trim_prod_result = await db.execute(
+                    select(Product).where(Product.category == "byproduct").limit(1)
+                )
+                trim_product = trim_prod_result.scalar_one_or_none()
+                if trim_product:
+                    try:
+                        trim_inbound = await WarehouseV2Service.create_inbound(db, {
+                            "source_type": "production",
+                            "source_id": record.id,
+                            "source_no": f"SLAUGHTER-{record.id}",
+                            "warehouse_id": fb_wh.id,
+                            "product_id": trim_product.id,
+                            "batch_id": record.source_batch_id,
+                            "qty": record.byproduct_trim_weight_kg,
+                            "unit": "kg",
+                            "unit_cost": Decimal("0"),
+                            "inbound_date": record.slaughter_date,
+                            "notes": f"屠宰产出-边角料 {record.slaughter_date} ({record.slaughter_type})",
+                        })
+                        await WarehouseV2Service.confirm_inbound(db, trim_inbound)
+                    except ValueError:
+                        pass
 
     @staticmethod
     async def update_record(
