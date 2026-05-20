@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { reduceSum, fmt, fmtCNY } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -178,9 +179,9 @@ export function SalesPage() {
 
   const summary = {
     totalCount: allSalesData?.items?.length || 0,
-    totalBoxes: allSalesData?.items?.reduce((sum, s) => sum + Number(s.box_count || 0), 0) || 0,
-    totalWeight: allSalesData?.items?.reduce((sum, s) => sum + Number(s.weight_kg || 0), 0) || 0,
-    totalNetAmount: allSalesData?.items?.reduce((sum, s) => sum + Number(s.net_amount || 0), 0) || 0,
+    totalBoxes: reduceSum(allSalesData?.items || [], (s) => s.box_count).toNumber(),
+    totalWeight: reduceSum(allSalesData?.items || [], (s) => s.weight_kg).toNumber(),
+    totalNetAmount: reduceSum(allSalesData?.items || [], (s) => s.net_amount).toNumber(),
     totalPaid: allSalesData?.items?.reduce((sum, s) => sum + Number(s.paid_amount || 0), 0) || 0,
     totalUnpaid: allSalesData?.items?.reduce((sum, s) => sum + (Number(s.net_amount || 0) - Number(s.paid_amount || 0)), 0) || 0,
     totalReceivable: allSalesData?.items?.reduce((sum, s) => {

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { reduceSum, fmt, fmtUSD } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,26 +75,12 @@ const RATES = {
 };
 
 /* ─────────────── 金额格式化 ─────────────── */
-const fmt = (v?: number | string | null) => {
-  if (v === undefined || v === null || v === "" || Number.isNaN(Number(v))) return "-";
-  return `¥${Number(v).toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-};
+// fmt / fmtUSD 已从 @/lib/money 导入（基于 Decimal 的安全金额运算）
 
 // 进口费用列表专用：费用为 0 时显示 "-"，表示没有这笔费用
 const fmtFee = (v?: number | string | null) => {
   if (v === undefined || v === null || v === "" || Number.isNaN(Number(v)) || Number(v) === 0) return "-";
   return fmt(v);
-};
-
-const fmtUSD = (v?: number | string | null) => {
-  if (v === undefined || v === null || v === "" || Number.isNaN(Number(v))) return "-";
-  return `$${Number(v).toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 };
 
 const transactionTypeMap: Record<string, string> = {
@@ -1029,16 +1016,16 @@ function ImportFeesTab() {
               {importFees.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">
                   <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
-                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.import_duty || 0), 0))}</TableCell>
-                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.import_vat || 0), 0))}</TableCell>
-                  <TableCell className="font-semibold text-amber-700">{fmtFee(importFees.reduce((s, f) => s + Number(f.tax_total || 0), 0))}</TableCell>
-                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.pickup_fee || 0), 0))}</TableCell>
-                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.freight || 0), 0))}</TableCell>
-                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.clearance_service_fee || 0), 0))}</TableCell>
-                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.yard_fee || 0), 0))}</TableCell>
-                  <TableCell>{fmtFee(importFees.reduce((s, f) => s + Number(f.cold_storage_fee || 0), 0))}</TableCell>
-                  <TableCell className="font-semibold text-blue-700">{fmtFee(importFees.reduce((s, f) => s + Number(f.clearance_total || 0), 0))}</TableCell>
-                  <TableCell className="font-bold">{fmtFee(importFees.reduce((s, f) => s + Number(f.grand_total || 0), 0))}</TableCell>
+                  <TableCell>{fmtFee(reduceSum(importFees, (f) => f.import_duty))}</TableCell>
+                  <TableCell>{fmtFee(reduceSum(importFees, (f) => f.import_vat))}</TableCell>
+                  <TableCell className="font-semibold text-amber-700">{fmtFee(reduceSum(importFees, (f) => f.tax_total))}</TableCell>
+                  <TableCell>{fmtFee(reduceSum(importFees, (f) => f.pickup_fee))}</TableCell>
+                  <TableCell>{fmtFee(reduceSum(importFees, (f) => f.freight))}</TableCell>
+                  <TableCell>{fmtFee(reduceSum(importFees, (f) => f.clearance_service_fee))}</TableCell>
+                  <TableCell>{fmtFee(reduceSum(importFees, (f) => f.yard_fee))}</TableCell>
+                  <TableCell>{fmtFee(reduceSum(importFees, (f) => f.cold_storage_fee))}</TableCell>
+                  <TableCell className="font-semibold text-blue-700">{fmtFee(reduceSum(importFees, (f) => f.clearance_total))}</TableCell>
+                  <TableCell className="font-bold">{fmtFee(reduceSum(importFees, (f) => f.grand_total))}</TableCell>
                   <TableCell />
                 </TableRow>
               )}
@@ -1631,11 +1618,11 @@ function ExchangeTab() {
               {pagedExchanges.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">
                   <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
-                  <TableCell className="font-bold">{fmtUSD(pagedExchanges.reduce((s, r) => s + Number(r.amount_usd || 0), 0))}</TableCell>
+                  <TableCell className="font-bold">{fmtUSD(reduceSum(pagedExchanges, (r) => r.amount_usd))}</TableCell>
                   <TableCell />
-                  <TableCell className="font-bold">{fmt(pagedExchanges.reduce((s, r) => s + Number(r.amount_cny || 0), 0))}</TableCell>
-                  <TableCell>{fmt(pagedExchanges.reduce((s, r) => s + Number(r.fee_cny || 0), 0))}</TableCell>
-                  <TableCell className="font-bold">{fmt(pagedExchanges.reduce((s, r) => s + Number(r.amount_cny || 0) + Number(r.fee_cny || 0), 0))}</TableCell>
+                  <TableCell className="font-bold">{fmt(reduceSum(pagedExchanges, (r) => r.amount_cny))}</TableCell>
+                  <TableCell>{fmt(reduceSum(pagedExchanges, (r) => r.fee_cny))}</TableCell>
+                  <TableCell className="font-bold">{fmt(reduceSum(pagedExchanges, (r) => r.amount_cny).plus(reduceSum(pagedExchanges, (r) => r.fee_cny)))}</TableCell>
                   <TableCell />
                 </TableRow>
               )}
@@ -2681,7 +2668,7 @@ function TransactionsTab() {
                     本页合计 ({transactions.length} / {transactionsTotal} 条):
                   </TableCell>
                   <TableCell className="text-right font-bold">
-                    {transactions.reduce((s, r) => s + (r.type === "income" ? Number(r.amount || 0) : -Number(r.amount || 0)), 0).toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    {fmt(reduceSum(transactions, (r) => r.type === "income" ? r.amount : -r.amount))}
                   </TableCell>
                   <TableCell colSpan={5} />
                 </TableRow>
