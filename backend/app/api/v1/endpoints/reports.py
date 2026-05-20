@@ -3274,9 +3274,8 @@ async def get_financial_statements(
 
     # 已收销售净额（截至 end_date）
     paid_sales_result = await db.execute(
-        select(func.sum(WholeFishSale.net_amount))
+        select(func.sum(WholeFishSale.paid_amount))
         .where(
-            WholeFishSale.status.in_(["partial_paid", "fully_paid"]),
             WholeFishSale.sale_date <= edt,
         )
     )
