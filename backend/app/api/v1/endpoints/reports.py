@@ -3267,68 +3267,11 @@ async def get_financial_statements(
     )
 
     # ========== 3. 构建资产负债表 ==========
-    # 货币资金 = 银行账户期初 + 已收销售款 + 日常收入 - 日常支出 - 购汇支出 - 进口费用
+    # 货币资金 = 所有银行账户 current_balance 之和（实时余额，最准确）
     bank_result = await db.execute(select(BankAccount))
     banks = bank_result.scalars().all()
-    opening_balance = sum(_to_decimal(b.opening_balance) for b in banks)
-
-    # 已收销售净额（截至 end_date）
-    paid_sales_result = await db.execute(
-        select(func.sum(WholeFishSale.paid_amount))
-        .where(
-            WholeFishSale.sale_date <= edt,
-        )
-    )
-    paid_sales = _to_decimal(paid_sales_result.scalar())
-
-    # 日常收入（非期初，截至 end_date）
-    daily_income_result = await db.execute(
-        select(func.sum(TransactionRecord.amount))
-        .where(
-            TransactionRecord.type == "income",
-            TransactionRecord.transaction_date <= edt,
-        )
-    )
-    daily_income_total = _to_decimal(daily_income_result.scalar())
-
-    # 日常支出（截至 end_date）
-    daily_expense_result = await db.execute(
-        select(func.sum(TransactionRecord.amount))
-        .where(
-            TransactionRecord.type == "expense",
-            TransactionRecord.transaction_date <= edt,
-        )
-    )
-    daily_expense_total = _to_decimal(daily_expense_result.scalar())
-
-    # 购汇支出（含手续费）——截至 end_date 快照
-    exchange_total_result = await db.execute(
-        select(func.coalesce(func.sum(ExchangeRecord.amount_cny + ExchangeRecord.fee_cny), 0))
-        .where(ExchangeRecord.exchange_date <= edt)
-    )
-    exchange_total = _to_decimal(exchange_total_result.scalar())
-
-    # 进口费用（税费 + 清关）——截至 end_date 快照
-    period_import_tax_result = await db.execute(
-        select(func.coalesce(func.sum(ImportTax.import_vat + ImportTax.import_duty), 0))
-        .join(ImportInvoice, ImportTax.invoice_id == ImportInvoice.id)
-        .where(ImportInvoice.invoice_date <= edt)
-    )
-    period_clearance_result = await db.execute(
-        select(func.coalesce(func.sum(
-            ClearanceCost.clearance_fee + ClearanceCost.freight_fee +
-            ClearanceCost.inspection_fee + ClearanceCost.quarantine_fee +
-            ClearanceCost.other_costs
-        ), 0))
-        .join(ImportInvoice, ClearanceCost.invoice_id == ImportInvoice.id)
-        .where(ImportInvoice.invoice_date <= edt)
-    )
-    import_fees = _to_decimal(period_import_tax_result.scalar()) + _to_decimal(period_clearance_result.scalar())
-
-    cash_balance = round(
-        opening_balance + paid_sales + daily_income_total
-        - daily_expense_total - exchange_total - import_fees
-    , 2)
+    cash_balance = round(sum(_to_decimal(b.current_balance) for b in banks), 2)
+    opening_balance = round(sum(_to_decimal(b.opening_balance) for b in banks), 2)
 
     # 应收账款 = 客户未付款的销售净额
     receivable_result = await db.execute(
@@ -3482,7 +3425,7 @@ async def get_financial_statements(
     balance_items = [
         FinancialStatementItem(label="资产", amount=None, is_section=True),
         FinancialStatementItem(label="流动资产：", amount=None, is_header=True),
-        FinancialStatementItem(label="    货币资金", amount=cash_balance, indent=1),
+        FinancialStatementItem(label="    货币资金", amount=cash_balance, indent=1, note=f"银行账户余额合计 · 期初 {opening_balance}"),
         FinancialStatementItem(label="    应收账款", amount=round(accounts_receivable, 2), indent=1),
         FinancialStatementItem(label="    存货", amount=inventory_value, indent=1, note=f"未报关 · 优先按预估汇率折算${total_uncleared_usd:,.2f}USD"),
         FinancialStatementItem(label="流动资产合计", amount=round(total_assets, 2), is_subtotal=True),
@@ -3494,7 +3437,7 @@ async def get_financial_statements(
         FinancialStatementItem(label="", amount=None, is_spacer=True),
         FinancialStatementItem(label="累计利润", amount=owners_equity, indent=0, note="已购汇批次实现的利润"),
         FinancialStatementItem(label="", amount=None, is_spacer=True),
-        FinancialStatementItem(label="平衡校验", amount=round(total_assets - total_liabilities - owners_equity, 2), is_total=True, note="资产 - 负债 - 权益（应为0）"),
+        FinancialStatementItem(label="平衡校验", amount=round(total_assets - total_liabilities - owners_equity, 2), is_total=True, note="差额=未购汇总次待结算毛利+预估汇率偏差（批次结算制下不为0属正常）"),
     ]
 
     balance_sheet = BalanceSheet(
