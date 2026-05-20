@@ -88,13 +88,14 @@ async def _update_stock_inbound(db: AsyncSession, warehouse_id: int, product_id:
         stock = Stock(
             warehouse_id=warehouse_id,
             product_id=product_id,
-            current_qty=Decimal("0"),
-            available_qty=Decimal("0"),
-            unit=unit_cost and "kg" or "kg",
+            current_qty=qty,
+            available_qty=qty,
+            unit="kg",
         )
         db.add(stock)
-    stock.current_qty = stock.current_qty + qty
-    stock.available_qty = stock.available_qty + qty
+    else:
+        stock.current_qty = stock.current_qty + qty
+        stock.available_qty = stock.available_qty + qty
     if unit_cost:
         stock.unit_cost = unit_cost
     if total_cost:
@@ -172,6 +173,7 @@ async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) 
         
         inbounds.append(inbound_no)
     
+    await db.commit()
     return inbounds
 
 
@@ -224,6 +226,7 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
         
         outbounds.append(outbound_no)
     
+    await db.commit()
     return outbounds
 
 
