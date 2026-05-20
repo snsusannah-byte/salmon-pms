@@ -185,12 +185,25 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
     
     outbounds = []
     for product in sale.products:
-        # 查找产品
-        result = await db.execute(select(Product).where(Product.name == product.product_spec))
-        p = result.scalar_one_or_none()
+        # 查找产品（优先用 product_name 匹配，不是 product_spec）
+        p = None
+        if product.product_name:
+            result = await db.execute(select(Product).where(Product.name == product.product_name))
+            p = result.scalar_one_or_none()
+        if not p and product.product_spec:
+            result = await db.execute(select(Product).where(Product.name == product.product_spec))
+            p = result.scalar_one_or_none()
         if not p:
-            # 找不到产品，跳过
-            continue
+            # 仍找不到，自动创建占位产品，避免库存流失
+            p_id = await _get_or_create_product(
+                db,
+                name=product.product_name or product.product_spec or "未命名产品",
+                spec=product.product_spec or "",
+                unit="kg",
+                category="raw_material",
+            )
+            result = await db.execute(select(Product).where(Product.id == p_id))
+            p = result.scalar_one()
         
         # 生成出库单号
         today = _date.today()

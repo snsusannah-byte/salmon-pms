@@ -12,7 +12,7 @@ from app.models.finished_product_v2 import (
     DailySlaughterRecord,
     SlaughterType,
 )
-from app.models import Product, ProductCategory
+from app.models import Product
 
 
 class DailySlaughterService:
@@ -189,54 +189,61 @@ class DailySlaughterService:
         db.add(record)
         await db.commit()
         await db.refresh(record)
-        
-        # 自动扣减整鱼/鱼柳库存
-        await DailySlaughterService._deduct_warehouse_stock(db, record)
-        
         return record
 
     @staticmethod
-    async def _deduct_warehouse_stock(db: AsyncSession, record: DailySlaughterRecord):
-        """宰杀登记时自动扣减整鱼/鱼柳库存，并将产出入库到成品仓库"""
-        from app.services.warehouse_service import WarehouseService
-        from sqlalchemy import select
+    async def _deduct_warehouse_stock_v2(db: AsyncSession, record: DailySlaughterRecord):
+        """宰杀记录锁定时自动扣减原料库存（V2仓库系统）
 
-        # 1. 扣减原料库存（整鱼仓库）
-        category_filter = (
-            ProductCategory.WHOLE_FISH.value
-            if record.slaughter_type == SlaughterType.WHOLE_FISH.value
-            else ProductCategory.FILLET.value
+        流程：
+        1. 根据原料来源确定仓库（进口整包仓 / 国内整包仓）
+        2. 从对应仓库出库原料（整鱼/鱼柳）
+        """
+        from app.services.warehouse_v2_service import WarehouseV2Service
+        from app.models import Warehouse
+
+        # 1. 确定原料仓库
+        # 有 source_batch_id → 进口批次 → 进口整包仓
+        # 无 source_batch_id → 国内采购 → 国内整包仓
+        warehouse_code = "ZB-IMPORT" if record.source_batch_id else "ZB-DOMESTIC"
+
+        wh_result = await db.execute(
+            select(Warehouse).where(Warehouse.code == warehouse_code)
         )
-        result = await db.execute(
+        wh = wh_result.scalar_one_or_none()
+        if not wh:
+            return
+
+        # 2. 确定原料产品
+        category_filter = (
+            "whole_fish"
+            if record.slaughter_type == "whole_fish"
+            else "whole_fish"
+        )
+        prod_result = await db.execute(
             select(Product).where(Product.category == category_filter).limit(1)
         )
-        raw_product = result.scalar_one_or_none()
+        raw_product = prod_result.scalar_one_or_none()
+        if not raw_product:
+            return
 
-        if raw_product:
-            try:
-                await WarehouseService.stock_out(
-                    db,
-                    product_id=raw_product.id,
-                    quantity=record.total_weight_kg,
-                    reason=f"屠宰消耗 {record.slaughter_date}",
-                )
-            except ValueError:
-                pass
-
-        # 2. 成品肉入库（成品仓库）
-        result = await db.execute(
-            select(Product).where(Product.category == ProductCategory.FINISHED_PRODUCT.value).limit(1)
-        )
-        finished_product = result.scalar_one_or_none()
-
-        if finished_product and record.meat_weight_kg > 0:
-            await WarehouseService.stock_in(
-                db,
-                product_id=finished_product.id,
-                quantity=record.meat_weight_kg,
-                unit_price=record.cost_price_per_kg or Decimal("0"),
-                reason=f"屠宰产出 {record.slaughter_date}",
-            )
+        # 3. 创建出库单并自动确认
+        try:
+            outbound = await WarehouseV2Service.create_outbound(db, {
+                "dest_type": "production",
+                "dest_id": record.id,
+                "dest_no": f"SLAUGHTER-{record.id}",
+                "warehouse_id": wh.id,
+                "product_id": raw_product.id,
+                "batch_id": record.source_batch_id,
+                "qty": record.total_weight_kg,
+                "unit": "kg",
+                "outbound_date": record.slaughter_date,
+                "notes": f"屠宰消耗 {record.slaughter_date} ({record.slaughter_type})",
+            })
+            await WarehouseV2Service.confirm_outbound(db, outbound)
+        except ValueError:
+            pass
 
     @staticmethod
     async def update_record(
@@ -297,10 +304,18 @@ class DailySlaughterService:
 
     @staticmethod
     async def lock_record(db: AsyncSession, record: DailySlaughterRecord):
-        """锁定宰杀记录（成本确认后锁定）"""
+        """锁定宰杀记录（成本确认后锁定）并触发仓库原料出库"""
+        # 避免重复锁定和重复扣减
+        if record.is_locked:
+            return record
+
         record.is_locked = True
         await db.commit()
         await db.refresh(record)
+
+        # 锁定后自动扣减原料库存（V2仓库系统）
+        await DailySlaughterService._deduct_warehouse_stock_v2(db, record)
+
         return record
 
     @staticmethod
