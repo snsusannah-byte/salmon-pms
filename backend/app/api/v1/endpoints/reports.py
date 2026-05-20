@@ -96,6 +96,36 @@ async def _get_invoice_clearance(db: AsyncSession, invoice_id: int) -> Optional[
     return result.scalar_one_or_none()
 
 
+async def _batch_get_taxes(db: AsyncSession, invoice_ids: List[int]) -> dict[int, Optional[ImportTax]]:
+    """批量获取发票税费记录 — 替代循环内多次单查"""
+    if not invoice_ids:
+        return {}
+    result = await db.execute(
+        select(ImportTax).where(ImportTax.invoice_id.in_(invoice_ids))
+    )
+    return {t.invoice_id: t for t in result.scalars().all()}
+
+
+async def _batch_get_clearances(db: AsyncSession, invoice_ids: List[int]) -> dict[int, Optional[ClearanceCost]]:
+    """批量获取发票清关费用记录 — 替代循环内多次单查"""
+    if not invoice_ids:
+        return {}
+    result = await db.execute(
+        select(ClearanceCost).where(ClearanceCost.invoice_id.in_(invoice_ids))
+    )
+    return {c.invoice_id: c for c in result.scalars().all()}
+
+
+async def _batch_get_company_names(db: AsyncSession, company_ids: List[int]) -> dict[int, str]:
+    """批量获取公司名称 — 替代循环内多次单查"""
+    if not company_ids:
+        return {}
+    result = await db.execute(
+        select(Company.id, Company.name).where(Company.id.in_(company_ids))
+    )
+    return {row[0]: row[1] for row in result.all() if row[0]}
+
+
 async def _get_invoice_exchange(db: AsyncSession, invoice_id: int, batch_id: Optional[int] = None) -> Optional[ExchangeRecord]:
     """获取发票/批次的购汇记录（发票优先，回退到批次，最后查合并购汇的 related_invoice_ids）"""
     # 先按发票查
@@ -508,13 +538,17 @@ async def list_batch_reports(
         )
         cb_inv_ids = [bi.invoice_id for bi in cb_bi_result.scalars().all()]
 
+        # 批量预加载税费和清关（避免N+1）
+        cb_taxes_map = await _batch_get_taxes(db, cb_inv_ids)
+        cb_clearances_map = await _batch_get_clearances(db, cb_inv_ids)
+
         cb_taxes = Decimal("0")
         cb_clearance = Decimal("0")
         for cb_inv_id in cb_inv_ids:
-            cb_tax = await _get_invoice_taxes(db, cb_inv_id)
+            cb_tax = cb_taxes_map.get(cb_inv_id)
             if cb_tax:
                 cb_taxes += _to_decimal(cb_tax.import_vat) + _to_decimal(cb_tax.import_duty)
-            cb_clearance_item = await _get_invoice_clearance(db, cb_inv_id)
+            cb_clearance_item = cb_clearances_map.get(cb_inv_id)
             if cb_clearance_item:
                 cb_clearance += (
                     _to_decimal(cb_clearance_item.clearance_fee) +
@@ -573,6 +607,11 @@ async def list_batch_reports(
         exchange_rate = None
         batch_exchange_applied_summary = False  # 批次级购汇只计算一次
 
+        # 预加载所有关联发票的税费和清关（避免循环内N+1查询）
+        all_inv_ids = [inv.id for _, inv in bi_rows]
+        taxes_map = await _batch_get_taxes(db, all_inv_ids)
+        clearances_map = await _batch_get_clearances(db, all_inv_ids)
+
         for bi, inv in bi_rows:
             invoice_ids.append(inv.id)
             invoice_nos.append(inv.invoice_no)
@@ -596,14 +635,14 @@ async def list_batch_reports(
             total_weight += inv_weight
             total_boxes += inv_boxes
 
-            # 税费
-            tax = await _get_invoice_taxes(db, inv.id)
+            # 税费（从预加载字典获取）
+            tax = taxes_map.get(inv.id)
             if tax:
                 total_import_duty += _to_decimal(tax.import_duty)
                 total_import_vat += _to_decimal(tax.import_vat)
 
-            # 清关
-            clearance = await _get_invoice_clearance(db, inv.id)
+            # 清关（从预加载字典获取）
+            clearance = clearances_map.get(inv.id)
             if clearance:
                 total_clearance += (
                     _to_decimal(clearance.clearance_fee) +
@@ -833,31 +872,38 @@ async def get_batch_report(
         invoice_weights[inv.id] = w
         batch_total_weight += w
 
+    # 预加载所有发票的税费和清关（避免N+1）
+    all_inv_ids = [inv.id for _, inv in bi_rows]
+    taxes_map = await _batch_get_taxes(db, all_inv_ids)
+    clearances_map = await _batch_get_clearances(db, all_inv_ids)
+
+    # 预加载所有发票的产品（避免循环内多次查询）
+    prods_map_result = await db.execute(
+        select(InvoiceProduct).where(InvoiceProduct.invoice_id.in_(all_inv_ids))
+    )
+    prods_map = {}
+    for p in prods_map_result.scalars().all():
+        prods_map.setdefault(p.invoice_id, []).append(p)
+
     for bi, inv in bi_rows:
         invoice_nos.append(inv.invoice_no)
         inv_weight = invoice_weights[inv.id]
-        inv_boxes = sum(
-            p.box_count or 0 for p in
-            (await db.execute(select(InvoiceProduct).where(InvoiceProduct.invoice_id == inv.id))).scalars().all()
-        )
+        prods = prods_map.get(inv.id, [])
+        inv_boxes = sum(p.box_count or 0 for p in prods)
         if inv_boxes == 0:
             inv_boxes = inv.total_boxes or 0
 
-        prod_result = await db.execute(
-            select(InvoiceProduct).where(InvoiceProduct.invoice_id == inv.id)
-        )
-        prods = prod_result.scalars().all()
         inv_amount = sum(_to_decimal(p.total_amount) for p in prods)
         if inv_amount == 0:
             inv_amount = _to_decimal(inv.total_amount_usd)
 
-        # 税费
-        tax = await _get_invoice_taxes(db, inv.id)
+        # 税费（从预加载字典获取）
+        tax = taxes_map.get(inv.id)
         inv_duty = _to_decimal(tax.import_duty) if tax else Decimal("0")
         inv_vat = _to_decimal(tax.import_vat) if tax else Decimal("0")
 
-        # 清关
-        clearance = await _get_invoice_clearance(db, inv.id)
+        # 清关（从预加载字典获取）
+        clearance = clearances_map.get(inv.id)
         inv_clearance = Decimal("0")
         if clearance:
             inv_clearance = (
@@ -1120,13 +1166,17 @@ async def get_batch_report(
         )
         cb_inv_ids = [bi.invoice_id for bi in cb_bi_result.scalars().all()]
 
+        # 批量预加载税费和清关（避免N+1）
+        cb_taxes_map = await _batch_get_taxes(db, cb_inv_ids)
+        cb_clearances_map = await _batch_get_clearances(db, cb_inv_ids)
+
         cb_taxes = Decimal("0")
         cb_clearance = Decimal("0")
         for cb_inv_id in cb_inv_ids:
-            cb_tax = await _get_invoice_taxes(db, cb_inv_id)
+            cb_tax = cb_taxes_map.get(cb_inv_id)
             if cb_tax:
                 cb_taxes += _to_decimal(cb_tax.import_vat) + _to_decimal(cb_tax.import_duty)
-            cb_clearance_item = await _get_invoice_clearance(db, cb_inv_id)
+            cb_clearance_item = cb_clearances_map.get(cb_inv_id)
             if cb_clearance_item:
                 cb_clearance += (
                     _to_decimal(cb_clearance_item.clearance_fee) +
@@ -1225,16 +1275,25 @@ async def list_invoice_reports(
     )
     invoices = invoice_result.scalars().all()
 
+    # 预加载所有发票的产品、税费、清关（避免循环内N+1）
+    all_inv_ids = [inv.id for inv in invoices]
+    prods_map_result = await db.execute(
+        select(InvoiceProduct).where(InvoiceProduct.invoice_id.in_(all_inv_ids))
+    )
+    prods_map = {}
+    for p in prods_map_result.scalars().all():
+        prods_map.setdefault(p.invoice_id, []).append(p)
+    
+    taxes_map = await _batch_get_taxes(db, all_inv_ids)
+    clearances_map = await _batch_get_clearances(db, all_inv_ids)
+
     items: List[InvoiceReportSummaryItem] = []
     for inv in invoices:
         # 批次信息
         batch_id, batch_name, batch_code = await _get_invoice_batch_info(db, inv.id)
 
-        # 产品汇总
-        prod_result = await db.execute(
-            select(InvoiceProduct).where(InvoiceProduct.invoice_id == inv.id)
-        )
-        prods = prod_result.scalars().all()
+        # 产品汇总（从预加载字典获取）
+        prods = prods_map.get(inv.id, [])
         total_weight = sum(_to_decimal(p.net_weight_kg) for p in prods)
         total_boxes = sum(p.box_count or 0 for p in prods)
         total_amount_usd = sum(_to_decimal(p.total_amount) for p in prods)
@@ -1245,14 +1304,14 @@ async def list_invoice_reports(
         if total_boxes == 0:
             total_boxes = inv.total_boxes or 0
 
-        # 税费
-        tax = await _get_invoice_taxes(db, inv.id)
+        # 税费（从预加载字典获取）
+        tax = taxes_map.get(inv.id)
         import_duty = _to_decimal(tax.import_duty) if tax else Decimal("0")
         import_vat = _to_decimal(tax.import_vat) if tax else Decimal("0")
         total_taxes = import_duty + import_vat
 
-        # 清关
-        clearance = await _get_invoice_clearance(db, inv.id)
+        # 清关（从预加载字典获取）
+        clearance = clearances_map.get(inv.id)
         clearance_cost = Decimal("0")
         if clearance:
             clearance_cost = (
@@ -1293,10 +1352,7 @@ async def list_invoice_reports(
             batch_rows = batch_bi_result.all()
             batch_total_weight = Decimal("0")
             for bbi, binv in batch_rows:
-                bprod_result = await db.execute(
-                    select(InvoiceProduct).where(InvoiceProduct.invoice_id == binv.id)
-                )
-                bprods = bprod_result.scalars().all()
+                bprods = prods_map.get(binv.id, [])
                 bw = sum(_to_decimal(p.net_weight_kg) for p in bprods)
                 if bw == 0:
                     bw = _to_decimal(binv.total_weight_kg)
@@ -2330,12 +2386,22 @@ async def list_payable_statements(
         # 本期采购
         current_purchase = Decimal("0")
         current_expenses = Decimal("0")
+        # 预加载本期发票的产品和税费（避免N+1）
+        period_inv_ids = [inv.id for inv in all_invoices if start <= inv.invoice_date <= end]
+        prods_map_result = await db.execute(
+            select(InvoiceProduct).where(InvoiceProduct.invoice_id.in_(period_inv_ids))
+        )
+        prods_map = {}
+        for p in prods_map_result.scalars().all():
+            prods_map.setdefault(p.invoice_id, []).append(p)
+        
+        taxes_map = {}
+        if not is_usd:
+            taxes_map = await _batch_get_taxes(db, period_inv_ids)
+
         for inv in all_invoices:
             if start <= inv.invoice_date <= end:
-                prod_result = await db.execute(
-                    select(InvoiceProduct).where(InvoiceProduct.invoice_id == inv.id)
-                )
-                prods = prod_result.scalars().all()
+                prods = prods_map.get(inv.id, [])
                 amount_usd = sum(_to_decimal(p.total_amount) for p in prods)
                 if amount_usd == 0:
                     amount_usd = _to_decimal(inv.total_amount_usd)
@@ -2356,8 +2422,8 @@ async def list_payable_statements(
                     amount_cny=round(purchase_cny, 2),
                 ))
 
-                # 税费（仅CNY供应商显示）
-                tax = await _get_invoice_taxes(db, inv.id)
+                # 税费（从预加载字典获取，仅CNY供应商显示）
+                tax = taxes_map.get(inv.id)
                 if tax and not is_usd:
                     duty = _to_decimal(tax.import_duty)
                     vat = _to_decimal(tax.import_vat)
@@ -3127,17 +3193,26 @@ async def get_financial_statements(
         bi_rows = bi_result.scalars().all()
         invoice_ids = [bi.invoice_id for bi in bi_rows]
 
-        # 税费（按发票日期过滤）
+        # 批量获取发票日期信息 + 预加载税费/清关（避免N+1）
+        inv_result = await db.execute(
+            select(ImportInvoice.id, ImportInvoice.invoice_date)
+            .where(ImportInvoice.id.in_(invoice_ids))
+        )
+        inv_dates = {row[0]: row[1] for row in inv_result.all()}
+
+        taxes_map = await _batch_get_taxes(db, invoice_ids)
+        clearances_map = await _batch_get_clearances(db, invoice_ids)
+
+        # 税费和清关（按发票日期过滤，从预加载字典获取）
         for inv_id in invoice_ids:
-            inv = await db.get(ImportInvoice, inv_id)
-            if inv and inv.invoice_date >= sdt and inv.invoice_date <= edt:
-                tax = await _get_invoice_taxes(db, inv_id)
+            inv_date = inv_dates.get(inv_id)
+            if inv_date and inv_date >= sdt and inv_date <= edt:
+                tax = taxes_map.get(inv_id)
                 if tax:
                     total_import_vat += _to_decimal(tax.import_vat)
                     total_import_duty += _to_decimal(tax.import_duty)
 
-                # 清关
-                clearance = await _get_invoice_clearance(db, inv_id)
+                clearance = clearances_map.get(inv_id)
                 if clearance:
                     total_clearance += (
                         _to_decimal(clearance.clearance_fee) +
@@ -3390,13 +3465,17 @@ async def get_financial_statements(
         )
         invoice_ids = [bi.invoice_id for bi in bi_result.scalars().all()]
 
+        # 批量预加载税费和清关（避免N+1）
+        taxes_map = await _batch_get_taxes(db, invoice_ids)
+        clearances_map = await _batch_get_clearances(db, invoice_ids)
+
         taxes = Decimal("0")
         clearance_cost = Decimal("0")
         for inv_id in invoice_ids:
-            tax = await _get_invoice_taxes(db, inv_id)
+            tax = taxes_map.get(inv_id)
             if tax:
                 taxes += _to_decimal(tax.import_vat) + _to_decimal(tax.import_duty)
-            clearance = await _get_invoice_clearance(db, inv_id)
+            clearance = clearances_map.get(inv_id)
             if clearance:
                 clearance_cost += (
                     _to_decimal(clearance.clearance_fee) +
