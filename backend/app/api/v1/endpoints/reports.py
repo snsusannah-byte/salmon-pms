@@ -1784,7 +1784,7 @@ async def list_receivable_statements(
                         date=sale.sale_date,
                         type="discount",
                         sale_no=sale.sale_no,
-                        description=f"折扣",
+                        description="折扣",
                         debit=Decimal("0"),
                         credit=_to_decimal(sale.discount),
                         balance=Decimal("0"),
@@ -1814,7 +1814,7 @@ async def list_receivable_statements(
                         date=sale.sale_date,
                         type="discount",
                         sale_no=f"FP-{sale.id}",
-                        description=f"折扣",
+                        description="折扣",
                         debit=Decimal("0"),
                         credit=_to_decimal(sale.discount),
                         balance=Decimal("0"),
@@ -2005,7 +2005,7 @@ async def list_receivable_statements(
             TransactionRecord.counterparty_id == customer.id,
             TransactionRecord.type == "income",
             TransactionRecord.category == "customer_deposit",
-            TransactionRecord.is_confirmed == True,
+            TransactionRecord.is_confirmed.is_(True),
         ]
         if start is not None:
             txn_conditions.append(TransactionRecord.transaction_date >= start)
@@ -2030,7 +2030,7 @@ async def list_receivable_statements(
             TransactionRecord.counterparty_id == customer.id,
             TransactionRecord.type == "expense",
             TransactionRecord.category == "sales_refund",
-            TransactionRecord.is_confirmed == True,
+            TransactionRecord.is_confirmed.is_(True),
         ]
         if start is not None:
             refund_conditions.append(TransactionRecord.transaction_date >= start)
@@ -2100,7 +2100,6 @@ async def export_receivable_statements(
     """
     导出应收对账单CSV（包含明细）
     """
-    from datetime import datetime as _dt
 
     # 复用查询逻辑：先获取数据
     resp = await list_receivable_statements(
@@ -2685,7 +2684,6 @@ async def export_payable_statements(
     """
     导出应付对账单CSV（包含明细）
     """
-    from datetime import datetime as _dt
 
     # 复用查询逻辑
     resp = await list_payable_statements(
@@ -2798,9 +2796,6 @@ async def get_payable_monthly(
         start_date = today.replace(day=1).isoformat()
     if not end_date:
         end_date = today.isoformat()
-
-    start = _dt.strptime(start_date, "%Y-%m-%d").date()
-    end = _dt.strptime(end_date, "%Y-%m-%d").date()
 
     # 获取供应商
     supplier = await db.get(Company, supplier_id)
