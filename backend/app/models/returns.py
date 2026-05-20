@@ -7,8 +7,8 @@ from enum import Enum as PyEnum
 from typing import Optional, List
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Enum, ForeignKey, Integer,
-    Numeric, String, Text, UniqueConstraint,
+    Date, DateTime, Enum, ForeignKey, Integer,
+    Numeric, String, Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
