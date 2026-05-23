@@ -147,11 +147,10 @@ class FinanceService:
 
             total_exchanged = direct_total + batch_share
 
-            # 判断购汇状态
-            if total_exchanged >= inv_amount and inv_amount > 0:
+            # 购汇状态二元判断：业务上不存在部分购汇
+            # 只要有购汇记录（> 0）就是已购汇，否则未购汇
+            if total_exchanged > 0:
                 status = ExchangeStatus.COMPLETED
-            elif total_exchanged > 0:
-                status = ExchangeStatus.PARTIAL
             else:
                 status = ExchangeStatus.NOT_EXCHANGED
 
@@ -215,13 +214,11 @@ class FinanceService:
                     batch_share = batch_ex_total * proportion
 
             total_exchanged = direct_total + batch_share
-            invoice_total = inv.total_amount_usd or Decimal("0")
 
-            # 判断购汇状态
-            if total_exchanged >= invoice_total and invoice_total > 0:
+            # 购汇状态二元判断：业务上不存在部分购汇
+            # 只要有购汇记录（> 0）就是已购汇，否则未购汇
+            if total_exchanged > 0:
                 status = ExchangeStatus.COMPLETED
-            elif total_exchanged > 0:
-                status = ExchangeStatus.PARTIAL
             else:
                 status = ExchangeStatus.NOT_EXCHANGED
 

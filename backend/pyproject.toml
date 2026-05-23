@@ -51,6 +51,18 @@ dev = [
 [tool.uv]
 default-groups = ["dev"]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::sqlalchemy.exc.SAWarning"
+]
+
 [tool.setuptools.packages.find]
 include = ["app*"]
 exclude = ["migrations*"]

@@ -342,7 +342,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
     });
   };
 
-  // 实时计算汇总（直接使用已保存的产品金额，避免浮点精度误差）
+  // 实时计算汇总（直接用重量×单价，不依赖 total_amount 字段）
   const products = form.watch("products") || [];
   let totalBoxes = 0;
   let totalWeight = 0;
@@ -351,7 +351,8 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
   products.forEach((p: any) => {
     const netWeight = Number(p?.net_weight_kg || 0);
     const boxCount = Number(p?.box_count || 0);
-    const lineAmount = Number(p?.total_amount || 0);
+    const unitPrice = Number(p?.unit_price || 0);
+    const lineAmount = Math.round(netWeight * unitPrice * 100) / 100;
     totalBoxes += boxCount;
     totalWeight += netWeight;
     totalAmount += lineAmount;
@@ -591,7 +592,6 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
             {fields.map((field, index) => {
               const netWeight = Number(form.watch(`products.${index}.net_weight_kg`) || 0);
               const unitPrice = Number(form.watch(`products.${index}.unit_price`) || 0);
-              const storedAmount = Number(form.watch(`products.${index}.total_amount`) || 0);
               const lineAmount = Math.round(netWeight * unitPrice * 100) / 100;
               const productName = form.watch(`products.${index}.product_name`);
               
@@ -644,7 +644,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                     {...form.register(`products.${index}.unit_price`)} 
                   />
                   <div className="text-right text-xs font-medium tabular-nums">
-                    ${storedAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${lineAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </div>
                   <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-red-500 shrink-0" onClick={() => remove(index)}>
                     <X className="h-4 w-4" />

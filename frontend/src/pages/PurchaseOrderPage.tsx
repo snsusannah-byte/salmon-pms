@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Search, Plus, Package, ArrowDown, Boxes, Fish, Wrench,
-  ClipboardList, CheckCircle2, Circle, AlertCircle,
+  ClipboardList, CheckCircle2, Circle, AlertCircle, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -96,6 +96,10 @@ const typeMap: Record<string, string> = {
 const fetchPurchaseOrders = async (params: Record<string, any>) => {
   const { data } = await api.get("/v1/purchase-orders", { params });
   return data;
+};
+
+const deletePurchaseOrder = async (id: number) => {
+  await api.delete(`/v1/purchase-orders/${id}`);
 };
 
 const fetchSuppliers = async () => {
@@ -388,6 +392,20 @@ export function PurchaseOrderPage() {
       }),
   });
 
+  const [deleteOrderId, setDeleteOrderId] = useState<number | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: deletePurchaseOrder,
+    onSuccess: () => {
+      toast.success("采购单删除成功");
+      queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      setDeleteOrderId(null);
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || "删除失败");
+    },
+  });
+
   const orders: PurchaseOrder[] = data?.items || [];
   const total = data?.total || 0;
   const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
@@ -484,7 +502,14 @@ export function PurchaseOrderPage() {
                           <Badge className={status.className}>{status.label}</Badge>
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="sm">详情</Button>
+                          <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="sm">详情</Button>
+                            {order.status === "pending" && (
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600" onClick={() => setDeleteOrderId(order.id)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -517,6 +542,23 @@ export function PurchaseOrderPage() {
           </Card>
         </TabsContent>
       </Tabs>
+      {/* 删除确认弹窗 */}
+      <Dialog open={!!deleteOrderId} onOpenChange={() => setDeleteOrderId(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            确定删除该采购单吗？此操作不可恢复，仅待入库状态的采购单可删除。
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOrderId(null)}>取消</Button>
+            <Button variant="destructive" onClick={() => deleteOrderId && deleteMutation.mutate(deleteOrderId)} disabled={deleteMutation.isPending}>
+              {deleteMutation.isPending ? "删除中..." : "删除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -141,7 +141,7 @@ class WarehouseV2Service:
         for stock, wh, product in rows:
             batch_no = None
             if stock.batch_id:
-                batch_result = await db.execute(select(Batch.batch_no).where(Batch.id == stock.batch_id))
+                batch_result = await db.execute(select(Batch.batch_code).where(Batch.id == stock.batch_id))
                 batch_no = batch_result.scalar()
 
             items.append({

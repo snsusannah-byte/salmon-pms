@@ -84,6 +84,9 @@ const emptyForm = {
   total_weight: 0,
   total_boxes: 0,
   remark: '',
+  sale_id: null as number | null,
+  slaughter_date: '' as string,
+  factory: '' as string,
   products: [emptyProduct]
 };
 
@@ -102,6 +105,7 @@ export function PurchaseOrderEntry() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
+  const [sales, setSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -138,8 +142,29 @@ export function PurchaseOrderEntry() {
     }
   };
 
-  useEffect(() => { loadOrders(); loadSuppliers(); loadProducts(); }, []);
+  const loadSales = async () => {
+    const res = await apiFetch('/v4/finished-product-sales');
+    if (res.ok && res.data) {
+      const arr = Array.isArray(res.data) ? res.data : (res.data.data || []);
+      // 只显示待采购（未关联采购单）的整鱼销售单
+      setSales(arr.filter((s: any) =>
+        s.sale_type === 'whole_fish' &&
+        (s.procurement_status || s.status) === 'pending' &&
+        (s.purchase_count || 0) === 0
+      ));
+    }
+  };
+
+  useEffect(() => { loadOrders(); loadSuppliers(); loadProducts(); loadSales(); }, []);
   useEffect(() => { if (showModal && productGroups.length === 0) loadProducts(); }, [showModal]);
+
+  // 解析重量（支持 10+17.9 这种多重量相加）
+  const parseWeight = (v: any): number => {
+    if (typeof v === 'string' && v.includes('+')) {
+      return v.split('+').reduce((a, b) => a + (parseFloat(b.trim()) || 0), 0);
+    }
+    return parseFloat(v) || 0;
+  };
 
   const handleProductChange = (idx: number, field: keyof PurchaseProduct, value: any) => {
     setForm(prev => {
@@ -147,11 +172,13 @@ export function PurchaseOrderEntry() {
       products[idx] = { ...products[idx], [field]: value };
       // 自动计算金额
       if (field === 'weight_kg' || field === 'unit_price') {
-        products[idx].total_amount = round2(products[idx].weight_kg * products[idx].unit_price);
+        const w = parseWeight(products[idx].weight_kg);
+        const p = parseFloat(products[idx].unit_price as any) || 0;
+        products[idx].total_amount = round2(w * p);
       }
       // 汇总
       const total_amount = products.reduce((s, p) => s + (p.total_amount || 0), 0);
-      const total_weight = products.reduce((s, p) => s + (p.weight_kg || 0), 0);
+      const total_weight = products.reduce((s, p) => s + parseWeight(p.weight_kg), 0);
       const total_boxes = products.reduce((s, p) => s + (p.box_count || 0), 0);
       return { ...prev, products, total_amount, total_weight, total_boxes };
     });
@@ -164,11 +191,13 @@ export function PurchaseOrderEntry() {
       products[idx] = { ...products[idx], ...updates };
       // 自动计算金额
       if (updates.weight_kg !== undefined || updates.unit_price !== undefined) {
-        products[idx].total_amount = round2(products[idx].weight_kg * products[idx].unit_price);
+        const w = parseWeight(products[idx].weight_kg);
+        const p = parseFloat(products[idx].unit_price as any) || 0;
+        products[idx].total_amount = round2(w * p);
       }
       // 汇总
       const total_amount = products.reduce((s, p) => s + (p.total_amount || 0), 0);
-      const total_weight = products.reduce((s, p) => s + (p.weight_kg || 0), 0);
+      const total_weight = products.reduce((s, p) => s + parseWeight(p.weight_kg), 0);
       const total_boxes = products.reduce((s, p) => s + (p.box_count || 0), 0);
       return { ...prev, products, total_amount, total_weight, total_boxes };
     });
@@ -188,11 +217,14 @@ export function PurchaseOrderEntry() {
     if (!form.supplier_id) return;
     const payload = {
       ...form,
+      sale_id: form.sale_id,
+      slaughter_date: form.slaughter_date || undefined,
+      factory: form.factory || undefined,
       products: form.products.filter(p => p.product_name.trim() || p.product_spec.trim())
     };
     try {
       if (editingId) {
-        await apiFetch(`/purchase-orders/${editingId}`, {
+        await apiFetch(`/v4/purchase-orders/${editingId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -204,13 +236,14 @@ export function PurchaseOrderEntry() {
       setForm(emptyForm);
       setEditingId(null);
       loadOrders();
+      loadSales();
     } catch (e) {}
   };
 
   const handleEdit = async (order: PurchaseOrder) => {
-    const res = await apiFetch(`/purchase-orders/${order.id}`);
+    const res = await apiFetch(`/v4/purchase-orders/${order.id}`);
     if (res.ok && res.data) {
-      const o = res.data;
+      const o = res.data.data || res.data;
       setForm({
         purchase_no: o.purchase_no || '',
         purchase_date: o.purchase_date || new Date().toISOString().split('T')[0],
@@ -221,6 +254,9 @@ export function PurchaseOrderEntry() {
         total_weight: o.total_weight || 0,
         total_boxes: o.total_boxes || 0,
         remark: o.remark || '',
+        sale_id: o.sale_id || null,
+        slaughter_date: o.slaughter_date || '',
+        factory: o.factory || '',
         products: (o.products?.length ? o.products : [emptyProduct]).map((p: any) => ({
           product_name: p.product_name || '',
           product_spec: p.product_spec || '',
@@ -238,14 +274,15 @@ export function PurchaseOrderEntry() {
 
   const handleDelete = async (id: number) => {
     if (!confirm('确定删除该采购入库单？')) return;
-    await apiDelete(`v4/purchase-orders/${id}`, '删除成功');
+    await apiDelete(`/v4/purchase-orders/${id}`, '删除成功');
     loadOrders();
+    loadSales();
   };
 
   const handleViewDetail = async (order: PurchaseOrder) => {
-    const res = await apiFetch(`/purchase-orders/${order.id}`);
+    const res = await apiFetch(`/v4/purchase-orders/${order.id}`);
     if (res.ok && res.data) {
-      setDetailOrder(res.data);
+      setDetailOrder(res.data.data || res.data);
       setShowDetail(true);
     }
   };
@@ -298,7 +335,9 @@ export function PurchaseOrderEntry() {
                     <th className="px-4 py-2 text-left">采购单号</th>
                     <th className="px-4 py-2 text-left">日期</th>
                     <th className="px-4 py-2 text-left">供应商</th>
+                    <th className="px-4 py-2 text-left">产品名称</th>
                     <th className="px-4 py-2 text-left">加工厂</th>
+                    <th className="px-4 py-2 text-left">宰杀日期</th>
                     <th className="px-4 py-2 text-right">箱数</th>
                     <th className="px-4 py-2 text-right">重量(kg)</th>
                     <th className="px-4 py-2 text-right">金额(元)</th>
@@ -307,23 +346,30 @@ export function PurchaseOrderEntry() {
                 </thead>
                 <tbody>
                   {filteredOrders.length === 0 && (
-                    <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">暂无采购入库单</td></tr>
+                    <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">暂无采购入库单</td></tr>
                   )}
-                  {filteredOrders.map(o => (
-                    <tr key={o.id} className="border-t hover:bg-gray-50">
-                      <td className="px-4 py-2 font-mono text-blue-600 cursor-pointer hover:underline" onClick={() => handleViewDetail(o)}>{o.purchase_no}</td>
-                      <td className="px-4 py-2">{o.purchase_date}</td>
-                      <td className="px-4 py-2">{o.supplier_name}</td>
-                      <td className="px-4 py-2 text-xs text-gray-500">{o.factories?.length ? o.factories.join('、') : '-'}</td>
-                      <td className="px-4 py-2 text-right">{o.total_boxes || '-'}</td>
-                      <td className="px-4 py-2 text-right">{o.total_weight ? o.total_weight.toFixed(2) : '-'}</td>
-                      <td className="px-4 py-2 text-right font-medium">{o.total_amount ? o.total_amount.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' }) : '-'}</td>
-                      <td className="px-4 py-2 text-center">
-                        <Button size="sm" variant="ghost" onClick={() => handleEdit(o)}><Edit2 className="w-4 h-4" /></Button>
-                        <Button size="sm" variant="ghost" className="text-red-500" onClick={() => handleDelete(o.id)}><Trash2 className="w-4 h-4" /></Button>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredOrders.map(o => {
+                    const firstProductName = o.products?.[0]?.product_name || '';
+                    const productNames = [...new Set(o.products?.map((p: any) => p.product_name).filter(Boolean) || [])];
+                    const sd = o.slaughter_date ? o.slaughter_date.slice(5, 10).replace('-', '') : '';
+                    return (
+                      <tr key={o.id} className="border-t hover:bg-gray-50">
+                        <td className="px-4 py-2 font-mono text-blue-600 cursor-pointer hover:underline" onClick={() => handleViewDetail(o)}>{o.purchase_no}</td>
+                        <td className="px-4 py-2">{o.purchase_date}</td>
+                        <td className="px-4 py-2">{o.supplier_name}</td>
+                        <td className="px-4 py-2 text-xs text-gray-600">{productNames.length ? productNames.join('、') : '-'}</td>
+                        <td className="px-4 py-2 text-xs text-gray-500">{o.factories?.length ? o.factories.join('、') : '-'}</td>
+                        <td className="px-4 py-2">{sd ? `05${sd}` : '-'}</td>
+                        <td className="px-4 py-2 text-right">{o.total_boxes || '-'}</td>
+                        <td className="px-4 py-2 text-right">{o.total_weight ? o.total_weight.toFixed(2) : '-'}</td>
+                        <td className="px-4 py-2 text-right font-medium">{o.total_amount ? o.total_amount.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' }) : '-'}</td>
+                        <td className="px-4 py-2 text-center">
+                          <Button size="sm" variant="ghost" onClick={() => handleEdit(o)}><Edit2 className="w-4 h-4" /></Button>
+                          <Button size="sm" variant="ghost" className="text-red-500" onClick={() => handleDelete(o.id)}><Trash2 className="w-4 h-4" /></Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -348,6 +394,61 @@ export function PurchaseOrderEntry() {
                 <Label>采购日期 *</Label>
                 <Input type="date" value={form.purchase_date} onChange={e => setForm({...form, purchase_date: e.target.value})} />
               </div>
+              {/* 以销定采：关联销售单 */}
+              {form.order_type === 'raw_material' && (
+                <div>
+                  <Label>关联销售单（以销定采）</Label>
+                  <select
+                    className="w-full h-9 px-3 rounded-md border border-input bg-background text-sm"
+                    value={form.sale_id || ''}
+                    onChange={async e => {
+                      const saleId = e.target.value ? Number(e.target.value) : null;
+                      if (!saleId) {
+                        setForm({...form, sale_id: null, products: [emptyProduct]});
+                        return;
+                      }
+                      // fetch 销售单详情，自动生成采购明细
+                      const res = await apiFetch(`/v4/finished-product-sales/${saleId}`);
+                      if (res.ok && res.data) {
+                        const s = res.data.data || res.data;
+                        const autoProducts = (s.products || []).map((sp: any) => ({
+                          product_name: s.product_name || sp.product_name || '',
+                          product_spec: sp.product_spec || '',
+                          factory: s.factory || sp.factory || '',
+                          box_count: sp.box_count || 0,
+                          weight_kg: 0,
+                          unit_price: sp.unit_price || 0,
+                          total_amount: 0,
+                        }));
+                        setForm(prev => ({
+                          ...prev,
+                          sale_id: saleId,
+                          slaughter_date: s.slaughter_date || prev.purchase_date,
+                          factory: s.factory || '',
+                          products: autoProducts.length ? autoProducts : [emptyProduct],
+                          total_boxes: autoProducts.reduce((sum: number, p: any) => sum + (p.box_count || 0), 0),
+                          total_weight: 0,
+                          total_amount: 0,
+                        }));
+                      } else {
+                        setForm({...form, sale_id: saleId});
+                      }
+                    }}
+                  >
+                    <option value="">不关联（常规采购）</option>
+                    {sales.map((s: any) => {
+                      const sd = s.slaughter_date ? s.slaughter_date.slice(5, 10).replace('-', '') : '';
+                      const totalBoxes = (s.products || []).reduce((sum: number, p: any) => sum + (p.box_count || 0), 0) || s.quantity || 0;
+                      const label = `${s.customer || '-'}·${sd || '--'}·${s.factory || s.first_product_factory || '-'}·${totalBoxes}箱`;
+                      return (
+                        <option key={s.id} value={s.id}>
+                          {s.sale_no} · {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
               <div>
                 <Label>供应商 *</Label>
                 <div className="relative">
@@ -545,7 +646,33 @@ export function PurchaseOrderEntry() {
                             <Input type="number" className="h-8 text-sm text-right" value={String(p.box_count || '')} onChange={e => handleProductChange(idx, 'box_count', parseInt(e.target.value) || 0)} placeholder="箱" />
                           </td>
                           <td className="px-3 py-2">
-                            <Input type="number" step="0.01" className="h-8 text-sm text-right" value={String(p.weight_kg || '')} onChange={e => handleProductChange(idx, 'weight_kg', parseFloat(e.target.value) || 0)} placeholder="kg" />
+                            <Input type="text" className="h-8 text-sm text-right" value={String(p.weight_kg ?? '')} onChange={e => {
+                                handleProductChange(idx, 'weight_kg', e.target.value);
+                              }} onBlur={e => {
+                                const val = e.target.value.trim();
+                                if (val.includes('+')) {
+                                  const sum = val.split('+').reduce((a, b) => a + (parseFloat(b.trim()) || 0), 0);
+                                  handleProductChange(idx, 'weight_kg', round2(sum));
+                                } else {
+                                  const num = parseFloat(val);
+                                  if (!isNaN(num)) {
+                                    handleProductChange(idx, 'weight_kg', round2(num));
+                                  }
+                                }
+                              }} onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const val = (e.target as HTMLInputElement).value.trim();
+                                  if (val.includes('+')) {
+                                    const sum = val.split('+').reduce((a, b) => a + (parseFloat(b.trim()) || 0), 0);
+                                    handleProductChange(idx, 'weight_kg', round2(sum));
+                                  } else {
+                                    const num = parseFloat(val);
+                                    if (!isNaN(num)) {
+                                      handleProductChange(idx, 'weight_kg', round2(num));
+                                    }
+                                  }
+                                }
+                              }} placeholder="22.16 或 10+17.9" />
                           </td>
                           <td className="px-3 py-2">
                             <Input type="number" step="0.01" className="h-8 text-sm text-right" value={String(p.unit_price || '')} onChange={e => handleProductChange(idx, 'unit_price', parseFloat(e.target.value) || 0)} placeholder="元/kg" />
@@ -618,9 +745,26 @@ export function PurchaseOrderEntry() {
                       </tr>
                     )) || <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-400">无明细</td></tr>}
                   </tbody>
+                  {/* 汇总行 */}
+                  {(detailOrder.products?.length || 0) > 0 && (
+                    <tfoot className="bg-gray-50 border-t-2">
+                      <tr>
+                        <td className="px-3 py-2 font-bold">合计</td>
+                        <td className="px-3 py-2 text-right font-bold">{detailOrder.total_boxes}</td>
+                        <td className="px-3 py-2 text-right font-bold">{detailOrder.total_weight?.toFixed?.(2) ?? detailOrder.total_weight} kg</td>
+                        <td className="px-3 py-2"></td>
+                        <td className="px-3 py-2 text-right font-bold text-blue-600">{detailOrder.total_amount?.toLocaleString?.('zh-CN', { style: 'currency', currency: 'CNY' }) ?? detailOrder.total_amount?.toFixed?.(2)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
               <div className="text-sm text-gray-500">备注: {detailOrder.remark || '-'}</div>
+              {detailOrder.sale_id && (
+                <div className="bg-blue-50 p-2 rounded text-sm">
+                  <span className="text-blue-600 font-medium">以销定采：</span>关联销售单 {detailOrder.sale_no || detailOrder.sale_id}
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

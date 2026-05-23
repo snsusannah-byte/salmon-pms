@@ -80,11 +80,11 @@ class InvoiceNotificationService:
         notifications = []
         now = datetime.now()
         
-        # 获取加工厂显示（优先EU注册号 enterprise_registration_no，其次 name）
+        # 获取加工厂显示（优先 code，其次 name）
         processing_plant_display = None
         if invoice.processing_plant:
             # 关系已加载，直接取
-            processing_plant_display = invoice.processing_plant.enterprise_registration_no or invoice.processing_plant.name
+            processing_plant_display = invoice.processing_plant.code or invoice.processing_plant.name
         elif invoice.processing_plant_id:
             # 如果关系没加载，直接查询
             company_result = await db.execute(
@@ -92,7 +92,7 @@ class InvoiceNotificationService:
             )
             company = company_result.scalar_one_or_none()
             if company:
-                processing_plant_display = company.enterprise_registration_no or company.name
+                processing_plant_display = company.code or company.name
         
         # 1. 预计到货通知
         arrival_text = InvoiceNotificationService.generate_arrival_notification(

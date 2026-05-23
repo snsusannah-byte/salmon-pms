@@ -57,7 +57,7 @@ const router = createBrowserRouter([
       { path: "finished-product-sales", element: <FinishedProductSales /> },
       { path: "production", element: <ProductionManagementPage /> },
       { path: "materials", element: <MaterialManagementPage /> },
-      { path: "warehouse", element: <WarehousePage /> },
+      { path: "warehouse", element: <Navigate to="/warehouse-v2" replace /> },
       { path: "warehouse-v2", element: <WarehouseV2Page /> },
       { path: "purchase-orders", element: <PurchaseOrderEntry /> },
       { path: "finished-product-reports", element: <FinishedProductReportsPage /> },

@@ -424,3 +424,177 @@ async def list_movements(
         start_date=start_date, end_date=end_date, skip=skip, limit=limit,
     )
     return StockMovementListResponse(total=total, items=items, skip=skip, limit=limit)
+
+
+# ==================== 国内整包仓明细 ====================
+
+@router.get("/domestic-stocks")
+async def list_domestic_stocks(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """国内整包仓明细列表：按入库批次展示，含宰杀日期、加工厂、规格等"""
+    from app.models.warehouse import StockInbound, Warehouse, Stock
+    from app.models import Product, StockMovement
+    from sqlalchemy import func
+
+    # 查国内整包仓ID
+    wh_result = await db.execute(select(Warehouse.id).where(Warehouse.code == "ZB-DOMESTIC"))
+    wh_id = wh_result.scalar()
+    if not wh_id:
+        return {"total": 0, "items": []}
+
+    # 查入库记录 + 关联产品
+    inbound_result = await db.execute(
+        select(
+            StockInbound.id,
+            StockInbound.inbound_no,
+            StockInbound.source_no,
+            StockInbound.qty,
+            StockInbound.unit_cost,
+            StockInbound.total_cost,
+            StockInbound.inbound_date,
+            StockInbound.slaughter_date,
+            StockInbound.factory,
+            StockInbound.original_box_count,
+            StockInbound.original_weight,
+            StockInbound.remaining_qty,
+            StockInbound.remaining_box_count,
+            StockInbound.detail,
+            Product.id.label("product_id"),
+            Product.name.label("product_name"),
+            Product.spec.label("product_spec"),
+        )
+        .join(Product, StockInbound.product_id == Product.id)
+        .where(StockInbound.warehouse_id == wh_id)
+        .where(StockInbound.source_type == "purchase_order")
+        .order_by(StockInbound.inbound_date.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    rows = inbound_result.all()
+
+    # 查总数
+    count_result = await db.execute(
+        select(func.count()).select_from(
+            select(StockInbound).where(StockInbound.warehouse_id == wh_id).where(StockInbound.source_type == "purchase_order").subquery()
+        )
+    )
+    total = count_result.scalar() or 0
+
+    items = []
+    for r in rows:
+        detail = r.detail or {}
+        batch_no = detail.get("batch_no", "")
+        # 优先用采购单里的产品名称
+        display_product_name = detail.get("product_name") or r.product_name or "-"
+
+        # 查当前库存（从 stocks 表查聚合库存）
+        stock_result = await db.execute(
+            select(Stock.current_qty, Stock.available_qty)
+            .where(Stock.warehouse_id == wh_id)
+            .where(Stock.product_id == r.product_id)
+        )
+        stock_row = stock_result.one_or_none()
+        current_qty = float(stock_row.current_qty) if stock_row else 0
+        available_qty = float(stock_row.available_qty) if stock_row else 0
+
+        # 计算库存箱数（优先用剩余箱数字段，旧记录 fallback 到原始箱数）
+        if r.remaining_box_count is not None:
+            stock_box_count = r.remaining_box_count
+        else:
+            stock_box_count = r.original_box_count or detail.get("box_count", 0)
+
+        # 查当前库存（批次级：用 remaining_qty，旧记录 fallback 到 original_weight）
+        if r.remaining_qty is not None:
+            current_qty = float(r.remaining_qty)
+        else:
+            current_qty = float(r.original_weight or r.qty or 0)
+        available_qty = current_qty
+
+        # 查该产品的操作记录（包含关联单据信息）
+        from app.models.finance import PurchaseOrderV2
+        from app.models.finished_product import FinishedProductSaleV2
+        
+        move_result = await db.execute(
+            select(
+                StockMovement.id,
+                StockMovement.movement_type,
+                StockMovement.movement_date,
+                StockMovement.qty_change,
+                StockMovement.qty_before,
+                StockMovement.qty_after,
+                StockMovement.unit,
+                StockMovement.ref_type,
+                StockMovement.ref_no,
+                StockMovement.notes,
+            )
+            .where(StockMovement.warehouse_id == wh_id)
+            .where(StockMovement.product_id == r.product_id)
+            .order_by(StockMovement.movement_date.desc())
+        )
+        movements_raw = move_result.all()
+        
+        movements = []
+        for m in movements_raw:
+            # 反查关联单据获取供应商/客户
+            related_party = "-"
+            if m.ref_type == "purchase_order" and m.ref_no:
+                po_result = await db.execute(
+                    select(PurchaseOrderV2.supplier_name).where(PurchaseOrderV2.purchase_no == m.ref_no)
+                )
+                related_party = po_result.scalar() or "-"
+            elif m.ref_type == "finished_product_sale" and m.ref_no:
+                sale_result = await db.execute(
+                    select(FinishedProductSaleV2.customer).where(FinishedProductSaleV2.sale_no == m.ref_no)
+                )
+                related_party = sale_result.scalar() or "-"
+            
+            # 业务类型中文映射
+            business_type_map = {
+                "purchase_order": "采购入库",
+                "finished_product_sale": "成品销售",
+                "sale": "成品销售",
+                "transfer": "调拨",
+                "adjustment": "库存盘点",
+                "StockOutbound": "销售出库",
+            }
+            
+            movements.append({
+                "id": m.id,
+                "movement_type": m.movement_type,
+                "movement_date": m.movement_date.isoformat() if m.movement_date else None,
+                "qty_change": float(m.qty_change),
+                "qty_before": float(m.qty_before),
+                "qty_after": float(m.qty_after),
+                "unit": m.unit,
+                "ref_type": m.ref_type,
+                "ref_no": m.ref_no,
+                "notes": m.notes,
+                "business_type": business_type_map.get(m.ref_type, m.ref_type),
+                "related_party": related_party,
+            })
+
+        items.append({
+            "id": r.id,
+            "inbound_no": r.inbound_no,
+            "batch_no": batch_no,
+            "product_name": display_product_name,
+            "product_spec": r.product_spec or detail.get("spec", ""),
+            "slaughter_date": r.slaughter_date.isoformat() if r.slaughter_date else None,
+            "factory": r.factory,
+            "box_count": stock_box_count,
+            "current_weight": current_qty,
+            "available_weight": available_qty,
+            "original_box_count": r.original_box_count or detail.get("box_count", 0),
+            "original_weight": float(r.original_weight or r.qty or 0),
+            "unit_cost": float(r.unit_cost) if r.unit_cost else 0,
+            "total_cost": float(r.total_cost) if r.total_cost else 0,
+            "inbound_date": r.inbound_date.isoformat() if r.inbound_date else None,
+            "source_no": r.source_no,
+            "movement_count": len(movements),
+            "movements": movements,
+        })
+
+    return {"total": total, "items": items, "skip": skip, "limit": limit}

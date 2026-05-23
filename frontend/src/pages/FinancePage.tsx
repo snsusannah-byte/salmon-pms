@@ -250,17 +250,30 @@ export function FinancePage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* 进口费用 - 只在进口费用页或总览页显示 */}
         {(!tabFromUrl || tabFromUrl === "import") && (
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">进口费用合计</CardTitle>
-              <Ship className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {fmt(Number(summary?.total_tax || 0) + Number(summary?.total_clearance_cost || 0))}
-              </div>
-            </CardContent>
-          </Card>
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-amber-700">税费合计</CardTitle>
+                <Receipt className="h-4 w-4 text-amber-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-amber-700">
+                  {fmt(Number(summary?.total_tax || 0))}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-blue-700">清关费合计</CardTitle>
+                <Truck className="h-4 w-4 text-blue-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-700">
+                  {fmt(Number(summary?.total_clearance_cost || 0))}
+                </div>
+              </CardContent>
+            </Card>
+          </>
         )}
 
         {/* 购汇 - 只在购汇登记页或总览页显示 */}
@@ -873,6 +886,12 @@ function ImportFeesTab() {
                   <div className="font-medium">{detailItem.expense_date || "-"}</div>
                 </div>
               </div>
+              {detailItem.gross_weight_kg && (
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">出关毛重</Label>
+                  <div className="font-medium">{detailItem.gross_weight_kg} kg</div>
+                </div>
+              )}
               {detailItem.customs_broker_name && (
                 <div className="space-y-1">
                   <Label className="text-xs text-muted-foreground">报关行</Label>
@@ -935,6 +954,7 @@ function ImportFeesTab() {
             <TableRow>
               <TableHead>发票号</TableHead>
               <TableHead>费用日期</TableHead>
+              <TableHead>出关毛重(kg)</TableHead>
               <TableHead>报关行</TableHead>
               <TableHead>进口关税</TableHead>
               <TableHead>进口增值税</TableHead>
@@ -952,13 +972,13 @@ function ImportFeesTab() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={14} className="text-center py-8">
+                <TableCell colSpan={15} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : !importFees.length ? (
               <TableRow>
-                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -968,6 +988,7 @@ function ImportFeesTab() {
                   <TableRow key={f.invoice_id} className="hover:bg-slate-100 cursor-default transition-colors">
                   <TableCell className="font-medium">{f.invoice_no}</TableCell>
                   <TableCell>{f.expense_date || "-"}</TableCell>
+                  <TableCell className="text-xs">{f.gross_weight_kg ?? "-"}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{f.customs_broker_name || "-"}</TableCell>
                   <TableCell>{fmtFee(f.import_duty)}</TableCell>
                   <TableCell>{fmtFee(f.import_vat)}</TableCell>
@@ -1015,7 +1036,7 @@ function ImportFeesTab() {
               {/* 页汇总行 */}
               {importFees.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">
-                  <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
+                  <TableCell colSpan={4} className="text-right">本页合计:</TableCell>
                   <TableCell>{fmtFee(reduceSum(importFees, (f) => f.import_duty))}</TableCell>
                   <TableCell>{fmtFee(reduceSum(importFees, (f) => f.import_vat))}</TableCell>
                   <TableCell className="font-semibold text-amber-700">{fmtFee(reduceSum(importFees, (f) => f.tax_total))}</TableCell>

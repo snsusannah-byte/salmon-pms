@@ -97,14 +97,13 @@ class FinishedProductAftersales(Base, TimestampMixin):
 
 
 class FinishedProductSaleV2(Base, TimestampMixin):
-    """成品销售记录 (v2 - 迁移自 salmon-finance-v4)"""
+    """成品销售记录 (v2 - 以销定采，无库存)"""
     __tablename__ = "finished_product_sales_v2"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sale_no: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
     sale_type: Mapped[Optional[str]] = mapped_column(String(20), default="whole_fish")
-    source_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    source_no: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    # 以销定采：销售单先行，不关联采购单（采购单反过来关联销售单）
     customer: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     salesperson: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     product_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -122,6 +121,15 @@ class FinishedProductSaleV2(Base, TimestampMixin):
     net_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
     paid: Mapped[int] = mapped_column(Integer, default=0)
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 状态流转：pending(待采购) -> ordered(已下单) -> purchased(采购中) -> arrived(已到货) -> shipped(已发货) -> paid(已收款)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    # 批次号：MMDD-加工厂缩写-NNN（以销定采，批次号在销售单级别生成）
+    batch_no: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    # 业务扩展字段
+    slaughter_date: Mapped[Optional[Date]] = mapped_column(Date, nullable=True)  # 宰杀日期
+    factory: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # 加工厂
+    delivery_address: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # 收货地址
+    logistics_info: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # 物流信息
 
     products: Mapped[List["FinishedSaleProductV2"]] = relationship(
         "FinishedSaleProductV2",

@@ -43,11 +43,11 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
   const [amountCny, setAmountCny] = useState("");
   const [feeCny, setFeeCny] = useState("");
 
-  // 获取所有未购汇/部分购汇的发票
+  // 只获取未购汇的发票（业务上不存在部分购汇）
   const { data: invoicesData, isLoading } = useQuery<Invoice[]>({
     queryKey: ["invoices-for-exchange"],
     queryFn: async () => {
-      const res = await api.get("/v1/invoices?limit=500&exchange_status=not_exchanged,partial");
+      const res = await api.get("/v1/invoices?limit=500&exchange_status=not_exchanged");
       return res.data?.items || [];
     },
     enabled: open,

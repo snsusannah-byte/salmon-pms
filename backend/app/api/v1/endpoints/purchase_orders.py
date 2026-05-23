@@ -88,6 +88,21 @@ async def cancel_purchase_order(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.delete("/purchase-orders/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_purchase_order(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除采购单（仅待入库状态可删除）"""
+    order = await PurchaseOrderService.get_order(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="采购单不存在")
+    try:
+        await PurchaseOrderService.delete_order(db, order)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ==================== 入库确认 ====================
 
 @router.post("/purchase-orders/{order_id}/inbound", status_code=status.HTTP_200_OK)

@@ -128,8 +128,11 @@ class PurchaseOrderV2(Base, TimestampMixin):
     total_weight: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     total_boxes: Mapped[int] = mapped_column(Integer, default=0)
     order_type: Mapped[Optional[str]] = mapped_column(String(20), default="raw_material")  # raw_material=整鱼, accessories=辅料
+    slaughter_date: Mapped[Optional[Date]] = mapped_column(Date, nullable=True)  # 宰杀日期
     remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="completed")
+    # 以销定采：采购单反向关联销售单（一个销售单可分多个采购单）
+    sale_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
     products: Mapped[List["PurchaseOrderProductV2"]] = relationship(
         "PurchaseOrderProductV2",

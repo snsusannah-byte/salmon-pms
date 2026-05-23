@@ -47,11 +47,11 @@ const customsStatusMap: Record<string, { label: string; color: string }> = {
 const exchangeStatusMap: Record<string, { label: string; color: string }> = {
   not_exchanged: { label: "未购汇", color: "bg-gray-100 text-gray-800" },
   completed: { label: "已购汇", color: "bg-green-100 text-green-800" },
-  // 兼容旧数据
+  // partial 视为已购汇（兼容旧数据，业务上不存在部分购汇）
   partial: { label: "已购汇", color: "bg-green-100 text-green-800" },
   NOT_EXCHANGED: { label: "未购汇", color: "bg-gray-100 text-gray-800" },
   COMPLETED: { label: "已购汇", color: "bg-green-100 text-green-800" },
-  PARTIAL: { label: "已购汇", color: "bg-green-100 text-green-800" },
+  PARTIAL: { label: "已购汇", color: "bg-green-100 text-gray-800" },
 };
 
 interface InvoiceProduct {

@@ -236,9 +236,26 @@ async def create_exchange_record(
     data: ExchangeRecordCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    """创建购汇记录"""
+    """创建购汇记录（合并购汇时校验发票未购汇状态）"""
     if data.batch_id:
         await _check_batch_locked(db, data.batch_id)
+    
+    # 校验合并购汇的发票均未购汇（防止重复购汇）
+    if data.related_invoice_ids:
+        from app.models import ImportInvoice
+        from sqlalchemy import select
+        result = await db.execute(
+            select(ImportInvoice.id, ImportInvoice.invoice_no, ImportInvoice.exchange_status)
+            .where(ImportInvoice.id.in_(data.related_invoice_ids))
+        )
+        for row in result.all():
+            inv_id, inv_no, status = row
+            if status != "not_exchanged":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"发票 {inv_no} 已购汇，不能重复购汇"
+                )
+    
     record = await FinanceService.create_exchange_record(db, data.model_dump())
     return ExchangeRecordResponse.model_validate(record)
 

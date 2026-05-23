@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Search, Package, Warehouse, ArrowDown, ArrowUp, AlertTriangle,
@@ -423,7 +424,7 @@ export function WarehouseV2Page() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Warehouse className="h-6 w-6" />
-          仓库管理V2
+          仓库管理
         </h1>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setInboundOpen(true)}>
@@ -448,8 +449,10 @@ export function WarehouseV2Page() {
       {summary && <SummaryCards summary={summary} />}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-flex">
+        <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-flex">
           <TabsTrigger value="stocks">库存查询</TabsTrigger>
+          <TabsTrigger value="warnings">库存预警</TabsTrigger>
+          <TabsTrigger value="domestic">国内整包仓</TabsTrigger>
           <TabsTrigger value="movements">库存变动</TabsTrigger>
           <TabsTrigger value="warehouses">仓库定义</TabsTrigger>
           <TabsTrigger value="docs">操作说明</TabsTrigger>
@@ -457,6 +460,14 @@ export function WarehouseV2Page() {
 
         <TabsContent value="stocks" className="mt-4">
           <StockList />
+        </TabsContent>
+
+        <TabsContent value="warnings" className="mt-4">
+          <StockList isBelowWarning={true} />
+        </TabsContent>
+
+        <TabsContent value="domestic" className="mt-4">
+          <DomesticStockList />
         </TabsContent>
 
         <TabsContent value="movements" className="mt-4">
@@ -485,16 +496,198 @@ export function WarehouseV2Page() {
               <div>
                 <h3 className="font-semibold mb-1">业务流程</h3>
                 <ol className="list-decimal list-inside space-y-1 text-gray-600">
-                  <li>进口发票到港 → 入库到 ZB-IMPORT（整包仓）</li>
-                  <li>整鱼销售 → 从 ZB-IMPORT 出库</li>
-                  <li>调拨到分包仓 → ZB-IMPORT → FB-FISH（箱→条）</li>
-                  <li>分包仓单条销售 → 从 FB-FISH 出库</li>
+                  <li>采购入库 → 自动生成入库记录并更新库存</li>
+                  <li>调拨：整包仓 → 分包仓（箱→条转换）</li>
+                  <li>销售出库：从对应仓库扣减库存</li>
+                  <li>库存预警：库存低于安全线时自动标红</li>
                 </ol>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+// ==================== 国内整包仓明细 ====================
+interface DomesticStock {
+  id: number;
+  inbound_no: string;
+  batch_no: string;
+  product_name: string;
+  product_spec: string;
+  slaughter_date: string | null;
+  factory: string | null;
+  box_count: number;
+  current_weight: number;
+  available_weight: number;
+  original_box_count: number;
+  original_weight: number;
+  unit_cost: number;
+  total_cost: number;
+  inbound_date: string | null;
+  source_no: string;
+  movement_count: number;
+  movements?: {
+    id: number;
+    movement_type: string;
+    movement_date: string;
+    qty_change: number;
+    qty_before: number;
+    qty_after: number;
+    unit: string;
+    ref_type: string;
+    ref_no: string;
+    notes: string;
+    business_type: string;
+    related_party: string;
+  }[];
+}
+
+const fetchDomesticStocks = async (params: Record<string, any>) => {
+  const { data } = await api.get("/v1/warehouse-v2/domestic-stocks", { params });
+  return data;
+};
+
+function DomesticStockList() {
+  const [search, setSearch] = useState("");
+  const [movementOpen, setMovementOpen] = useState(false);
+  const [movementData, setMovementData] = useState<DomesticStock | null>(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ["warehouse-v2-domestic-stocks"],
+    queryFn: () => fetchDomesticStocks({ limit: 500 }),
+  });
+
+  const items: DomesticStock[] = data?.items || [];
+  const filtered = items.filter((s) =>
+    s.product_name?.toLowerCase().includes(search.toLowerCase()) ||
+    s.batch_no?.toLowerCase().includes(search.toLowerCase()) ||
+    s.factory?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-4">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+          <Input
+            placeholder="搜索产品/批次/加工厂..."
+            className="pl-8"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <span className="text-sm text-gray-500">共 {filtered.length} 条</span>
+      </div>
+
+      <div className="border rounded-md overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>仓库</TableHead>
+              <TableHead>产品名称</TableHead>
+              <TableHead>批次</TableHead>
+              <TableHead>宰杀日期</TableHead>
+              <TableHead>加工厂</TableHead>
+              <TableHead>规格</TableHead>
+              <TableHead className="text-right">库存箱数</TableHead>
+              <TableHead className="text-right">库存重量</TableHead>
+              <TableHead className="text-right">原始箱数</TableHead>
+              <TableHead className="text-right">原始重量</TableHead>
+              <TableHead className="text-right">操作记录</TableHead>
+              <TableHead className="text-right">入库金额</TableHead>
+              <TableHead>入库日期</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={13} className="text-center py-8">加载中...</TableCell>
+              </TableRow>
+            ) : filtered.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={13} className="text-center py-8 text-gray-500">暂无国内整包仓入库记录</TableCell>
+              </TableRow>
+            ) : (
+              filtered.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      {getWarehouseIcon("WHOLE_PACKAGE")}
+                      <span className="text-sm">国内整包仓</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="font-medium">{s.product_name}</TableCell>
+                  <TableCell className="font-mono text-xs">{s.batch_no || "-"}</TableCell>
+                  <TableCell>{s.slaughter_date || "-"}</TableCell>
+                  <TableCell>{s.factory || "-"}</TableCell>
+                  <TableCell>{s.product_spec || "-"}</TableCell>
+                  <TableCell className="text-right">{s.box_count || "-"}</TableCell>
+                  <TableCell className="text-right font-medium">{fmt(s.current_weight)} kg</TableCell>
+                  <TableCell className="text-right text-gray-500">{s.original_box_count || "-"}</TableCell>
+                  <TableCell className="text-right text-gray-500">{fmt(s.original_weight)} kg</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" className="h-6 px-2 text-blue-600" onClick={() => { setMovementData(s); setMovementOpen(true); }}>
+                      查看
+                    </Button>
+                  </TableCell>
+                  <TableCell className="text-right font-medium">¥{fmt(s.total_cost)}</TableCell>
+                  <TableCell>{s.inbound_date || "-"}</TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* 操作记录弹窗 */}
+      <Dialog open={movementOpen} onOpenChange={setMovementOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>操作记录 — {movementData?.product_name} {movementData?.batch_no}</DialogTitle>
+          </DialogHeader>
+          <div className="border rounded-md">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>操作时间</TableHead>
+                  <TableHead>单据编号</TableHead>
+                  <TableHead>业务类型</TableHead>
+                  <TableHead className="text-right">数量</TableHead>
+                  <TableHead>备注</TableHead>
+                  <TableHead>操作人</TableHead>
+                  <TableHead>供应商/客户</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {movementData?.movements?.length === 0 ? (
+                  <TableRow><TableCell colSpan={7} className="text-center py-4 text-gray-400">暂无记录</TableCell></TableRow>
+                ) : (
+                  movementData?.movements?.map((m) => (
+                    <TableRow key={m.id}>
+                      <TableCell>{m.movement_date}</TableCell>
+                      <TableCell className="font-mono text-xs">{m.ref_no || "-"}</TableCell>
+                      <TableCell>
+                        <Badge className={getMovementTypeBadge(m.movement_type)}>{m.business_type || getMovementTypeLabel(m.movement_type)}</Badge>
+                      </TableCell>
+                      <TableCell className={`text-right font-medium ${m.qty_change > 0 ? "text-green-600" : "text-red-600"}`}>
+                        {m.qty_change > 0 ? "+" : ""}{fmt(m.qty_change)} {m.unit}
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-500">{m.notes || "-"}</TableCell>
+                      <TableCell className="text-sm text-gray-500">-</TableCell>
+                      <TableCell className="text-sm">{m.related_party || "-"}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMovementOpen(false)}>关闭</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

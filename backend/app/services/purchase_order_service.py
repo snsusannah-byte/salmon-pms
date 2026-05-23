@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, select, desc
+from sqlalchemy import delete, func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -184,6 +184,20 @@ class PurchaseOrderService:
         await db.commit()
         await db.refresh(order)
         return order
+
+    @staticmethod
+    async def delete_order(db: AsyncSession, order: PurchaseOrder) -> None:
+        """删除采购单（仅待入库状态可删除）"""
+        if order.status != PurchaseOrderStatus.PENDING:
+            raise ValueError("只有待入库状态的采购单可以删除")
+
+        # 先删除采购单项
+        await db.execute(
+            delete(PurchaseOrderItem).where(PurchaseOrderItem.order_id == order.id)
+        )
+        # 再删除采购单
+        await db.delete(order)
+        await db.commit()
 
     # ==================== 入库确认 ====================
 

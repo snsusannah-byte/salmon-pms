@@ -105,6 +105,15 @@ class StockInbound(Base, TimestampMixin):
     confirmed_at: Mapped[Optional[DateTime]] = mapped_column(DateTime)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
+    # 国内整包仓专用字段
+    slaughter_date: Mapped[Optional[Date]] = mapped_column(Date, nullable=True)
+    factory: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    original_box_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    original_weight: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3), nullable=True)
+
+    # 批次级剩余量（用于先进先出扣减）
+    remaining_qty: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3), nullable=True)
+    remaining_box_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class StockOutbound(Base, TimestampMixin):

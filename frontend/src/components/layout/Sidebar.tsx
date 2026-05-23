@@ -58,8 +58,7 @@ const financeItems = [
 const finishedProductItems = [
   { icon: PackageCheck, label: "成品销售", path: "/finished-product-sales" },
   { icon: Factory, label: "生产管理", path: "/production" },
-  { icon: Warehouse, label: "成品仓库", path: "/warehouse" },
-  { icon: Archive, label: "仓库管理V2", path: "/warehouse-v2" },
+  { icon: Warehouse, label: "仓库管理", path: "/warehouse-v2" },
   { icon: Package, label: "采购入库", path: "/purchase-orders" },
   { icon: FileSpreadsheet, label: "成品报表", path: "/finished-product-reports" },
 ];

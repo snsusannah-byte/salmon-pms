@@ -48,14 +48,17 @@ export async function apiFetch(
     const res = await api.request({ url, ...config });
     const data = res.data;
 
-    if (!data.success) {
+    // 兼容两种格式：{success:true, data:...} 或 {total, items, ...}
+    const hasSuccessField = 'success' in data;
+    if (hasSuccessField && !data.success) {
       const msg = data?.error || errorMsg;
       if (errorMsg) toast.error(msg);
       return { ok: false, error: msg };
     }
 
     if (successMsg) toast.success(successMsg);
-    return { ok: true, data: data.data || data };
+    // 如果有 data 字段用 data，否则用整个响应
+    return { ok: true, data: hasSuccessField ? (data.data || data) : data };
   } catch (err: any) {
     const msg = `网络错误: ${err.message || "无法连接到服务器"}`;
     toast.error(msg);
