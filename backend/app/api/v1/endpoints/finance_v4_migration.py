@@ -27,6 +27,7 @@ from app.models import (
     Stock,
     FinishedProductReceipt,
     FinishedProductAftersales,
+    BankAccount,
 )
 from app.models.enums import StockMovementType
 
@@ -925,6 +926,7 @@ async def api_get_finished_sales(db: AsyncSession = Depends(get_db)):
             "purchase_count": purchase_count,
             "purchase_total_weight": purchase_total_weight,
             "purchase_total_amount": purchase_total_amount,
+            "receipts": [],
         })
     return {"success": True, "data": data}
 
@@ -979,6 +981,12 @@ async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)
         select(PurchaseOrderV2).where(PurchaseOrderV2.sale_id == sale_id)
     )
     purchases = purchase_result.scalars().all()
+
+    # 查收款记录
+    receipt_result = await db.execute(
+        select(FinishedProductReceipt).where(FinishedProductReceipt.sale_v2_id == sale_id)
+    )
+    receipts = receipt_result.scalars().all()
     
     return {
         "success": True,
@@ -1036,6 +1044,19 @@ async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)
                     "slaughter_date": po.slaughter_date.isoformat() if po.slaughter_date else None,
                 }
                 for po in purchases
+            ],
+            "receipts": [
+                {
+                    "id": r.id,
+                    "sale_id": r.sale_id,
+                    "receipt_date": r.receipt_date.isoformat() if r.receipt_date else None,
+                    "amount": float(r.amount) if r.amount else 0,
+                    "payment_method": r.payment_method or "bank_transfer",
+                    "bank_account_id": r.bank_account_id,
+                    "reference_no": r.reference_no,
+                    "notes": r.notes,
+                }
+                for r in receipts
             ],
         }
     }
@@ -1205,7 +1226,7 @@ async def api_delete_finished_sale(sale_id: int, db: AsyncSession = Depends(get_
     
     # 1. 删除收款记录
     await db.execute(
-        sa_delete(FinishedProductReceipt).where(FinishedProductReceipt.sale_id == sale_id)
+        sa_delete(FinishedProductReceipt).where(FinishedProductReceipt.sale_v2_id == sale_id)
     )
     
     # 2. 删除售后记录
@@ -1223,6 +1244,125 @@ async def api_delete_finished_sale(sale_id: int, db: AsyncSession = Depends(get_
     await db.commit()
     return {"success": True}
 
+
+
+# ==================== 收款记录 ====================
+
+@router.get("/finished-product-sales/{sale_id}/receipts")
+async def api_list_finished_sale_receipts(sale_id: int, db: AsyncSession = Depends(get_db)):
+    """成品销售收款记录列表"""
+    receipt_result = await db.execute(
+        select(FinishedProductReceipt).where(FinishedProductReceipt.sale_v2_id == sale_id)
+    )
+    receipts = receipt_result.scalars().all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": r.id,
+                "sale_id": r.sale_v2_id,
+                "receipt_date": r.receipt_date.isoformat() if r.receipt_date else None,
+                "amount": float(r.amount) if r.amount else 0,
+                "payment_method": r.payment_method or "bank_transfer",
+                "bank_account_id": r.bank_account_id,
+                "reference_no": r.reference_no,
+                "notes": r.notes,
+            }
+            for r in receipts
+        ],
+    }
+
+
+@router.post("/finished-product-sales/{sale_id}/receipts")
+async def api_create_finished_sale_receipt(sale_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+    """创建成品销售收款记录"""
+    sale_result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
+    sale = sale_result.scalar_one_or_none()
+    if not sale:
+        raise HTTPException(status_code=404, detail="销售记录不存在")
+
+    receipt = FinishedProductReceipt(
+        sale_v2_id=sale_id,
+        receipt_date=_parse_date(data.get("receipt_date")),
+        amount=Decimal(str(data.get("amount", 0))),
+        payment_method=data.get("payment_method", "bank_transfer"),
+        bank_account_id=data.get("bank_account_id"),
+        reference_no=data.get("reference_no"),
+        notes=data.get("notes"),
+    )
+    db.add(receipt)
+    await db.flush()
+
+    # 重新计算已收金额
+    receipt_result = await db.execute(
+        select(func.sum(FinishedProductReceipt.amount))
+        .where(FinishedProductReceipt.sale_v2_id == sale_id)
+    )
+    paid_amount = receipt_result.scalar() or Decimal("0")
+    sale.paid_amount = paid_amount
+
+    # 更新付款状态
+    net_amount = sale.net_amount or Decimal("0")
+    if paid_amount >= net_amount and net_amount > 0:
+        sale.status = "paid"
+        sale.paid = 1
+    elif paid_amount > 0:
+        sale.paid = 1
+    else:
+        sale.paid = 0
+
+    await db.commit()
+    return {
+        "success": True,
+        "data": {
+            "id": receipt.id,
+            "sale_id": receipt.sale_v2_id,
+            "receipt_date": receipt.receipt_date.isoformat() if receipt.receipt_date else None,
+            "amount": float(receipt.amount) if receipt.amount else 0,
+            "payment_method": receipt.payment_method or "bank_transfer",
+            "bank_account_id": receipt.bank_account_id,
+            "reference_no": receipt.reference_no,
+            "notes": receipt.notes,
+        },
+    }
+
+
+@router.delete("/finished-product-sales/{sale_id}/receipts/{receipt_id}")
+async def api_delete_finished_sale_receipt(sale_id: int, receipt_id: int, db: AsyncSession = Depends(get_db)):
+    """删除成品销售收款记录"""
+    receipt_result = await db.execute(
+        select(FinishedProductReceipt)
+        .where(FinishedProductReceipt.id == receipt_id, FinishedProductReceipt.sale_v2_id == sale_id)
+    )
+    receipt = receipt_result.scalar_one_or_none()
+    if not receipt:
+        raise HTTPException(status_code=404, detail="收款记录不存在")
+
+    await db.delete(receipt)
+    await db.flush()
+
+    # 重新计算已收金额
+    receipt_result = await db.execute(
+        select(func.sum(FinishedProductReceipt.amount))
+        .where(FinishedProductReceipt.sale_v2_id == sale_id)
+    )
+    paid_amount = receipt_result.scalar() or Decimal("0")
+
+    sale_result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
+    sale = sale_result.scalar_one_or_none()
+    if sale:
+        sale.paid_amount = paid_amount
+        net_amount = sale.net_amount or Decimal("0")
+        if paid_amount >= net_amount and net_amount > 0:
+            sale.status = "paid"
+            sale.paid = 1
+        elif paid_amount > 0:
+            sale.paid = 1
+        else:
+            sale.paid = 0
+
+    await db.commit()
+    return {"success": True}
 
 
 # ==================== 库存操作记录 ====================

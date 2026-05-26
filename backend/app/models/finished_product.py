@@ -72,13 +72,18 @@ class FinishedProductReceipt(Base, TimestampMixin):
     __tablename__ = "finished_product_receipts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    sale_id: Mapped[int] = mapped_column(ForeignKey("finished_product_sales.id"), nullable=False)
+    sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales.id"), nullable=True)
+    sale_v2_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales_v2.id"), nullable=True)
     receipt_date: Mapped[Date] = mapped_column(Date, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     payment_method: Mapped[str] = mapped_column(String(50))
     bank_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bank_accounts.id"))
     reference_no: Mapped[Optional[str]] = mapped_column(String(100))
     notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    sale_v2: Mapped[Optional["FinishedProductSaleV2"]] = relationship(
+        "FinishedProductSaleV2", foreign_keys=[sale_v2_id], lazy="raise"
+    )
 
 
 

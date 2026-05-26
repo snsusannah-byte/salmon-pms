@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +14,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
   Factory, ShoppingCart, Plus, Search, Edit2, Trash2, Save, X,
   CreditCard, Eye, Package, DollarSign, Download, Pencil, Banknote,
   ArrowLeftRight, SlidersHorizontal, Lock, Unlock
@@ -20,6 +24,17 @@ import {
 import { cn } from '@/lib/utils';
 import { api, apiFetch, apiPost, apiDelete } from '@/lib/api';
 import { toast } from 'sonner';
+
+interface FinishedSaleReceipt {
+  id: number;
+  sale_id: number;
+  receipt_date: string;
+  amount: number;
+  payment_method: string;
+  bank_account_id?: number | null;
+  reference_no?: string | null;
+  notes?: string | null;
+}
 
 interface FinishedSale {
   id: number;
@@ -51,7 +66,9 @@ interface FinishedSale {
   status?: string;
   batch_no?: string;
   procurement_status?: string;
+  payment_status?: string;
   products?: FinishedSaleProduct[];
+  receipts?: FinishedSaleReceipt[];
 }
 
 interface FinishedSaleProduct {
@@ -97,7 +114,7 @@ function round2(n: number): number {
 
 export function FinishedProductSales() {
   const [sales, setSales] = useState<FinishedSale[]>([]);
-  const [customers, setCustomers] = useState<string[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
   const [salespeople, setSalespeople] = useState<{name: string, commission_rate: number}[]>([]);
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
   const [loading, setLoading] = useState(false);
@@ -111,12 +128,18 @@ export function FinishedProductSales() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerList, setShowCustomerList] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentForm, setPaymentForm] = useState({ actual_amount: 0, rounding: 0 });
-  const [paymentSaleId, setPaymentSaleId] = useState<number | null>(null);
+  const [receiptSale, setReceiptSale] = useState<FinishedSale | null>(null);
+  const [receiptAmount, setReceiptAmount] = useState("");
+  const [receiptRounding, setReceiptRounding] = useState("0");
+  const [receiptMethod, setReceiptMethod] = useState("bank_transfer");
+  const [receiptBankAccountId, setReceiptBankAccountId] = useState("");
+  const [receiptDate, setReceiptDate] = useState(new Date().toISOString().split('T')[0]);
+  const [receiptDescription, setReceiptDescription] = useState("");
+  const [paymentLoading, setPaymentLoading] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [adjustForm, setAdjustForm] = useState({ discount: 0, scan_fee: 0, rounding: 0, after_sales_adjustment: 0 });
   const [adjustSaleId, setAdjustSaleId] = useState<number | null>(null);
-  const [deleteSaleId, setDeleteSaleId] = useState<number | null>(null);
+  const [deleteSale, setDeleteSale] = useState<FinishedSale | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [exportLoading, setExportLoading] = useState(false);
@@ -144,7 +167,7 @@ export function FinishedProductSales() {
     const res = await apiFetch('v4/customers?limit=500');
     if (res.ok && res.data) {
       const items = Array.isArray(res.data) ? res.data : (res.data.data || []);
-      setCustomers(items.map((c: any) => c.name));
+      setCustomers(items);
     }
   };
 
@@ -251,11 +274,11 @@ export function FinishedProductSales() {
     }
   };
 
-  const handleDelete = async (id: number) => { setDeleteSaleId(id); };
+  const handleDelete = async (sale: FinishedSale) => { setDeleteSale(sale); };
   const confirmDelete = async () => {
-    if (!deleteSaleId) return;
+    if (!deleteSale) return;
     setDeleteLoading(true);
-    try { await apiDelete(`/v4/finished-product-sales/${deleteSaleId}`, '删除成功'); setDeleteSaleId(null); loadSales(); } catch (e) {} finally { setDeleteLoading(false); }
+    try { await apiDelete(`/v4/finished-product-sales/${deleteSale.id}`, '删除成功'); setDeleteSale(null); loadSales(); } catch (e) {} finally { setDeleteLoading(false); }
   };
 
   const handleViewDetail = async (sale: FinishedSale) => {
@@ -287,21 +310,75 @@ export function FinishedProductSales() {
     setShowAdjustModal(false); setAdjustSaleId(null); loadSales();
   };
 
+  // 银行账户列表
+  const { data: bankAccountsData } = useQuery({
+    queryKey: ['bank-accounts'],
+    queryFn: async () => {
+      const res = await api.get('/v1/finance/bank-accounts');
+      return Array.isArray(res.data) ? res.data : (res.data?.items || []);
+    },
+  });
+  const bankAccounts = bankAccountsData || [];
+
+  // 客户列表（用于余额抵扣显示客户余额）
+  const { data: customersDataV4 } = useQuery({
+    queryKey: ['customers-list-v4'],
+    queryFn: async () => {
+      const res = await apiFetch('v4/customers?limit=500');
+      return res.ok ? (res.data?.data || res.data || []) : [];
+    },
+  });
+  const customersListV4 = customersDataV4 || [];
+
   const handlePaymentOpen = (sale: FinishedSale) => {
-    setPaymentSaleId(sale.id);
-    setPaymentForm({ actual_amount: sale.net_amount || 0, rounding: 0 });
+    setReceiptSale(sale);
+    const receivable = Math.max(0, (sale.net_amount || 0) - (sale.paid_amount || 0));
+    setReceiptAmount(receivable > 0 ? receivable.toFixed(2) : '');
+    setReceiptRounding('0');
+    setReceiptMethod('bank_transfer');
+    setReceiptBankAccountId('');
+    setReceiptDate(new Date().toISOString().split('T')[0]);
+    setReceiptDescription('');
     setShowPaymentModal(true);
   };
+
+  // 当实收金额变化时，实时计算抹零 = 应收 - 实收
+  const handleReceiptAmountChange = (value: string) => {
+    setReceiptAmount(value);
+    if (!receiptSale) return;
+    const receivable = Math.max(0, (receiptSale.net_amount || 0) - (receiptSale.paid_amount || 0));
+    const actual = Number(value) || 0;
+    const rounding = Math.max(0, receivable - actual);
+    setReceiptRounding(rounding > 0 ? rounding.toFixed(2) : '0');
+  };
+
   const handlePaymentSave = async () => {
-    if (!paymentSaleId) return;
-    const sale = sales.find(s => s.id === paymentSaleId);
-    if (!sale) return;
-    const net = round2(paymentForm.actual_amount - paymentForm.rounding - (sale.scan_fee || 0) - (sale.commission || 0) - (sale.discount || 0) - (sale.after_sales_adjustment || 0));
-    await apiFetch(`/v4/finished-product-sales/${paymentSaleId}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...sale, actual_amount: paymentForm.actual_amount, rounding: paymentForm.rounding, net_amount: net, paid: 1 })
-    }, '收款成功');
-    setShowPaymentModal(false); setPaymentSaleId(null); loadSales();
+    if (!receiptSale) return;
+    const amount = Number(receiptAmount);
+    if (amount <= 0) {
+      toast.error('收款金额必须大于0');
+      return;
+    }
+    setPaymentLoading(true);
+    try {
+      const res = await apiPost(`/v4/finished-product-sales/${receiptSale.id}/receipts`, {
+        receipt_date: receiptDate,
+        amount: amount,
+        payment_method: receiptMethod,
+        bank_account_id: receiptBankAccountId ? Number(receiptBankAccountId) : null,
+        rounding_adjustment: Number(receiptRounding || 0),
+        notes: receiptDescription.trim() || undefined,
+      }, '收款成功');
+      if (res.ok) {
+        setShowPaymentModal(false);
+        setReceiptSale(null);
+        loadSales();
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || '收款失败');
+    } finally {
+      setPaymentLoading(false);
+    }
   };
 
   const handleExport = async () => {
@@ -399,9 +476,9 @@ export function FinishedProductSales() {
             {hasSelection && <div className="h-6 w-px bg-border" />}
             <Button size="sm" variant="ghost" disabled={!single} onClick={() => singleSale && handleViewDetail(singleSale)} title="查看"><Eye className="h-4 w-4 mr-1" />查看</Button>
             <Button size="sm" variant="ghost" disabled={!single} onClick={() => singleSale && handleEdit(singleSale)} title="编辑"><Pencil className="h-4 w-4 mr-1" />编辑</Button>
-            <Button size="sm" variant="ghost" className="text-green-600" disabled={!single || !!singleSale?.paid} onClick={() => singleSale && handlePaymentOpen(singleSale)} title="收款"><Banknote className="h-4 w-4 mr-1" />收款</Button>
+            <Button size="sm" variant="ghost" className="text-green-600" disabled={!single || (singleSale?.payment_status === 'fully_paid')} onClick={() => singleSale && handlePaymentOpen(singleSale)} title="收款"><Banknote className="h-4 w-4 mr-1" />收款</Button>
             <Button size="sm" variant="ghost" className="text-orange-600" disabled={!single} onClick={() => singleSale && handleAdjustOpen(singleSale)} title="调整"><SlidersHorizontal className="h-4 w-4 mr-1" />调整</Button>
-            <Button size="sm" variant="ghost" className="text-red-500" disabled={!hasSelection} onClick={multi ? handleBatchDelete : () => singleSale && handleDelete(singleSale!.id)} title="删除"><Trash2 className="h-4 w-4 mr-1" />{multi ? '批量删除' : '删除'}</Button>
+            <Button size="sm" variant="ghost" className="text-red-500" disabled={!hasSelection} onClick={multi ? handleBatchDelete : () => singleSale && handleDelete(singleSale)} title="删除"><Trash2 className="h-4 w-4 mr-1" />{multi ? '批量删除' : '删除'}</Button>
           </div>
 
           {loading ? (
@@ -631,13 +708,257 @@ export function FinishedProductSales() {
 
       {/* 收款弹窗 */}
       <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>收款登记</DialogTitle></DialogHeader>
-          <div className="space-y-3 mt-2">
-            <div><Label>实收金额(元)</Label><Input type="number" step="0.01" value={paymentForm.actual_amount || ''} onChange={e => setPaymentForm({...paymentForm, actual_amount: parseFloat(e.target.value) || 0})} /></div>
-            <div><Label>抹零(元)</Label><Input type="number" step="0.01" value={paymentForm.rounding || ''} onChange={e => setPaymentForm({...paymentForm, rounding: parseFloat(e.target.value) || 0})} /></div>
-            <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setShowPaymentModal(false)}>取消</Button><Button onClick={handlePaymentSave}><DollarSign className="w-4 h-4 mr-1" /> 确认收款</Button></div>
+        <DialogContent className="max-w-[450px]">
+          <DialogHeader>
+            <DialogTitle>💰 销售收款</DialogTitle>
+            <DialogDescription>
+              {receiptSale ? `销售单: ${receiptSale.sale_no ?? `#${receiptSale.id}`} · 客户: ${receiptSale.customer ?? '-'}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* 金额明细 */}
+            <div className="bg-muted/50 rounded-md p-3 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">销售金额</span>
+                <span className="font-medium tabular-nums">¥{receiptSale ? Number(receiptSale.total_amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0'}</span>
+              </div>
+              {receiptSale && Number(receiptSale.rounding) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>抹零调整</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.rounding).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {receiptSale && Number(receiptSale.after_sales_adjustment) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>售后调整</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.after_sales_adjustment).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {receiptSale && Number(receiptSale.discount) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>折扣</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.discount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {receiptSale && Number(receiptSale.commission) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>提成</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.commission).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {receiptSale && Number(receiptSale.scan_fee) !== 0 && (
+                <div className="flex justify-between text-orange-600">
+                  <span>扫码手续费</span>
+                  <span className="tabular-nums">-¥{Number(receiptSale.scan_fee).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">已收金额</span>
+                <span className="font-medium tabular-nums">¥{receiptSale ? Number(receiptSale.paid_amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0'}</span>
+              </div>
+              <div className="flex justify-between font-semibold border-t border-dashed pt-2 mt-1">
+                <span>应收金额</span>
+                <span className="text-blue-600 text-base tabular-nums">
+                  ¥{receiptSale ? Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>本次实收金额</Label>
+              <Input
+                inputMode="decimal"
+                value={receiptAmount}
+                onChange={(e) => handleReceiptAmountChange(e.target.value)}
+                placeholder="输入实际收款金额"
+                className="text-lg"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs">抹零调整</Label>
+              <Input
+                inputMode="decimal"
+                value={receiptRounding}
+                onChange={(e) => setReceiptRounding(e.target.value)}
+                placeholder="0"
+                className="text-sm"
+              />
+              <p className="text-xs text-muted-foreground">本次收款时减免的尾差金额，默认0</p>
+            </div>
+
+            {/* 动态抹零/多收标签 */}
+            {(() => {
+              if (!receiptSale || !receiptAmount) return null;
+              const receivable = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
+              const actual = Number(receiptAmount) || 0;
+              const rounding = Number(receiptRounding) || 0;
+              const diff = receivable - actual - rounding;
+              if (diff === 0) {
+                return (
+                  <div className="flex justify-end items-center mt-1.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                    <span className="text-xs text-green-600 font-medium">已付清 ✓</span>
+                  </div>
+                );
+              }
+              if (diff > 0) {
+                return (
+                  <div className="flex justify-end items-center gap-2 mt-1.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-600 border border-orange-200">
+                      未付余额
+                    </span>
+                    <span className="text-sm font-semibold text-orange-600 tabular-nums">¥{diff.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                );
+              }
+              return (
+                <div className="flex justify-end items-center gap-2 mt-1.5 animate-in fade-in slide-in-from-top-1 duration-300">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-600 border border-green-200">
+                    ↑ 多收
+                  </span>
+                  <span className="text-sm font-semibold text-green-600 tabular-nums">¥{Math.abs(diff).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              );
+            })()}
+            {/* 计算公式提示 */}
+            {(() => {
+              if (!receiptSale || !receiptAmount) return null;
+              const receivable = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
+              const actual = Number(receiptAmount) || 0;
+              const rounding = Number(receiptRounding) || 0;
+              const diff = receivable - actual - rounding;
+              if (diff === 0) return null;
+              return (
+                <div className="flex justify-end mt-0.5">
+                  <span className="text-xs text-muted-foreground">
+                    应收 ¥{receivable.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 实收 ¥{actual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {rounding > 0 ? `- 抹零 ¥${rounding.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''} = {diff > 0 ? `未付 ¥${diff.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `多收 ¥${Math.abs(diff).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  </span>
+                </div>
+              );
+            })()}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">收款方式</Label>
+                <Select value={receiptMethod} onValueChange={(v) => { setReceiptMethod(v ?? ''); if (v === 'balance') setReceiptBankAccountId(''); }}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bank_transfer">银行转账</SelectItem>
+                    <SelectItem value="cash">现金</SelectItem>
+                    <SelectItem value="check">支票</SelectItem>
+                    <SelectItem value="scan">扫码</SelectItem>
+                    <SelectItem value="balance">余额抵扣</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {receiptMethod !== 'balance' ? (
+                <div className="space-y-1">
+                  <Label className="text-xs">收款银行</Label>
+                  <Select value={receiptBankAccountId} onValueChange={(v) => setReceiptBankAccountId(v ?? '')}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="选择银行">
+                        {(() => {
+                          const b = bankAccounts.find((ba: any) => String(ba.id) === receiptBankAccountId);
+                          return b ? `${b.bank_name} ···${b.account_number?.slice(-4)}` : '选择银行';
+                        })()}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bankAccounts.map((b: any) => (
+                        <SelectItem key={b.id} value={String(b.id)} className="text-xs">{b.bank_name} ···{b.account_number?.slice(-4)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Label className="text-xs">客户余额</Label>
+                  <div className="h-8 flex items-center px-3 rounded-md border bg-muted/30 text-xs">
+                    {(() => {
+                      const c = customersListV4.find((c: any) => c.name === receiptSale?.customer);
+                      const bal = Number(c?.prepaid_balance || 0);
+                      return (
+                        <span className={bal > 0 ? 'text-green-600 font-medium' : 'text-muted-foreground'}>
+                          {c ? `¥${bal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">收款日期</Label>
+              <Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} className="h-8 text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">收款描述</Label>
+              <Input
+                value={receiptDescription}
+                onChange={(e) => setReceiptDescription(e.target.value)}
+                placeholder="如：张三转账/微信收款/尾款等"
+                className="h-8 text-xs"
+              />
+              <p className="text-xs text-muted-foreground">描述会同步显示在交易流水中</p>
+            </div>
+
+            {/* 本次收款后未付 */}
+            <div className="border-t pt-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium">本次收款后未付</span>
+                <span className={`text-lg font-bold tabular-nums ${(() => {
+                  if (!receiptSale) return 'text-gray-400';
+                  const remaining = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
+                  if (!receiptAmount) {
+                    return remaining <= 0 ? 'text-green-600' : 'text-orange-600';
+                  }
+                  const actual = Number(receiptAmount) || 0;
+                  const rounding = Number(receiptRounding) || 0;
+                  const afterPay = Math.max(0, remaining - actual - rounding);
+                  return afterPay <= 0 ? 'text-green-600' : 'text-orange-600';
+                })()}`}>
+                  ¥{(() => {
+                    if (!receiptSale) return '0.00';
+                    const remaining = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
+                    if (!receiptAmount) {
+                      return remaining.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    }
+                    const actual = Number(receiptAmount) || 0;
+                    const rounding = Number(receiptRounding) || 0;
+                    const afterPay = Math.max(0, remaining - actual - rounding);
+                    return afterPay.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                  })()}
+                </span>
+              </div>
+              {receiptAmount && Number(receiptAmount) > 0 && (() => {
+                const receivable = Math.max(0, Number(receiptSale?.net_amount || 0) - Number(receiptSale?.paid_amount || 0));
+                const actual = Number(receiptAmount) || 0;
+                const rounding = Number(receiptRounding) || 0;
+                const afterPay = receivable - actual - rounding;
+                if (afterPay > 0) {
+                  return (
+                    <div className="flex justify-end mt-1">
+                      <span className="text-xs text-muted-foreground">应收 ¥{receivable.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 实收 ¥{actual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 抹零 ¥{rounding.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = 未付 ¥{afterPay.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  );
+                }
+                if (afterPay <= 0) {
+                  return (
+                    <div className="flex justify-end mt-1">
+                      <span className="text-xs text-muted-foreground">应收 ¥{receivable.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 实收 ¥{actual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {rounding > 0 ? `- 抹零 ¥${rounding.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''} = 已结清</span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+            </div>
           </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowPaymentModal(false)}>取消</Button>
+            <Button onClick={handlePaymentSave} disabled={paymentLoading} className="bg-green-600 hover:bg-green-700">{paymentLoading ? '收款中...' : '确认收款'}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -656,12 +977,15 @@ export function FinishedProductSales() {
       </Dialog>
 
       {/* 删除确认弹窗 */}
-      <Dialog open={!!deleteSaleId} onOpenChange={() => setDeleteSaleId(null)}>
+      {/* 删除确认弹窗 */}
+      <Dialog open={!!deleteSale} onOpenChange={() => setDeleteSale(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader><DialogTitle>确认删除</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">确定删除该销售记录吗？此操作不可恢复。</p>
+          <p className="text-sm text-muted-foreground">
+            确定要删除销售记录 <span className="font-mono font-medium">{deleteSale?.sale_no ?? `#${deleteSale?.id}`}</span> 吗？<br/>客户: {deleteSale?.customer ?? "-"}<br/>此操作不可恢复。
+          </p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteSaleId(null)} disabled={deleteLoading}>取消</Button>
+            <Button variant="outline" onClick={() => setDeleteSale(null)} disabled={deleteLoading}>取消</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleteLoading}>{deleteLoading ? '删除中...' : '删除'}</Button>
           </DialogFooter>
         </DialogContent>

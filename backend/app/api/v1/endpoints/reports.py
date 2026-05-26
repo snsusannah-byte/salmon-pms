@@ -516,15 +516,6 @@ async def list_batch_reports(
         )
         cb_sales_list = cb_sales_result.scalars().all()
         cb_sales_net = sum(_to_decimal(s.net_amount) for s in cb_sales_list)
-        
-        # commission
-        cb_sale_ids = [s.id for s in cb_sales_list]
-        cb_commission = Decimal("0")
-        if cb_sale_ids:
-            cb_commission_result = await db.execute(
-                select(func.sum(CommissionRecord.commission_amount)).where(CommissionRecord.sale_id.in_(cb_sale_ids))
-            )
-            cb_commission = _to_decimal(cb_commission_result.scalar())
 
         cb_ex_result = await db.execute(
             select(ExchangeRecord).where(ExchangeRecord.batch_id == cb_id)
@@ -579,7 +570,7 @@ async def list_batch_reports(
                     cb_unit_price = cb_import_amount / cb_import_weight
                     cb_shrinkage = cb_diff * cb_unit_price * cb_rate
         
-        cb_net_profit = (cb_sales_net - cb_commission) - cb_expenses - round(cb_shrinkage, 2)
+        cb_net_profit = cb_sales_net - cb_expenses - round(cb_shrinkage, 2)
         running_cumulative += cb_net_profit
         cumulative_profit_map[cb_id] = round(running_cumulative, 2)
 
@@ -1145,15 +1136,6 @@ async def get_batch_report(
         cb_sales_list = cb_sales_result.scalars().all()
         cb_sales_net = sum(_to_decimal(s.net_amount) for s in cb_sales_list)
 
-        # 从 CommissionRecord 查询该批次的提成
-        cb_sale_ids = [s.id for s in cb_sales_list]
-        cb_commission = Decimal("0")
-        if cb_sale_ids:
-            cb_commission_result = await db.execute(
-                select(func.sum(CommissionRecord.commission_amount)).where(CommissionRecord.sale_id.in_(cb_sale_ids))
-            )
-            cb_commission = _to_decimal(cb_commission_result.scalar())
-
         cb_ex_result = await db.execute(
             select(ExchangeRecord).where(ExchangeRecord.batch_id == cb_id)
         )
@@ -1207,7 +1189,7 @@ async def get_batch_report(
                     cb_unit_price = cb_import_amount / cb_import_weight
                     cb_shrinkage = cb_diff * cb_unit_price * cb_rate
         
-        cumulative_profit += (cb_sales_net - cb_commission) - cb_expenses - round(cb_shrinkage, 2)
+        cumulative_profit += cb_sales_net - cb_expenses - round(cb_shrinkage, 2)
 
     # 利润率
     profit_margin = None
@@ -1464,14 +1446,6 @@ async def get_invoice_report(
                 cb_sales_list = cb_sales_result.scalars().all()
                 cb_sales_net = sum(_to_decimal(s.net_amount) for s in cb_sales_list)
 
-                cb_sale_ids = [s.id for s in cb_sales_list]
-                cb_commission = Decimal("0")
-                if cb_sale_ids:
-                    cb_commission_result = await db.execute(
-                        select(func.sum(CommissionRecord.commission_amount)).where(CommissionRecord.sale_id.in_(cb_sale_ids))
-                    )
-                    cb_commission = _to_decimal(cb_commission_result.scalar())
-
                 cb_ex_result = await db.execute(
                     select(ExchangeRecord).where(ExchangeRecord.batch_id == cb_id)
                 )
@@ -1520,7 +1494,7 @@ async def get_invoice_report(
                             cb_unit_price = cb_import_amount / cb_import_weight
                             cb_shrinkage = cb_diff * cb_unit_price * cb_rate
 
-                cumulative_profit += (cb_sales_net - cb_commission) - cb_expenses - round(cb_shrinkage, 2)
+                cumulative_profit += cb_sales_net - cb_expenses - round(cb_shrinkage, 2)
 
     # 溯源信息
     pp = await db.execute(select(Company).where(Company.id == invoice.processing_plant_id))
@@ -3441,15 +3415,6 @@ async def get_financial_statements(
         sales_list = sales_result.scalars().all()
         sales_net = sum(_to_decimal(s.net_amount) for s in sales_list)
 
-        # 从 CommissionRecord 查询提成
-        sale_ids = [s.id for s in sales_list]
-        commission_amount = Decimal("0")
-        if sale_ids:
-            commission_result = await db.execute(
-                select(func.sum(CommissionRecord.commission_amount)).where(CommissionRecord.sale_id.in_(sale_ids))
-            )
-            commission_amount = _to_decimal(commission_result.scalar())
-
         ex_result = await db.execute(
             select(ExchangeRecord).where(ExchangeRecord.batch_id == batch_id)
         )
@@ -3489,7 +3454,7 @@ async def get_financial_statements(
         # 损耗（使用公共函数）
         shrink = await _calc_batch_shrinkage(db, batch_id, invoice_ids, sales_list)
 
-        cumulative_profit += (sales_net - commission_amount) - total_exp - shrink
+        cumulative_profit += sales_net - total_exp - shrink
 
     total_assets = cash_balance + accounts_receivable + inventory_value
     total_liabilities = accounts_payable
@@ -3667,7 +3632,7 @@ async def get_financial_statements(
     from sqlalchemy import text
     monthly_revenue_result = await db.execute(
         text("""
-            SELECT TO_CHAR(sale_date, 'YYYY-MM') AS month, SUM(net_amount) AS revenue
+            SELECT TO_CHAR(sale_date, 'YYYY-MM') AS month, SUM(net_amount + commission) AS revenue
             FROM whole_fish_sales
             WHERE sale_date >= :start AND sale_date <= :end
             GROUP BY TO_CHAR(sale_date, 'YYYY-MM')
@@ -3733,11 +3698,11 @@ async def get_financial_statements(
     customer_revenue_result = await db.execute(
         select(
             WholeFishSale.customer_id,
-            func.sum(WholeFishSale.net_amount).label("amount"),
+            func.sum(WholeFishSale.net_amount + WholeFishSale.commission).label("amount"),
         )
         .where(WholeFishSale.sale_date >= sdt, WholeFishSale.sale_date <= edt)
         .group_by(WholeFishSale.customer_id)
-        .order_by(func.sum(WholeFishSale.net_amount).desc())
+        .order_by(func.sum(WholeFishSale.net_amount + WholeFishSale.commission).desc())
     )
     customer_revenue = []
     for row in customer_revenue_result.all():
