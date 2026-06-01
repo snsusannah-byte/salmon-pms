@@ -144,6 +144,23 @@ class WarehouseV2Service:
                 batch_result = await db.execute(select(Batch.batch_code).where(Batch.id == stock.batch_id))
                 batch_no = batch_result.scalar()
 
+            # 查询该产品最新入库的到货周期
+            lead_time = None
+            from app.models import MaterialPurchaseOrder, MaterialPurchaseItem
+            mpo_result = await db.execute(
+                select(MaterialPurchaseOrder)
+                .join(MaterialPurchaseItem, MaterialPurchaseItem.purchase_order_id == MaterialPurchaseOrder.id)
+                .where(
+                    MaterialPurchaseItem.product_id == stock.product_id,
+                    MaterialPurchaseOrder.inbound_date.is_not(None),
+                )
+                .order_by(desc(MaterialPurchaseOrder.inbound_date))
+                .limit(1)
+            )
+            latest_order = mpo_result.scalar_one_or_none()
+            if latest_order and latest_order.inbound_date and latest_order.order_date:
+                lead_time = (latest_order.inbound_date - latest_order.order_date).days
+
             items.append({
                 "id": stock.id,
                 "warehouse_id": stock.warehouse_id,
@@ -165,6 +182,7 @@ class WarehouseV2Service:
                 "last_out_date": stock.last_out_date,
                 "location": stock.location,
                 "notes": stock.notes,
+                "lead_time": lead_time,
                 "created_at": stock.created_at,
                 "updated_at": stock.updated_at,
             })

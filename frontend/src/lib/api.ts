@@ -24,7 +24,29 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("token");
+      localStorage.removeItem("salmon_user");
       window.location.href = "/login";
+    }
+    if (error.response?.status === 403) {
+      const detail = error.response.data?.detail || "权限不足，无法执行此操作";
+      toast.error(detail);
+    }
+    // 500 错误自动上报到后端
+    if (error.response?.status >= 500) {
+      try {
+        const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+        fetch(`${baseUrl}/v1/client-errors`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "api_error",
+            status: error.response.status,
+            api_path: error.config?.url || "",
+            message: error.response.data?.detail || error.message,
+            timestamp: new Date().toISOString(),
+          }),
+        });
+      } catch (_) { /* ignore */ }
     }
     return Promise.reject(error);
   }
@@ -43,7 +65,13 @@ export async function apiFetch(
     const method = options?.method || "GET";
     const config: any = { method };
     if (options?.headers) config.headers = options.headers;
-    if (options?.body) config.data = JSON.parse(options.body as string);
+    if (options?.body && typeof options.body === "string" && options.body.trim()) {
+      try {
+        config.data = JSON.parse(options.body);
+      } catch {
+        config.data = options.body;
+      }
+    }
 
     const res = await api.request({ url, ...config });
     const data = res.data;

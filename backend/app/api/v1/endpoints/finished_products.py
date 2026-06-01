@@ -12,11 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.core.database import get_db
+from app.core.permissions import require_warehouse, log_operation
 from app.models.finished_products import (
     ProductTemplate, TemplatePart, TemplateBOM, TemplatePackaging,
     ProductVariant, VariantPackaging, VariantAccessory,
+    # 重构新增
+    ProductSeries, ProductSpec, VariantPriceTier,
 )
-from app.models import Product, Brand
+from app.models import Product, Brand, User
 
 router = APIRouter()
 
@@ -53,6 +56,7 @@ class ProductTemplateCreate(BaseModel):
     unit_weight_kg: Optional[float] = None
     portion_weight_g: Optional[int] = None
     portion_boxes: Optional[int] = None
+    series_id: Optional[int] = None
     series_code: Optional[str] = None
     series_name: Optional[str] = None
     notes: Optional[str] = None
@@ -68,6 +72,7 @@ class ProductTemplateUpdate(BaseModel):
     unit_weight_kg: Optional[float] = None
     portion_weight_g: Optional[int] = None
     portion_boxes: Optional[int] = None
+    series_id: Optional[int] = None
     series_code: Optional[str] = None
     series_name: Optional[str] = None
     is_active: Optional[bool] = None
@@ -114,6 +119,7 @@ class ProductTemplateResponse(BaseModel):
     unit_weight_kg: Optional[float] = None
     portion_weight_g: Optional[int] = None
     portion_boxes: Optional[int] = None
+    series_id: Optional[int] = None
     series_code: Optional[str] = None
     series_name: Optional[str] = None
     is_active: bool
@@ -203,6 +209,8 @@ class ProductVariantResponse(BaseModel):
     id: int
     template_id: int
     template_name: str
+    spec_id: Optional[int] = None
+    spec_name: Optional[str] = None
     brand_id: Optional[int] = None
     brand_name: Optional[str] = None
     brand_is_oem: bool = False
@@ -298,6 +306,7 @@ async def list_templates(
             unit_weight_kg=float(t.unit_weight_kg) if t.unit_weight_kg else None,
             portion_weight_g=t.portion_weight_g,
             portion_boxes=t.portion_boxes,
+            series_id=t.series_id,
             series_code=t.series_code,
             series_name=t.series_name,
             is_active=t.is_active,
@@ -347,6 +356,7 @@ async def create_template(
         unit_weight_kg=Decimal(str(data.unit_weight_kg)) if data.unit_weight_kg else None,
         portion_weight_g=data.portion_weight_g,
         portion_boxes=data.portion_boxes,
+        series_id=data.series_id,
         series_code=data.series_code.strip() if data.series_code else None,
         series_name=data.series_name.strip() if data.series_name else None,
         notes=data.notes,
@@ -426,6 +436,7 @@ async def create_template(
         unit_weight_kg=float(template.unit_weight_kg) if template.unit_weight_kg else None,
         portion_weight_g=template.portion_weight_g,
         portion_boxes=template.portion_boxes,
+        series_id=template.series_id,
         series_code=template.series_code,
         series_name=template.series_name,
         is_active=template.is_active,
@@ -491,6 +502,7 @@ async def get_template(
         unit_weight_kg=float(template.unit_weight_kg) if template.unit_weight_kg else None,
         portion_weight_g=template.portion_weight_g,
         portion_boxes=template.portion_boxes,
+        series_id=template.series_id,
         series_code=template.series_code,
         series_name=template.series_name,
         is_active=template.is_active,
@@ -534,6 +546,21 @@ async def update_template(
         template.portion_weight_g = data.portion_weight_g
     if data.portion_boxes is not None:
         template.portion_boxes = data.portion_boxes
+    if data.series_id is not None:
+        template.series_id = data.series_id
+        # 自动填充 series_code / series_name
+        if data.series_id:
+            from app.models.finished_products import ProductSeries
+            series = await db.get(ProductSeries, data.series_id)
+            if series:
+                template.series_code = series.code
+                template.series_name = series.name
+            else:
+                template.series_code = None
+                template.series_name = None
+        else:
+            template.series_code = None
+            template.series_name = None
     if data.series_code is not None:
         template.series_code = data.series_code.strip() if data.series_code else None
     if data.series_name is not None:
@@ -649,10 +676,13 @@ async def list_variants(
         brand = brand_map.get(v.brand_id) if v.brand_id else None
         vps = vp_map.get(v.id, [])
         vas = va_map.get(v.id, [])
+        spec = await db.get(ProductSpec, v.spec_id) if v.spec_id else None
         items.append(ProductVariantResponse(
             id=v.id,
             template_id=v.template_id,
             template_name=template.name,
+            spec_id=v.spec_id,
+            spec_name=spec.name if spec else None,
             brand_id=v.brand_id,
             brand_name=brand.name if brand else None,
             brand_is_oem=brand.is_oem if brand else False,
@@ -904,3 +934,517 @@ async def delete_variant(
     await db.delete(variant)
     await db.commit()
     return {"detail": "变体已删除"}
+
+
+# ==================== 重构新增：Schemas ====================
+
+class ProductSeriesCreate(BaseModel):
+    code: str
+    name: str
+    sort_order: int = 0
+    notes: Optional[str] = None
+
+
+class ProductSeriesUpdate(BaseModel):
+    name: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class ProductSeriesResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    code: str
+    name: str
+    sort_order: int
+    is_active: bool
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ProductSpecCreate(BaseModel):
+    code: str
+    name: str
+    parts_config: Optional[str] = None
+    total_weight_g: Optional[int] = None
+    portion_count: int = 1
+    box_count: int = 1
+    sort_order: int = 0
+    notes: Optional[str] = None
+
+
+class ProductSpecUpdate(BaseModel):
+    name: Optional[str] = None
+    parts_config: Optional[str] = None
+    total_weight_g: Optional[int] = None
+    portion_count: Optional[int] = None
+    box_count: Optional[int] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class ProductSpecResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    template_id: int
+    code: str
+    name: str
+    parts_config: Optional[str] = None
+    total_weight_g: Optional[int] = None
+    portion_count: Optional[int] = 1
+    box_count: Optional[int] = 1
+    sort_order: Optional[int] = 0
+    is_active: Optional[bool] = True
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class VariantPriceTierCreate(BaseModel):
+    tier_type: str
+    tier_key: str
+    tier_name: str
+    min_qty: int = 1
+    max_qty: Optional[int] = None
+    price: float
+    valid_from: Optional[str] = None
+    valid_to: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class VariantPriceTierUpdate(BaseModel):
+    tier_type: Optional[str] = None
+    tier_key: Optional[str] = None
+    tier_name: Optional[str] = None
+    min_qty: Optional[int] = None
+    max_qty: Optional[int] = None
+    price: Optional[float] = None
+    valid_from: Optional[str] = None
+    valid_to: Optional[str] = None
+    is_active: Optional[bool] = None
+    notes: Optional[str] = None
+
+
+class VariantPriceTierResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    variant_id: int
+    tier_type: str
+    tier_key: str
+    tier_name: str
+    min_qty: int
+    max_qty: Optional[int] = None
+    price: float
+    valid_from: Optional[str] = None
+    valid_to: Optional[str] = None
+    is_active: bool
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+# ==================== 重构新增：系列 API ====================
+
+@router.get("/series", response_model=List[ProductSeriesResponse])
+async def list_series(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取所有产品系列"""
+    result = await db.execute(
+        select(ProductSeries).order_by(ProductSeries.sort_order).offset(skip).limit(limit)
+    )
+    series = result.scalars().all()
+    return [
+        ProductSeriesResponse(
+            id=s.id, code=s.code, name=s.name, sort_order=s.sort_order,
+            is_active=s.is_active, notes=s.notes,
+            created_at=str(s.created_at) if s.created_at else None,
+            updated_at=str(s.updated_at) if s.updated_at else None,
+        ) for s in series
+    ]
+
+
+@router.post("/series", response_model=ProductSeriesResponse)
+async def create_series(
+    data: ProductSeriesCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """创建产品系列"""
+    existing = await db.execute(select(ProductSeries).where(ProductSeries.code == data.code))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail=f"系列编码 {data.code} 已存在")
+
+    series = ProductSeries(**data.model_dump())
+    db.add(series)
+    await db.commit()
+    await db.refresh(series)
+    return ProductSeriesResponse(
+        id=series.id, code=series.code, name=series.name,
+        sort_order=series.sort_order, is_active=series.is_active,
+        notes=series.notes,
+        created_at=str(series.created_at) if series.created_at else None,
+        updated_at=str(series.updated_at) if series.updated_at else None,
+    )
+
+
+@router.get("/series/{series_id}", response_model=ProductSeriesResponse)
+async def get_series(
+    series_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取系列详情"""
+    series = await db.get(ProductSeries, series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="系列不存在")
+    return ProductSeriesResponse(
+        id=series.id, code=series.code, name=series.name,
+        sort_order=series.sort_order, is_active=series.is_active,
+        notes=series.notes,
+        created_at=str(series.created_at) if series.created_at else None,
+        updated_at=str(series.updated_at) if series.updated_at else None,
+    )
+
+
+@router.put("/series/{series_id}", response_model=ProductSeriesResponse)
+async def update_series(
+    series_id: int,
+    data: ProductSeriesUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新系列"""
+    series = await db.get(ProductSeries, series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="系列不存在")
+
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(series, field, value)
+
+    await db.commit()
+    await db.refresh(series)
+    return ProductSeriesResponse(
+        id=series.id, code=series.code, name=series.name,
+        sort_order=series.sort_order, is_active=series.is_active,
+        notes=series.notes,
+        created_at=str(series.created_at) if series.created_at else None,
+        updated_at=str(series.updated_at) if series.updated_at else None,
+    )
+
+
+@router.delete("/series/{series_id}")
+async def delete_series(
+    series_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除系列（仅当无关联模板时）"""
+    series = await db.get(ProductSeries, series_id)
+    if not series:
+        raise HTTPException(status_code=404, detail="系列不存在")
+
+    templates = await db.execute(
+        select(func.count()).where(ProductTemplate.series_id == series_id)
+    )
+    if templates.scalar() > 0:
+        raise HTTPException(status_code=400, detail="该系列下存在产品模板，无法删除")
+
+    await db.delete(series)
+    await db.commit()
+    return {"detail": "系列已删除"}
+
+
+# ==================== 重构新增：规格 API ====================
+
+@router.get("/templates/{template_id}/specs", response_model=List[ProductSpecResponse])
+async def list_specs(
+    template_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取模板下的所有规格"""
+    template = await db.get(ProductTemplate, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="模板不存在")
+
+    result = await db.execute(
+        select(ProductSpec)
+        .where(ProductSpec.template_id == template_id)
+        .order_by(ProductSpec.sort_order)
+    )
+    specs = result.scalars().all()
+    return [
+        ProductSpecResponse(
+            id=s.id, template_id=s.template_id, code=s.code, name=s.name,
+            parts_config=s.parts_config, total_weight_g=s.total_weight_g,
+            portion_count=s.portion_count, box_count=s.box_count,
+            sort_order=s.sort_order, is_active=s.is_active, notes=s.notes,
+            created_at=str(s.created_at) if s.created_at else None,
+            updated_at=str(s.updated_at) if s.updated_at else None,
+        ) for s in specs
+    ]
+
+
+@router.post("/templates/{template_id}/specs", response_model=ProductSpecResponse)
+async def create_spec(
+    template_id: int,
+    data: ProductSpecCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """为模板创建规格"""
+    template = await db.get(ProductTemplate, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="模板不存在")
+
+    spec = ProductSpec(template_id=template_id, **data.model_dump())
+    db.add(spec)
+    await db.commit()
+    await db.refresh(spec)
+    return ProductSpecResponse(
+        id=spec.id, template_id=spec.template_id, code=spec.code, name=spec.name,
+        parts_config=spec.parts_config, total_weight_g=spec.total_weight_g,
+        portion_count=spec.portion_count, box_count=spec.box_count,
+        sort_order=spec.sort_order, is_active=spec.is_active, notes=spec.notes,
+        created_at=str(spec.created_at) if spec.created_at else None,
+        updated_at=str(spec.updated_at) if spec.updated_at else None,
+    )
+
+
+@router.get("/templates/{template_id}/specs/{spec_id}", response_model=ProductSpecResponse)
+async def get_spec(
+    template_id: int,
+    spec_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取规格详情"""
+    spec = await db.get(ProductSpec, spec_id)
+    if not spec or spec.template_id != template_id:
+        raise HTTPException(status_code=404, detail="规格不存在")
+    return ProductSpecResponse(
+        id=spec.id, template_id=spec.template_id, code=spec.code, name=spec.name,
+        parts_config=spec.parts_config, total_weight_g=spec.total_weight_g,
+        portion_count=spec.portion_count, box_count=spec.box_count,
+        sort_order=spec.sort_order, is_active=spec.is_active, notes=spec.notes,
+        created_at=str(spec.created_at) if spec.created_at else None,
+        updated_at=str(spec.updated_at) if spec.updated_at else None,
+    )
+
+
+@router.put("/templates/{template_id}/specs/{spec_id}", response_model=ProductSpecResponse)
+async def update_spec(
+    template_id: int,
+    spec_id: int,
+    data: ProductSpecUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新规格"""
+    spec = await db.get(ProductSpec, spec_id)
+    if not spec or spec.template_id != template_id:
+        raise HTTPException(status_code=404, detail="规格不存在")
+
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(spec, field, value)
+
+    await db.commit()
+    await db.refresh(spec)
+    return ProductSpecResponse(
+        id=spec.id, template_id=spec.template_id, code=spec.code, name=spec.name,
+        parts_config=spec.parts_config, total_weight_g=spec.total_weight_g,
+        portion_count=spec.portion_count, box_count=spec.box_count,
+        sort_order=spec.sort_order, is_active=spec.is_active, notes=spec.notes,
+        created_at=str(spec.created_at) if spec.created_at else None,
+        updated_at=str(spec.updated_at) if spec.updated_at else None,
+    )
+
+
+@router.delete("/templates/{template_id}/specs/{spec_id}")
+async def delete_spec(
+    template_id: int,
+    spec_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除规格（仅当无关联SKU时）"""
+    spec = await db.get(ProductSpec, spec_id)
+    if not spec or spec.template_id != template_id:
+        raise HTTPException(status_code=404, detail="规格不存在")
+
+    variants = await db.execute(
+        select(func.count()).where(ProductVariant.spec_id == spec_id)
+    )
+    if variants.scalar() > 0:
+        raise HTTPException(status_code=400, detail="该规格下存在品牌变体，无法删除")
+
+    await db.delete(spec)
+    await db.commit()
+    return {"detail": "规格已删除"}
+
+
+# ==================== 重构新增：价格层级 API ====================
+
+@router.get("/variants", response_model=VariantListResponse)
+async def list_all_variants(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取所有品牌变体（SKU）"""
+    result = await db.execute(
+        select(ProductVariant)
+        .order_by(ProductVariant.id.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    variants = result.scalars().all()
+
+    items = []
+    for v in variants:
+        template = await db.get(ProductTemplate, v.template_id)
+        brand = await db.get(Brand, v.brand_id)
+        spec = await db.get(ProductSpec, v.spec_id) if v.spec_id else None
+        items.append({
+            "id": v.id,
+            "template_id": v.template_id,
+            "brand_id": v.brand_id,
+            "spec_id": v.spec_id,
+            "code": v.code,
+            "name": v.name,
+            "cost_price": float(v.cost_price) if v.cost_price else None,
+            "suggested_retail_price": float(v.suggested_retail_price) if v.suggested_retail_price else None,
+            "wholesale_price": float(v.wholesale_price) if v.wholesale_price else None,
+            "min_price": float(v.min_price) if v.min_price else None,
+            "stock_quantity": v.stock_quantity,
+            "safety_stock": v.safety_stock,
+            "is_active": v.is_active,
+            "notes": v.notes,
+            "created_at": str(v.created_at) if v.created_at else None,
+            "updated_at": str(v.updated_at) if v.updated_at else None,
+            "template_name": template.name if template else None,
+            "brand_name": brand.name if brand else None,
+            "spec_name": spec.name if spec else None,
+        })
+
+    total_result = await db.execute(select(func.count()).select_from(ProductVariant))
+    total = total_result.scalar()
+
+    return {"items": items, "total": total}
+
+
+@router.get("/variants/{variant_id}/price-tiers", response_model=List[VariantPriceTierResponse])
+async def list_price_tiers(
+    variant_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取SKU的所有价格层级"""
+    variant = await db.get(ProductVariant, variant_id)
+    if not variant:
+        raise HTTPException(status_code=404, detail="变体不存在")
+
+    result = await db.execute(
+        select(VariantPriceTier)
+        .where(VariantPriceTier.variant_id == variant_id)
+        .order_by(VariantPriceTier.min_qty)
+    )
+    tiers = result.scalars().all()
+    return [
+        VariantPriceTierResponse(
+            id=t.id, variant_id=t.variant_id,
+            tier_type=t.tier_type, tier_key=t.tier_key, tier_name=t.tier_name,
+            min_qty=t.min_qty, max_qty=t.max_qty,
+            price=float(t.price), valid_from=t.valid_from, valid_to=t.valid_to,
+            is_active=t.is_active, notes=t.notes,
+            created_at=str(t.created_at) if t.created_at else None,
+            updated_at=str(t.updated_at) if t.updated_at else None,
+        ) for t in tiers
+    ]
+
+
+@router.post("/variants/{variant_id}/price-tiers", response_model=VariantPriceTierResponse)
+async def create_price_tier(
+    variant_id: int,
+    data: VariantPriceTierCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """为SKU创建价格层级"""
+    variant = await db.get(ProductVariant, variant_id)
+    if not variant:
+        raise HTTPException(status_code=404, detail="变体不存在")
+
+    tier = VariantPriceTier(variant_id=variant_id, **data.model_dump())
+    db.add(tier)
+    await db.commit()
+    await db.refresh(tier)
+    return VariantPriceTierResponse(
+        id=tier.id, variant_id=tier.variant_id,
+        tier_type=tier.tier_type, tier_key=tier.tier_key, tier_name=tier.tier_name,
+        min_qty=tier.min_qty, max_qty=tier.max_qty,
+        price=float(tier.price), valid_from=tier.valid_from, valid_to=tier.valid_to,
+        is_active=tier.is_active, notes=tier.notes,
+        created_at=str(tier.created_at) if tier.created_at else None,
+        updated_at=str(tier.updated_at) if tier.updated_at else None,
+    )
+
+
+@router.get("/variants/{variant_id}/price-tiers/{tier_id}", response_model=VariantPriceTierResponse)
+async def get_price_tier(
+    variant_id: int,
+    tier_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """获取价格层级详情"""
+    tier = await db.get(VariantPriceTier, tier_id)
+    if not tier or tier.variant_id != variant_id:
+        raise HTTPException(status_code=404, detail="价格层级不存在")
+    return VariantPriceTierResponse(
+        id=tier.id, variant_id=tier.variant_id,
+        tier_type=tier.tier_type, tier_key=tier.tier_key, tier_name=tier.tier_name,
+        min_qty=tier.min_qty, max_qty=tier.max_qty,
+        price=float(tier.price), valid_from=tier.valid_from, valid_to=tier.valid_to,
+        is_active=tier.is_active, notes=tier.notes,
+        created_at=str(tier.created_at) if tier.created_at else None,
+        updated_at=str(tier.updated_at) if tier.updated_at else None,
+    )
+
+
+@router.put("/variants/{variant_id}/price-tiers/{tier_id}", response_model=VariantPriceTierResponse)
+async def update_price_tier(
+    variant_id: int,
+    tier_id: int,
+    data: VariantPriceTierUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新价格层级"""
+    tier = await db.get(VariantPriceTier, tier_id)
+    if not tier or tier.variant_id != variant_id:
+        raise HTTPException(status_code=404, detail="价格层级不存在")
+
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(tier, field, value)
+
+    await db.commit()
+    await db.refresh(tier)
+    return VariantPriceTierResponse(
+        id=tier.id, variant_id=tier.variant_id,
+        tier_type=tier.tier_type, tier_key=tier.tier_key, tier_name=tier.tier_name,
+        min_qty=tier.min_qty, max_qty=tier.max_qty,
+        price=float(tier.price), valid_from=tier.valid_from, valid_to=tier.valid_to,
+        is_active=tier.is_active, notes=tier.notes,
+        created_at=str(tier.created_at) if tier.created_at else None,
+        updated_at=str(tier.updated_at) if tier.updated_at else None,
+    )
+
+
+@router.delete("/variants/{variant_id}/price-tiers/{tier_id}")
+async def delete_price_tier(
+    variant_id: int,
+    tier_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除价格层级"""
+    tier = await db.get(VariantPriceTier, tier_id)
+    if not tier or tier.variant_id != variant_id:
+        raise HTTPException(status_code=404, detail="价格层级不存在")
+
+    await db.delete(tier)
+    await db.commit()
+    return {"detail": "价格层级已删除"}

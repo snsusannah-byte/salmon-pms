@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_warehouse, require_admin, log_operation
 from app.schemas.finished_product_v2 import (
     DailySlaughterRecordCreate,
     DailySlaughterRecordUpdate,

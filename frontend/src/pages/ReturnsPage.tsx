@@ -271,7 +271,7 @@ export default function ReturnsPage() {
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
+        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v ?? ""); setPage(1); }}>
           <SelectTrigger className="w-[140px]">
             <SelectValue placeholder="全部状态" />
           </SelectTrigger>
@@ -282,7 +282,7 @@ export default function ReturnsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={reasonFilter} onValueChange={(v) => { setReasonFilter(v); setPage(1); }}>
+        <Select value={reasonFilter} onValueChange={(v) => { setReasonFilter(v ?? ""); setPage(1); }}>
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="全部原因" />
           </SelectTrigger>

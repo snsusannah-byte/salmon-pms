@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -13,10 +13,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Search, Package, Warehouse, ArrowDown, ArrowUp, AlertTriangle,
-  Boxes, Fish, Shrimp, Wrench, Recycle, Plus
+  Boxes, Fish, Shrimp, Wrench, Recycle, Plus, X
 } from "lucide-react";
 import { toast } from "sonner";
 import { StockInboundDialog, StockOutboundDialog, StockTransferDialog } from "@/components/StockOperationDialogs";
@@ -29,6 +28,7 @@ interface Warehouse {
   type: string;
   business_scope: string;
   is_active: boolean;
+  notes?: string | null;
 }
 
 interface Stock {
@@ -51,6 +51,7 @@ interface Stock {
   last_in_date?: string;
   last_out_date?: string;
   location?: string;
+  lead_time?: number;
 }
 
 interface StockSummary {
@@ -120,6 +121,19 @@ const getWarehouseTypeLabel = (type: string) => {
   return map[type] || type;
 };
 
+const getProductCategoryLabel = (category: string) => {
+  const map: Record<string, string> = {
+    whole_fish: "整鱼",
+    fillet: "鱼柳",
+    finished_product: "成品",
+    byproduct: "副产品",
+    packaging: "包装物料",
+    accessory: "配套",
+    bom_material: "BOM物料",
+  };
+  return map[category] || category;
+};
+
 const getBusinessScopeLabel = (scope: string) => {
   const map: Record<string, string> = {
     IMPORT: "进口单证",
@@ -151,40 +165,14 @@ const getMovementTypeBadge = (type: string) => {
   return variantMap[type] || "bg-gray-100 text-gray-800";
 };
 
-const fmt = (n?: number) => {
-  if (n === undefined || n === null) return "-";
-  return n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+const fmt = (n?: number | string | null, digits = 2) => {
+  if (n === undefined || n === null || n === "") return "-";
+  const num = Number(n);
+  if (isNaN(num)) return "-";
+  return num.toLocaleString("zh-CN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 };
 
-// ==================== 库存汇总卡片 ====================
-function SummaryCards({ summary }: { summary: StockSummary[] }) {
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-      {summary.map((s) => (
-        <Card key={s.warehouse_id} className="cursor-pointer hover:shadow-md transition-shadow">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-2">
-              {getWarehouseIcon(s.warehouse_type)}
-              <span className="text-sm font-medium text-gray-600">{s.warehouse_name}</span>
-            </div>
-            <div className="text-2xl font-bold">{s.product_count}</div>
-            <div className="text-xs text-gray-500">种产品</div>
-            <div className="mt-2 text-sm">
-              <span className="text-gray-500">数量: </span>
-              <span className="font-semibold">{fmt(s.total_qty)}</span>
-            </div>
-            <div className="text-sm">
-              <span className="text-gray-500">金额: </span>
-              <span className="font-semibold">¥{fmt(s.total_cost)}</span>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
-// ==================== 库存列表 ====================
+// ==================== 产品汇总库存查询 ====================
 function StockList({
   warehouseId,
   productId,
@@ -195,88 +183,363 @@ function StockList({
   isBelowWarning?: boolean;
 }) {
   const [search, setSearch] = useState("");
+  const [selectedWarehouse, setSelectedWarehouse] = useState<string>("");
+  const [selectedProduct, setSelectedProduct] = useState<{
+    product_id: number;
+    product_name: string;
+    product_category: string;
+  } | null>(null);
+  const [movementDialogOpen, setMovementDialogOpen] = useState(false);
+  const [movementStock, setMovementStock] = useState<{
+    warehouse_id: number;
+    warehouse_name: string;
+    product_id: number;
+    product_name: string;
+  } | null>(null);
+
   const { data, isLoading } = useQuery({
     queryKey: ["warehouse-v2-stocks", warehouseId, productId, isBelowWarning],
     queryFn: () => fetchStocks({ warehouse_id: warehouseId, product_id: productId, is_below_warning: isBelowWarning, limit: 500 }),
   });
 
   const items: Stock[] = data?.items || [];
-  const filtered = items.filter((s) =>
-    s.product_name?.toLowerCase().includes(search.toLowerCase()) ||
-    s.warehouse_name?.toLowerCase().includes(search.toLowerCase())
-  );
+
+  // 按产品汇总（确保所有数值为 Number 类型，防止字符串拼接）
+  const groupedByProduct = useMemo(() => {
+    const map = new Map<number, { product_id: number; product_name: string; product_category: string; unit: string; total_current: number; total_available: number; total_cost: number; avg_unit_cost: number; details: Stock[]; is_below_warning: boolean; warehouse_names: string[]; lead_time?: number }>();
+    items.forEach((s) => {
+      const qty = Number(s.current_qty) || 0;
+      const avail = Number(s.available_qty) || 0;
+      const cost = Number(s.total_cost) || 0;
+      const uCost = Number(s.unit_cost) || 0;
+      const existing = map.get(s.product_id);
+      if (existing) {
+        existing.total_current += qty;
+        existing.total_available += avail;
+        existing.total_cost += cost;
+        existing.details.push(s);
+        if (!existing.warehouse_names.includes(s.warehouse_name)) {
+          existing.warehouse_names.push(s.warehouse_name);
+        }
+        if (s.is_below_warning) existing.is_below_warning = true;
+        // 如果有更新的 lead_time，更新它
+        if (s.lead_time !== undefined && s.lead_time !== null) {
+          existing.lead_time = s.lead_time;
+        }
+      } else {
+        map.set(s.product_id, {
+          product_id: s.product_id,
+          product_name: s.product_name,
+          product_category: s.product_category,
+          unit: s.unit,
+          total_current: qty,
+          total_available: avail,
+          total_cost: cost,
+          avg_unit_cost: uCost,
+          details: [s],
+          is_below_warning: s.is_below_warning,
+          warehouse_names: [s.warehouse_name],
+          lead_time: s.lead_time,
+        });
+      }
+    });
+    // 重新计算平均成本
+    map.forEach((g) => {
+      if (g.total_current > 0) {
+        g.avg_unit_cost = g.total_cost / g.total_current;
+      }
+    });
+    return Array.from(map.values());
+  }, [items]);
+
+  const filtered = groupedByProduct.filter((g) => {
+    const matchSearch = g.product_name?.toLowerCase().includes(search.toLowerCase()) ||
+      g.product_category?.toLowerCase().includes(search.toLowerCase());
+    const matchWarehouse = !selectedWarehouse || g.warehouse_names.includes(selectedWarehouse);
+    return matchSearch && matchWarehouse;
+  });
 
   return (
-    <div>
-      <div className="flex items-center gap-4 mb-4">
+    <div className="h-full flex flex-col gap-4">
+      {/* 搜索栏 */}
+      <div className="flex items-center gap-4">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
           <Input
-            placeholder="搜索产品或仓库..."
+            placeholder="搜索产品名称或分类..."
             className="pl-8"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setSelectedProduct(null); }}
           />
         </div>
-        <span className="text-sm text-gray-500">共 {filtered.length} 条</span>
+        <Select value={selectedWarehouse} onValueChange={(v) => { setSelectedWarehouse(v ?? ""); setSelectedProduct(null); }}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="选择仓库" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">全部仓库</SelectItem>
+            {(() => {
+              const whSet = new Set<string>();
+              items.forEach((s) => whSet.add(s.warehouse_name));
+              return Array.from(whSet).map((name) => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ));
+            })()}
+          </SelectContent>
+        </Select>
+        <span className="text-sm text-gray-500">共 {filtered.length} 种产品</span>
       </div>
 
-      <div className="border rounded-md">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>仓库</TableHead>
-              <TableHead>产品</TableHead>
-              <TableHead>分类</TableHead>
-              <TableHead className="text-right">当前数量</TableHead>
-              <TableHead className="text-right">可用数量</TableHead>
-              <TableHead className="text-right">单位成本</TableHead>
-              <TableHead className="text-right">总成本</TableHead>
-              <TableHead>状态</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
+      {/* 上部：产品汇总列表 */}
+      <div className="flex-1 flex flex-col min-h-0 border rounded-lg overflow-hidden">
+        <div className="overflow-auto">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8">加载中...</TableCell>
+                <TableHead className="sticky top-0 bg-background z-10">产品名称</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10">分类</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10">仓库</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10 text-right">总库存数量</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10 text-right">可用数量</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10 text-right">平均成本</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10 text-right">总成本</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10 text-right">到货周期</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10">状态</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10 text-center">操作记录</TableHead>
               </TableRow>
-            ) : filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-gray-500">暂无库存记录</TableCell>
-              </TableRow>
-            ) : (
-              filtered.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      {getWarehouseIcon("")}
-                      <span className="text-sm">{s.warehouse_name}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="font-medium">{s.product_name}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{s.product_category}</Badge>
-                  </TableCell>
-                  <TableCell className="text-right">{fmt(s.current_qty)} {s.unit}</TableCell>
-                  <TableCell className="text-right">{fmt(s.available_qty)} {s.unit}</TableCell>
-                  <TableCell className="text-right">¥{fmt(s.unit_cost)}</TableCell>
-                  <TableCell className="text-right">¥{fmt(s.total_cost)}</TableCell>
-                  <TableCell>
-                    {s.is_below_warning ? (
-                      <Badge className="bg-red-100 text-red-800 flex items-center gap-1">
-                        <AlertTriangle className="h-3 w-3" />
-                        预警
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-green-100 text-green-800">正常</Badge>
-                    )}
-                  </TableCell>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center py-8">加载中...</TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center py-8 text-gray-500">暂无库存记录</TableCell>
+                </TableRow>
+              ) : (
+                filtered.map((g) => (
+                  <TableRow
+                    key={g.product_id}
+                    className={cn(
+                      "cursor-pointer transition-colors",
+                      selectedProduct?.product_id === g.product_id && "bg-primary/10 hover:bg-primary/15"
+                    )}
+                    onClick={() => setSelectedProduct(
+                      selectedProduct?.product_id === g.product_id ? null : {
+                        product_id: g.product_id,
+                        product_name: g.product_name,
+                        product_category: g.product_category,
+                      }
+                    )}
+                  >
+                    <TableCell className="font-medium">{g.product_name}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{getProductCategoryLabel(g.product_category)}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {g.warehouse_names.map((name) => (
+                          <Badge key={name} variant="secondary" className="text-xs">{name}</Badge>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span className={g.is_below_warning ? "text-red-600 font-semibold" : ""}>
+                        {fmt(g.total_current)} {g.unit}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right">{fmt(g.total_available)} {g.unit}</TableCell>
+                    <TableCell className="text-right">¥{fmt(g.avg_unit_cost)}</TableCell>
+                    <TableCell className="text-right">¥{fmt(g.total_cost)}</TableCell>
+                    <TableCell className="text-right">
+                      {g.lead_time !== undefined && g.lead_time !== null ? (
+                        <span className={g.lead_time > 7 ? "text-orange-600 font-semibold" : "text-green-600"}>
+                          {g.lead_time}天
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {g.is_below_warning ? (
+                        <Badge className="bg-red-100 text-red-800 flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          预警
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-green-100 text-green-800">正常</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Button variant="ghost" size="sm" className="h-6 px-2 text-blue-600" onClick={(e) => { e.stopPropagation(); setMovementStock({ warehouse_id: undefined, warehouse_name: '全部仓库', product_id: g.product_id, product_name: g.product_name }); setMovementDialogOpen(true); }}>
+                        查看
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
+
+      {/* 下部：选中产品的库存明细 */}
+      {selectedProduct && (
+        <div className="flex-none border rounded-lg bg-background">
+          <div className="p-3 space-y-2">
+            {/* 详情头部 */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <h3 className="font-semibold text-base">{selectedProduct.product_name} — 库存明细</h3>
+                <Badge variant="outline">{getProductCategoryLabel(selectedProduct.product_category)}</Badge>
+              </div>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedProduct(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="border rounded-md overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/30">
+                    <TableHead className="text-xs h-7">仓库</TableHead>
+                    <TableHead className="text-xs h-7">批次号</TableHead>
+                    <TableHead className="text-xs h-7 text-right">当前数量</TableHead>
+                    <TableHead className="text-xs h-7 text-right">可用数量</TableHead>
+                    <TableHead className="text-xs h-7 text-right">单位成本</TableHead>
+                    <TableHead className="text-xs h-7 text-right">总成本</TableHead>
+                    <TableHead className="text-xs h-7">最后入库</TableHead>
+                    <TableHead className="text-xs h-7">最后出库</TableHead>
+                    <TableHead className="text-xs h-7">状态</TableHead>
+                  <TableHead className="text-xs h-7 text-center">操作记录</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(() => {
+                    const details = groupedByProduct.find(g => g.product_id === selectedProduct.product_id)?.details || [];
+                    return details.map((s) => (
+                      <TableRow key={s.id} className="h-7">
+                        <TableCell className="text-sm py-0.5">
+                          <div className="flex items-center gap-1">
+                            {getWarehouseIcon("")}
+                            <span>{s.warehouse_name}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm py-0.5 font-mono text-xs">{s.batch_no || "-"}</TableCell>
+                        <TableCell className="text-sm py-0.5 text-right">
+                          <span className={s.is_below_warning ? "text-red-600 font-semibold" : ""}>
+                            {fmt(s.current_qty)} {s.unit}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-sm py-0.5 text-right">{fmt(s.available_qty)} {s.unit}</TableCell>
+                        <TableCell className="text-sm py-0.5 text-right">¥{fmt(s.unit_cost)}</TableCell>
+                        <TableCell className="text-sm py-0.5 text-right">¥{fmt(s.total_cost)}</TableCell>
+                        <TableCell className="text-sm py-0.5">{s.last_in_date || "-"}</TableCell>
+                        <TableCell className="text-sm py-0.5">{s.last_out_date || "-"}</TableCell>
+                        <TableCell className="text-sm py-0.5">
+                          {s.is_below_warning ? (
+                            <Badge className="bg-red-100 text-red-800 text-xs">
+                              <AlertTriangle className="h-3 w-3 mr-1" />
+                              预警
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-green-100 text-green-800 text-xs">正常</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm py-0.5 text-center">
+                          <Button variant="ghost" size="sm" className="h-6 px-2 text-blue-600" onClick={(e) => { e.stopPropagation(); setMovementStock({ warehouse_id: s.warehouse_id, warehouse_name: s.warehouse_name, product_id: s.product_id, product_name: s.product_name }); setMovementDialogOpen(true); }}>
+                            查看
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ));
+                  })()}
+                  <TableRow className="bg-muted/20 font-medium h-7">
+                    <TableCell className="text-sm py-0.5" colSpan={2}>合计</TableCell>
+                    <TableCell className="text-sm py-0.5 text-right">
+                      {fmt(groupedByProduct.find(g => g.product_id === selectedProduct.product_id)?.total_current || 0)}
+                    </TableCell>
+                    <TableCell className="text-sm py-0.5 text-right">
+                      {fmt(groupedByProduct.find(g => g.product_id === selectedProduct.product_id)?.total_available || 0)}
+                    </TableCell>
+                    <TableCell className="text-sm py-0.5 text-right">-</TableCell>
+                    <TableCell className="text-sm py-0.5 text-right">
+                      ¥{fmt(groupedByProduct.find(g => g.product_id === selectedProduct.product_id)?.total_cost || 0)}
+                    </TableCell>
+                    <TableCell colSpan={4} />
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 操作记录弹窗 */}
+      <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>操作记录 — {movementStock?.product_name}（{movementStock?.warehouse_name}）</DialogTitle>
+          </DialogHeader>
+          <StockMovementDialogContent warehouseId={movementStock?.warehouse_id} productId={movementStock?.product_id} />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMovementDialogOpen(false)}>关闭</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ==================== 操作记录弹窗内容 ====================
+function StockMovementDialogContent({ warehouseId, productId }: { warehouseId?: number; productId?: number }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["warehouse-v2-movements-dialog", warehouseId, productId],
+    queryFn: () =>
+      fetchMovements({ warehouse_id: warehouseId, product_id: productId, limit: 500 }),
+    enabled: !!productId,
+  });
+
+  const items: StockMovement[] = data?.items || [];
+
+  return (
+    <div className="border rounded-md overflow-x-auto">
+      <Table className="min-w-full">
+        <TableHeader>
+          <TableRow>
+            <TableHead className="text-xs whitespace-nowrap">日期</TableHead>
+            <TableHead className="text-xs whitespace-nowrap">类型</TableHead>
+            <TableHead className="text-xs whitespace-nowrap text-right">变动数量</TableHead>
+            <TableHead className="text-xs whitespace-nowrap text-right">变动前</TableHead>
+            <TableHead className="text-xs whitespace-nowrap text-right">变动后</TableHead>
+            <TableHead className="text-xs whitespace-nowrap">关联单据</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading ? (
+            <TableRow><TableCell colSpan={6} className="text-center py-4">加载中...</TableCell></TableRow>
+          ) : items.length === 0 ? (
+            <TableRow><TableCell colSpan={6} className="text-center py-4 text-gray-400">暂无操作记录</TableCell></TableRow>
+          ) : (
+            items.map((m) => (
+              <TableRow key={m.id}>
+                <TableCell className="text-sm whitespace-nowrap">{m.movement_date}</TableCell>
+                <TableCell className="text-sm whitespace-nowrap">
+                  <Badge className={getMovementTypeBadge(m.movement_type)}>
+                    {getMovementTypeLabel(m.movement_type)}
+                  </Badge>
+                </TableCell>
+                <TableCell className={`text-sm whitespace-nowrap text-right font-medium ${m.qty_change > 0 ? "text-green-600" : "text-red-600"}`}>
+                  {m.qty_change > 0 ? "+" : ""}{fmt(m.qty_change)} {m.unit}
+                </TableCell>
+                <TableCell className="text-sm whitespace-nowrap text-right text-gray-500">{fmt(m.qty_before)}</TableCell>
+                <TableCell className="text-sm whitespace-nowrap text-right">{fmt(m.qty_after)}</TableCell>
+                <TableCell className="text-sm whitespace-nowrap text-gray-500">{m.ref_no || "-"}</TableCell>
+              </TableRow>
+            ))
+          )}
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -294,7 +557,7 @@ function MovementList() {
   return (
     <div>
       <div className="flex items-center gap-4 mb-4">
-        <Select value={movementType} onValueChange={setMovementType}>
+        <Select value={movementType} onValueChange={(val) => setMovementType(val ?? "")}>
           <SelectTrigger className="w-40">
             <SelectValue placeholder="变动类型" />
           </SelectTrigger>
@@ -409,18 +672,12 @@ function WarehouseListView() {
 
 // ==================== 主页面 ====================
 export function WarehouseV2Page() {
-  const [activeTab, setActiveTab] = useState("stocks");
   const [inboundOpen, setInboundOpen] = useState(false);
   const [outboundOpen, setOutboundOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
 
-  const { data: summary } = useQuery({
-    queryKey: ["warehouse-v2-summary"],
-    queryFn: fetchStockSummary,
-  });
-
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 h-full flex flex-col">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Warehouse className="h-6 w-6" />
@@ -446,66 +703,7 @@ export function WarehouseV2Page() {
       <StockOutboundDialog open={outboundOpen} onOpenChange={setOutboundOpen} />
       <StockTransferDialog open={transferOpen} onOpenChange={setTransferOpen} />
 
-      {summary && <SummaryCards summary={summary} />}
-
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-flex">
-          <TabsTrigger value="stocks">库存查询</TabsTrigger>
-          <TabsTrigger value="warnings">库存预警</TabsTrigger>
-          <TabsTrigger value="domestic">国内整包仓</TabsTrigger>
-          <TabsTrigger value="movements">库存变动</TabsTrigger>
-          <TabsTrigger value="warehouses">仓库定义</TabsTrigger>
-          <TabsTrigger value="docs">操作说明</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="stocks" className="mt-4">
-          <StockList />
-        </TabsContent>
-
-        <TabsContent value="warnings" className="mt-4">
-          <StockList isBelowWarning={true} />
-        </TabsContent>
-
-        <TabsContent value="domestic" className="mt-4">
-          <DomesticStockList />
-        </TabsContent>
-
-        <TabsContent value="movements" className="mt-4">
-          <MovementList />
-        </TabsContent>
-
-        <TabsContent value="warehouses" className="mt-4">
-          <WarehouseListView />
-        </TabsContent>
-
-        <TabsContent value="docs" className="mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>仓库模块使用说明</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div>
-                <h3 className="font-semibold mb-1">仓库类型</h3>
-                <ul className="list-disc list-inside space-y-1 text-gray-600">
-                  <li><strong>整包仓</strong>：按箱管理（进口/国内采购的整鱼）</li>
-                  <li><strong>分包仓</strong>：按条/板/只管理（分切后的产品）</li>
-                  <li><strong>辅料仓</strong>：包装物、消耗品</li>
-                  <li><strong>副产品仓</strong>：鱼头、鱼尾、鱼骨、边角料</li>
-                </ul>
-              </div>
-              <div>
-                <h3 className="font-semibold mb-1">业务流程</h3>
-                <ol className="list-decimal list-inside space-y-1 text-gray-600">
-                  <li>采购入库 → 自动生成入库记录并更新库存</li>
-                  <li>调拨：整包仓 → 分包仓（箱→条转换）</li>
-                  <li>销售出库：从对应仓库扣减库存</li>
-                  <li>库存预警：库存低于安全线时自动标红</li>
-                </ol>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      <StockList />
     </div>
   );
 }

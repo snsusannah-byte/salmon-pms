@@ -49,6 +49,7 @@ interface Customer {
   monthly_purchase_limit: number | null;
   monthly_purchase_amount: number | null;
   prepaid_balance: number | null;
+  customer_level: string | null;
   customer_category: string | null;
   salesperson_id: number | null;
   salesperson_name: string | null;
@@ -128,6 +129,7 @@ export function CustomersPage() {
   const [formAddress, setFormAddress] = useState("");
   const [formCreditLimit, setFormCreditLimit] = useState("");
   const [formCategory, setFormCategory] = useState("");
+  const [formCustomerLevel, setFormCustomerLevel] = useState("");
   const [formSalespersonId, setFormSalespersonId] = useState("");
   const [formBankName, setFormBankName] = useState("");
   const [formBankAccount, setFormBankAccount] = useState("");
@@ -144,6 +146,7 @@ export function CustomersPage() {
     setFormAddress("");
     setFormCreditLimit("");
     setFormCategory("");
+    setFormCustomerLevel("");
     setFormSalespersonId("");
     setFormBankName("");
     setFormBankAccount("");
@@ -162,6 +165,7 @@ export function CustomersPage() {
     setFormAddress(c.address || "");
     setFormCreditLimit(c.credit_limit ? String(c.credit_limit) : "");
     setFormCategory(c.customer_category || "");
+    setFormCustomerLevel(c.customer_level || "");
     setFormSalespersonId(c.salesperson_id ? String(c.salesperson_id) : "");
     setFormBankName(c.bank_name || "");
     setFormBankAccount(c.bank_account || "");
@@ -309,6 +313,7 @@ export function CustomersPage() {
       phone: formPhone.trim() || null,
       address: formAddress.trim() || null,
       credit_limit: formCreditLimit ? Number(formCreditLimit) : null,
+      customer_level: formCustomerLevel || null,
       customer_category: formCategory || null,
       salesperson_id: formSalespersonId ? Number(formSalespersonId) : null,
       bank_name: formBankName.trim() || null,
@@ -374,6 +379,7 @@ export function CustomersPage() {
                 <TableHead className="text-xs text-right cursor-pointer hover:bg-muted" onClick={() => { /* 点击表头也可排序 */ }}>应收款</TableHead>
                 <TableHead className="text-xs text-right">预付款余额</TableHead>
                 <TableHead className="text-xs">分类</TableHead>
+                <TableHead className="text-xs">等级</TableHead>
                 <TableHead className="text-xs">联系人</TableHead>
                 <TableHead className="text-xs">电话</TableHead>
                 <TableHead className="text-xs text-right">信用额度</TableHead>
@@ -384,11 +390,11 @@ export function CustomersPage() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={11} className="text-center py-8">加载中...</TableCell>
+                  <TableCell colSpan={12} className="text-center py-8">加载中...</TableCell>
                 </TableRow>
               ) : customers?.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={12} className="text-center text-muted-foreground py-8">
                     暂无客户数据
                   </TableCell>
                 </TableRow>
@@ -414,6 +420,13 @@ export function CustomersPage() {
                       {c.customer_category ? (
                         <Badge variant="outline" className="text-[10px]">
                           {customerCategoryMap[c.customer_category] || c.customer_category}
+                        </Badge>
+                      ) : "-"}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {c.customer_level ? (
+                        <Badge variant="default" className="text-[10px]">
+                          {c.customer_level}
                         </Badge>
                       ) : "-"}
                     </TableCell>
@@ -617,6 +630,30 @@ export function CustomersPage() {
                 </Select>
               </div>
               <div className="space-y-2">
+                <Label>客户等级</Label>
+                <Select value={formCustomerLevel} onValueChange={setFormCustomerLevel}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择等级" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="normal">普通</SelectItem>
+                    <SelectItem value="vip">VIP</SelectItem>
+                    <SelectItem value="wholesale">批发</SelectItem>
+                    <SelectItem value="bulk">大客户</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>联系人</Label>
+                <Input value={formContact} onChange={(e) => setFormContact(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>电话</Label>
+                <Input value={formPhone} onChange={(e) => setFormPhone(e.target.value)} />
+              </div>
+              <div className="space-y-2">
                 <Label>业务员</Label>
                 <Select value={formSalespersonId} onValueChange={setFormSalespersonId}>
                   <SelectTrigger>
@@ -628,16 +665,6 @@ export function CustomersPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>联系人</Label>
-                <Input value={formContact} onChange={(e) => setFormContact(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label>电话</Label>
-                <Input value={formPhone} onChange={(e) => setFormPhone(e.target.value)} />
               </div>
             </div>
             <div className="space-y-2">

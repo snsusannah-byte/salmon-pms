@@ -922,7 +922,31 @@ class FinanceService:
 
     @staticmethod
     async def delete_transaction(db: AsyncSession, record: TransactionRecord) -> None:
-        # 如果关联了销售收款，同步删除并重新计算销售单状态
+        # 如果关联了辅料采购付款，同步更新采购单状态
+        if record.id and record.reference_no and record.reference_no.startswith("CG"):
+            from app.models import MaterialPurchaseOrder
+            from sqlalchemy import select
+            from sqlalchemy.ext.asyncio import AsyncSession
+            
+            # 查找关联的辅料采购单
+            po_result = await db.execute(
+                select(MaterialPurchaseOrder).where(MaterialPurchaseOrder.order_no == record.reference_no)
+            )
+            po = po_result.scalar_one_or_none()
+            if po:
+                # 扣除已付款金额
+                amount = Decimal(str(record.amount or 0))
+                po.paid_amount = max(Decimal("0"), Decimal(str(po.paid_amount or 0)) - amount)
+                
+                # 更新付款状态
+                if po.paid_amount >= po.actual_total:
+                    po.payment_status = "paid"
+                elif po.paid_amount > 0:
+                    po.payment_status = "partial"
+                else:
+                    po.payment_status = "unpaid"
+
+        # 如果关联了整鱼销售收款，同步删除并重新计算销售单状态
         if record.id:
             from app.models import SalesReceipt, WholeFishSale
             from sqlalchemy import select
@@ -951,6 +975,55 @@ class FinanceService:
                     if Decimal(str(sale.paid_amount or 0)) == 0:
                         sale.rounding_adjustment = Decimal("0")
                         await db.commit()
+
+        # 如果关联了成品销售/以销定采收款，同步删除并重新计算
+        if record.id:
+            from app.models.finished_product import FinishedProductReceipt, FinishedProductSaleV2
+            from sqlalchemy import func
+            from app.models.enums import TransactionCategory
+
+            result = await db.execute(
+                select(FinishedProductReceipt).where(FinishedProductReceipt.transaction_id == record.id)
+            )
+            fp_receipts = result.scalars().all()
+            affected_v2_sale_ids = set()
+            for receipt in fp_receipts:
+                affected_v2_sale_ids.add(receipt.sale_v2_id)
+                await db.delete(receipt)
+            
+            await db.flush()
+            
+            # 重新计算对应成品销售单的收款状态
+            for sale_id in affected_v2_sale_ids:
+                if not sale_id:
+                    continue
+                sale_result = await db.execute(
+                    select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id)
+                )
+                sale = sale_result.scalar_one_or_none()
+                if sale:
+                    # 重新计算已收金额
+                    receipt_result = await db.execute(
+                        select(func.sum(FinishedProductReceipt.amount))
+                        .where(FinishedProductReceipt.sale_v2_id == sale_id)
+                    )
+                    paid_amount = receipt_result.scalar() or Decimal("0")
+                    sale.paid_amount = paid_amount
+                    
+                    net_amount = sale.net_amount or Decimal("0")
+                    if paid_amount >= net_amount and net_amount > 0:
+                        sale.status = "paid"
+                        sale.paid = 1
+                    elif paid_amount > 0:
+                        sale.paid = 1
+                    else:
+                        sale.paid = 0
+                        # 已全额清零，同步清零抹零
+                        sale.rounding = Decimal("0")
+                        # 抹零清零后重算净金额
+                        sale.actual_amount = (sale.total_amount or Decimal("0")) - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - sale.rounding
+                        sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
+                    await db.flush()
 
         # 客户预付款删除：恢复客户余额
         if record.category == TransactionCategory.CUSTOMER_DEPOSIT and record.counterparty_id:

@@ -13,13 +13,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.core.database import get_db
-from app.models import Product, ProductCategory, Company, MaterialSupplier
+from app.core.permissions import require_warehouse, log_operation
+from app.models import Product, ProductCategory, Company, MaterialSupplier, MaterialCategory, User
 from app.models.finished_product_v2 import WarehousePurchaseOrder, WarehouseStock
 
 router = APIRouter()
 
 
 # ==================== 响应模型 ====================
+
+class MaterialCategoryBrief(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    code: str
+
+
+class MaterialCreate(BaseModel):
+    code: Optional[str] = None
+    name: str
+    spec: Optional[str] = None
+    unit: str = "个"
+    cost_price: Optional[float] = None
+    category_id: Optional[int] = None
+    is_active: bool = True
+    items_per_box: Optional[int] = None  # 每箱数量
+
+
+class MaterialUpdate(BaseModel):
+    code: Optional[str] = None
+    name: Optional[str] = None
+    spec: Optional[str] = None
+    unit: Optional[str] = None
+    cost_price: Optional[float] = None
+    category_id: Optional[int] = None
+    is_active: Optional[bool] = None
+    items_per_box: Optional[int] = None
+
 
 class MaterialSupplierItem(BaseModel):
     """物料供应商项"""
@@ -47,8 +77,15 @@ class MaterialItem(BaseModel):
     stock_quantity: Decimal
     lead_time_days: Optional[int] = None
     last_purchase_price: Optional[Decimal] = None
+    cost_price: Optional[Decimal] = None
     is_active: bool
+    category_id: Optional[int] = None  # 新增：分类ID
+    category: Optional[MaterialCategoryBrief] = None  # 物料分类
     suppliers: List[MaterialSupplierItem] = []  # 新增：多供应商
+    items_per_box: Optional[int] = None  # 每箱数量
+    material_type: Optional[str] = "standalone"
+    parent_id: Optional[int] = None
+    variants: List["MaterialItem"] = []  # 嵌套变体
 
 
 class MaterialListResponse(BaseModel):
@@ -119,6 +156,7 @@ class MaterialMovementListResponse(BaseModel):
 async def list_materials(
     search: Optional[str] = Query(None),
     supplier_id: Optional[int] = Query(None),
+    material_category_id: Optional[int] = Query(None),
     is_active: Optional[bool] = Query(None),
     is_low_stock: Optional[bool] = Query(None),
     skip: int = Query(0, ge=0),
@@ -146,9 +184,17 @@ async def list_materials(
         query = query.where(Product.supplier_id == supplier_id)
         count_query = count_query.where(Product.supplier_id == supplier_id)
 
+    if material_category_id is not None:
+        query = query.where(Product.material_category_id == material_category_id)
+        count_query = count_query.where(Product.material_category_id == material_category_id)
+
     if is_active is not None:
         query = query.where(Product.is_active == is_active)
         count_query = count_query.where(Product.is_active == is_active)
+
+    # 只查询基础物料和独立物料（变体作为嵌套）
+    query = query.where(Product.material_type.in_(["basic", "standalone"]))
+    count_query = count_query.where(Product.material_type.in_(["basic", "standalone"]))
 
     query = query.order_by(Product.created_at.desc())
 
@@ -158,10 +204,21 @@ async def list_materials(
     result = await db.execute(query.offset(skip).limit(limit))
     products = result.scalars().all()
 
+    # 获取所有相关物料ID（基础物料 + 它们的变体）
+    all_product_ids = [p.id for p in products]
+    variant_map: dict[int, List[Product]] = {}
+    for p in products:
+        if p.material_type == "basic":
+            variant_result = await db.execute(
+                select(Product).where(Product.parent_id == p.id).where(Product.is_active == True)
+            )
+            variants = variant_result.scalars().all()
+            variant_map[p.id] = variants
+            all_product_ids.extend([v.id for v in variants])
+
     # 获取库存信息
-    product_ids = [p.id for p in products]
     stock_result = await db.execute(
-        select(WarehouseStock).where(WarehouseStock.product_id.in_(product_ids))
+        select(WarehouseStock).where(WarehouseStock.product_id.in_(all_product_ids))
     )
     stock_map = {s.product_id: s for s in stock_result.scalars().all()}
 
@@ -169,7 +226,7 @@ async def list_materials(
     ms_result = await db.execute(
         select(MaterialSupplier, Company)
         .join(Company, MaterialSupplier.supplier_id == Company.id)
-        .where(MaterialSupplier.material_id.in_(product_ids))
+        .where(MaterialSupplier.material_id.in_(all_product_ids))
     )
     supplier_map: dict[int, List[MaterialSupplierItem]] = {}
     for ms, company in ms_result.all():
@@ -188,18 +245,31 @@ async def list_materials(
 
     # 获取旧版单供应商名称（兼容）
     old_supplier_ids = [p.supplier_id for p in products if p.supplier_id]
+    for variants in variant_map.values():
+        old_supplier_ids.extend([v.supplier_id for v in variants if v.supplier_id])
     old_supplier_names = {}
     if old_supplier_ids:
         supplier_result = await db.execute(
-            select(Company).where(Company.id.in_(old_supplier_ids))
+            select(Company).where(Company.id.in_(set(old_supplier_ids)))
         )
         old_supplier_names = {c.id: c.name for c in supplier_result.scalars().all()}
 
-    items = []
-    for p in products:
+    # 获取物料分类信息
+    category_ids = [p.material_category_id for p in products if p.material_category_id]
+    for variants in variant_map.values():
+        category_ids.extend([v.material_category_id for v in variants if v.material_category_id])
+    category_map = {}
+    if category_ids:
+        cat_result = await db.execute(
+            select(MaterialCategory).where(MaterialCategory.id.in_(set(category_ids)))
+        )
+        category_map = {c.id: MaterialCategoryBrief(id=c.id, name=c.name, code=c.code) for c in cat_result.scalars().all()}
+
+    def build_item(p: Product) -> MaterialItem:
         stock = stock_map.get(p.id)
         suppliers = supplier_map.get(p.id, [])
-        items.append(MaterialItem(
+        category = category_map.get(p.material_category_id) if p.material_category_id else None
+        return MaterialItem(
             id=p.id,
             code=p.code,
             name=p.name,
@@ -210,9 +280,23 @@ async def list_materials(
             stock_quantity=stock.current_quantity if stock else 0,
             lead_time_days=p.lead_time_days,
             last_purchase_price=p.last_purchase_price if p.last_purchase_price else None,
+            cost_price=p.cost_price if p.cost_price else None,
             is_active=p.is_active,
+            category_id=p.material_category_id,
+            category=category,
             suppliers=suppliers,
-        ))
+            items_per_box=p.items_per_box,
+            material_type=p.material_type,
+            parent_id=p.parent_id,
+        )
+
+    items = []
+    for p in products:
+        item = build_item(p)
+        # 加载变体
+        if p.id in variant_map:
+            item.variants = [build_item(v) for v in variant_map[p.id]]
+        items.append(item)
 
     # 低库存筛选
     if is_low_stock:
@@ -255,6 +339,16 @@ async def get_material(
         supplier = supplier_result.scalar_one_or_none()
         supplier_name = supplier.name if supplier else None
 
+    # 分类
+    category = None
+    if product.material_category_id:
+        cat_result = await db.execute(
+            select(MaterialCategory).where(MaterialCategory.id == product.material_category_id)
+        )
+        cat = cat_result.scalar_one_or_none()
+        if cat:
+            category = MaterialCategoryBrief(id=cat.id, name=cat.name, code=cat.code)
+
     return MaterialItem(
         id=product.id,
         code=product.code,
@@ -266,7 +360,11 @@ async def get_material(
         stock_quantity=stock.current_quantity if stock else 0,
         lead_time_days=product.lead_time_days,
         last_purchase_price=product.last_purchase_price if product.last_purchase_price else None,
+        cost_price=product.cost_price if product.cost_price else None,
         is_active=product.is_active,
+        category_id=product.material_category_id,
+        category=category,
+        items_per_box=product.items_per_box,
     )
 
 
@@ -560,6 +658,150 @@ async def delete_material_supplier(
     return {"detail": "已删除"}
 
 
+# ==================== 物料 CRUD ====================
+
+@router.post("/", response_model=MaterialItem, status_code=201)
+async def create_material(
+    data: MaterialCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """创建物料"""
+    product = Product(
+        category=ProductCategory.BOM_MATERIAL,
+        code=data.code or "",
+        name=data.name,
+        spec=data.spec,
+        unit=data.unit,
+        cost_price=Decimal(str(data.cost_price)) if data.cost_price is not None else None,
+        material_category_id=data.category_id,
+        is_active=data.is_active,
+        items_per_box=data.items_per_box,
+    )
+    db.add(product)
+    await db.commit()
+    await db.refresh(product)
+
+    return MaterialItem(
+        id=product.id,
+        code=product.code,
+        name=product.name,
+        spec=product.spec,
+        unit=product.unit or "个",
+        stock_quantity=0,
+        cost_price=product.cost_price if product.cost_price else None,
+        is_active=product.is_active,
+        category_id=product.material_category_id,
+        items_per_box=product.items_per_box,
+    )
+
+
+@router.put("/{material_id}", response_model=MaterialItem)
+async def update_material(
+    material_id: int,
+    data: MaterialUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新物料"""
+    result = await db.execute(
+        select(Product).where(
+            Product.id == material_id,
+            Product.category == ProductCategory.BOM_MATERIAL,
+        )
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="物料不存在")
+
+    if data.code is not None:
+        product.code = data.code
+    if data.name is not None:
+        product.name = data.name
+    if data.spec is not None:
+        product.spec = data.spec
+    if data.unit is not None:
+        product.unit = data.unit
+    if data.cost_price is not None:
+        product.cost_price = Decimal(str(data.cost_price))
+    if data.category_id is not None:
+        product.material_category_id = data.category_id
+    if data.is_active is not None:
+        product.is_active = data.is_active
+    if data.items_per_box is not None:
+        product.items_per_box = data.items_per_box
+
+    await db.commit()
+    await db.refresh(product)
+
+    # 获取库存
+    stock_result = await db.execute(
+        select(WarehouseStock).where(WarehouseStock.product_id == material_id)
+    )
+    stock = stock_result.scalar_one_or_none()
+
+    # 获取分类
+    category = None
+    if product.material_category_id:
+        cat_result = await db.execute(
+            select(MaterialCategory).where(MaterialCategory.id == product.material_category_id)
+        )
+        cat = cat_result.scalar_one_or_none()
+        if cat:
+            category = MaterialCategoryBrief(id=cat.id, name=cat.name, code=cat.code)
+
+    return MaterialItem(
+        id=product.id,
+        code=product.code,
+        name=product.name,
+        spec=product.spec,
+        unit=product.unit or "个",
+        stock_quantity=stock.current_quantity if stock else 0,
+        lead_time_days=product.lead_time_days,
+        last_purchase_price=product.last_purchase_price if product.last_purchase_price else None,
+        cost_price=product.cost_price if product.cost_price else None,
+        is_active=product.is_active,
+        category_id=product.material_category_id,
+        category=category,
+        items_per_box=product.items_per_box,
+    )
+
+
+@router.delete("/{material_id}", status_code=204)
+async def delete_material(
+    material_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """删除物料"""
+    result = await db.execute(
+        select(Product).where(
+            Product.id == material_id,
+            Product.category == ProductCategory.BOM_MATERIAL,
+        )
+    )
+    product = result.scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="物料不存在")
+
+    # 检查是否有关联库存
+    stock_result = await db.execute(
+        select(WarehouseStock).where(WarehouseStock.product_id == material_id)
+    )
+    stock = stock_result.scalar_one_or_none()
+    if stock and stock.current_quantity > 0:
+        raise HTTPException(status_code=400, detail="该物料还有库存，无法删除")
+
+    # 检查是否有关联供应商
+    ms_result = await db.execute(
+        select(func.count(MaterialSupplier.id)).where(MaterialSupplier.material_id == material_id)
+    )
+    ms_count = ms_result.scalar() or 0
+    if ms_count > 0:
+        raise HTTPException(status_code=400, detail=f"该物料还有 {ms_count} 个供应商关联，无法删除")
+
+    await db.delete(product)
+    await db.commit()
+    return {"detail": "已删除"}
+
+
 # ==================== 供应商视角：查看某供应商供应的所有物料 ====================
 
 @router.get("/by-supplier/{supplier_id}", response_model=MaterialListResponse)
@@ -624,6 +866,7 @@ async def list_materials_by_supplier(
             lead_time_days=ms.lead_time_days,
             last_purchase_price=ms.unit_price if ms.unit_price else None,
             is_active=p.is_active,
+            category_id=p.material_category_id,
             suppliers=[MaterialSupplierItem(
                 id=ms.id,
                 supplier_id=ms.supplier_id,

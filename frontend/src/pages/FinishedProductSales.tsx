@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,9 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -24,6 +28,8 @@ import {
 import { cn } from '@/lib/utils';
 import { api, apiFetch, apiPost, apiDelete } from '@/lib/api';
 import { toast } from 'sonner';
+import { ReturnOrderForm } from '@/components/returns/ReturnOrderForm';
+import { ProductSelectorV2 } from '@/components/ProductSelectorV2';
 
 interface FinishedSaleReceipt {
   id: number;
@@ -69,10 +75,13 @@ interface FinishedSale {
   payment_status?: string;
   products?: FinishedSaleProduct[];
   receipts?: FinishedSaleReceipt[];
+  aftersales?: any[];
+  return_orders?: any[];
 }
 
 interface FinishedSaleProduct {
   id?: number;
+  variant_id?: number | null;
   product_name?: string;
   product_spec: string;
   factory?: string;
@@ -93,7 +102,7 @@ interface ProductGroup {
 }
 
 const emptyProduct: FinishedSaleProduct = {
-  product_spec: '', box_count: 0, weight_kg: 0, unit_price: 0,
+  variant_id: null, product_spec: '', box_count: 0, weight_kg: 0, unit_price: 0,
   total_amount: 0, commission_rate: 0, commission_amount: 0, after_sales_adjustment: 0
 };
 
@@ -113,13 +122,18 @@ function round2(n: number): number {
 }
 
 export function FinishedProductSales() {
+  const location = useLocation();
+  const isMadeToOrder = location.pathname === '/made-to-order';
+  const pageTitle = isMadeToOrder ? '以销定采' : '预包装销售';
+  const allowedSaleType = isMadeToOrder ? 'whole_fish' : 'finished_product';
+
   const [sales, setSales] = useState<FinishedSale[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [salespeople, setSalespeople] = useState<{name: string, commission_rate: number}[]>([]);
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'whole_fish' | 'finished_product'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'whole_fish' | 'finished_product'>(allowedSaleType);
   const [showModal, setShowModal] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
   const [detailSale, setDetailSale] = useState<FinishedSale | null>(null);
@@ -141,8 +155,15 @@ export function FinishedProductSales() {
   const [adjustSaleId, setAdjustSaleId] = useState<number | null>(null);
   const [deleteSale, setDeleteSale] = useState<FinishedSale | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [batchDeleteDialogOpen, setBatchDeleteDialogOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectedSale, setSelectedSale] = useState<FinishedSale | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+  // 退货表单
+  const [returnFormOpen, setReturnFormOpen] = useState(false);
+  const [returnPrefillSale, setReturnPrefillSale] = useState<{ type: "whole_fish" | "finished_product"; sale: any } | null>(null);
 
   // 产品名称下拉
   const [activeProductNameIdx, setActiveProductNameIdx] = useState<number | null>(null);
@@ -155,7 +176,7 @@ export function FinishedProductSales() {
 
   const loadSales = async () => {
     setLoading(true);
-    const res = await apiFetch('v4/finished-product-sales');
+    const res = await apiFetch(`v4/finished-product-sales?sale_type=${allowedSaleType}`);
     if (res.ok && res.data) {
       const arr = Array.isArray(res.data) ? res.data : (res.data.data || []);
       setSales(arr);
@@ -185,6 +206,16 @@ export function FinishedProductSales() {
       const arr = Array.isArray(res.data) ? res.data : (res.data.data || []);
       setProductGroups(arr);
     }
+  };
+
+  const handleCustomerSelect = (customerName: string) => {
+    const customer = customers.find((c: any) => c.name === customerName);
+    setForm(prev => ({
+      ...prev,
+      customer: customerName,
+      delivery_address: customer?.address || prev.delivery_address,
+      logistics_info: customer?.logistics_info || prev.logistics_info,
+    }));
   };
 
   useEffect(() => { loadSales(); loadCustomers(); loadSalespeople(); loadProducts(); }, []);
@@ -403,6 +434,9 @@ export function FinishedProductSales() {
     return (s.sale_no?.toLowerCase().includes(search.toLowerCase()) || s.customer?.toLowerCase().includes(search.toLowerCase()) || s.salesperson?.toLowerCase().includes(search.toLowerCase()));
   });
 
+  const totalPages = Math.ceil(filteredSales.length / PAGE_SIZE) || 1;
+  const pageData = filteredSales.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   // 勾选相关
   const toggleSelectAll = () => {
     if (selectedIds.size === filteredSales.length) setSelectedIds(new Set());
@@ -422,15 +456,17 @@ export function FinishedProductSales() {
 
   const handleBatchDelete = async () => {
     if (selectedIds.size === 0) { toast.error('请先选择要删除的记录'); return; }
-    if (!confirm(`确定删除选中的 ${selectedIds.size} 条销售记录吗？`)) return;
+    setBatchDeleteDialogOpen(true);
+  };
+  const confirmBatchDelete = async () => {
     try {
       const ids = Array.from(selectedIds);
       await apiPost('/v4/finished-product-sales/batch-delete', { ids }, '批量删除成功');
       setSelectedIds(new Set()); loadSales();
-    } catch (e) {}
+    } catch (e) {} finally { setBatchDeleteDialogOpen(false); }
   };
 
-  const filteredCustomers = customers.filter(c => c.toLowerCase().includes(customerSearch.toLowerCase()));
+  const filteredCustomers = customers.filter((c: any) => c.name?.toLowerCase().includes(customerSearch.toLowerCase()));
   const filteredProductNames = productNameSearch.trim()
     ? productGroups.filter(g => (g.name || '').toLowerCase().includes(productNameSearch.toLowerCase()))
     : productGroups;
@@ -438,6 +474,12 @@ export function FinishedProductSales() {
   const paymentStatusMap: Record<number, { label: string; color: string }> = {
     0: { label: '未收款', color: 'bg-red-100 text-red-700' },
     1: { label: '已收款', color: 'bg-green-100 text-green-700' },
+  };
+
+  const paymentStatusMapV4: Record<string, { label: string; color: string }> = {
+    pending: { label: '未收款', color: 'bg-red-100 text-red-700' },
+    partial_paid: { label: '部分收款', color: 'bg-yellow-100 text-yellow-700' },
+    fully_paid: { label: '已收款', color: 'bg-green-100 text-green-700' },
   };
 
   const procurementStatusMap: Record<string, { label: string; color: string }> = {
@@ -450,43 +492,49 @@ export function FinishedProductSales() {
   };
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="flex items-center gap-2 text-lg"><Factory className="w-5 h-5" /> 成品销售</CardTitle></CardHeader>
-        <CardContent>
+    <div className="h-full flex flex-col gap-4">
+      <div className="flex-none space-y-3">
+        <div className="flex flex-row items-center justify-between pb-2"><h1 className="text-lg font-bold flex items-center gap-2"><Factory className="w-5 h-5" /> {pageTitle}</h1></div>
           <div className="flex gap-2 mb-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input className="pl-9" placeholder="搜索销售单号/客户/业务员..." value={search} onChange={e => setSearch(e.target.value)} />
+              <Input className="pl-9" placeholder="搜索销售单号/客户/业务员..." value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
             </div>
-            <Tabs value={filterType} onValueChange={(v: any) => setFilterType(v)} className="w-auto">
-              <TabsList>
-                <TabsTrigger value="all">全部</TabsTrigger>
-                <TabsTrigger value="whole_fish">整鱼</TabsTrigger>
-                <TabsTrigger value="finished_product">成品</TabsTrigger>
-              </TabsList>
-            </Tabs>
+            {!isMadeToOrder && (
+              <Tabs value={filterType} onValueChange={(v: any) => setFilterType(v)} className="w-auto">
+                <TabsList>
+                  <TabsTrigger value="all">全部</TabsTrigger>
+                  <TabsTrigger value="whole_fish">整鱼</TabsTrigger>
+                  <TabsTrigger value="finished_product">成品</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            )}
           </div>
 
           {/* 操作栏 */}
           <div className="flex items-center gap-2 flex-wrap mb-4">
-            <Button size="sm" variant="outline" onClick={() => handleNew('whole_fish')}><ShoppingCart className="h-4 w-4 mr-1" />整鱼销售</Button>
-            <Button size="sm" onClick={() => handleNew('finished_product')}><Plus className="h-4 w-4 mr-1" />成品销售</Button>
+            {isMadeToOrder && <Button size="sm" variant="outline" onClick={() => handleNew('whole_fish')}><ShoppingCart className="h-4 w-4 mr-1" />新建销售单</Button>}
+            {!isMadeToOrder && <Button size="sm" onClick={() => handleNew('finished_product')}><Plus className="h-4 w-4 mr-1" />成品销售</Button>}
             <Button size="sm" variant="outline" onClick={handleExport} disabled={exportLoading}><Download className="h-4 w-4 mr-1" />{exportLoading ? '导出中...' : '导出'}</Button>
             {hasSelection && <div className="h-6 w-px bg-border" />}
             <Button size="sm" variant="ghost" disabled={!single} onClick={() => singleSale && handleViewDetail(singleSale)} title="查看"><Eye className="h-4 w-4 mr-1" />查看</Button>
             <Button size="sm" variant="ghost" disabled={!single} onClick={() => singleSale && handleEdit(singleSale)} title="编辑"><Pencil className="h-4 w-4 mr-1" />编辑</Button>
             <Button size="sm" variant="ghost" className="text-green-600" disabled={!single || (singleSale?.payment_status === 'fully_paid')} onClick={() => singleSale && handlePaymentOpen(singleSale)} title="收款"><Banknote className="h-4 w-4 mr-1" />收款</Button>
             <Button size="sm" variant="ghost" className="text-orange-600" disabled={!single} onClick={() => singleSale && handleAdjustOpen(singleSale)} title="调整"><SlidersHorizontal className="h-4 w-4 mr-1" />调整</Button>
+            <Button size="sm" variant="ghost" className="text-purple-600" disabled={!single} onClick={() => { if (singleSale) { setReturnPrefillSale({ type: "finished_product", sale: singleSale }); setReturnFormOpen(true); } }} title="售后"><ArrowLeftRight className="h-4 w-4 mr-1" />售后</Button>
             <Button size="sm" variant="ghost" className="text-red-500" disabled={!hasSelection} onClick={multi ? handleBatchDelete : () => singleSale && handleDelete(singleSale)} title="删除"><Trash2 className="h-4 w-4 mr-1" />{multi ? '批量删除' : '删除'}</Button>
           </div>
 
-          {loading ? (
-            <div className="text-center py-8 text-gray-400">加载中...</div>
-          ) : (
-            <div className="border rounded-lg overflow-hidden">
+      </div>
+
+      {/* 列表区 */}
+      <div className="flex-1 flex flex-col min-h-0 border rounded-lg overflow-hidden">
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center text-gray-400">加载中...</div>
+        ) : (
+          <div className="flex-1 overflow-auto">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50">
+                <thead className="bg-gray-50 sticky top-0 z-10">
                   <tr>
                     <th className="px-3 py-2 w-[40px]"><Checkbox checked={filteredSales.length > 0 && selectedIds.size === filteredSales.length} onCheckedChange={toggleSelectAll} /></th>
                     <th className="px-3 py-2 text-left whitespace-nowrap">销售单号</th>
@@ -510,9 +558,9 @@ export function FinishedProductSales() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredSales.length === 0 && <tr><td colSpan={20} className="px-4 py-8 text-center text-gray-400">暂无销售记录</td></tr>}
-                  {filteredSales.map(s => (
-                    <tr key={s.id} className="border-t hover:bg-gray-50">
+                  {pageData.length === 0 && <tr><td colSpan={20} className="px-4 py-8 text-center text-gray-400">暂无销售记录</td></tr>}
+                  {pageData.map(s => (
+                    <tr key={s.id} className={cn("border-t hover:bg-gray-50 cursor-pointer", selectedSale?.id === s.id && "bg-primary/10")} onClick={() => setSelectedSale(s)}>
                       <td className="px-3 py-2"><Checkbox checked={selectedIds.has(s.id)} onCheckedChange={(checked) => toggleSelect(s.id, checked)} /></td>
                       <td className="px-3 py-2 font-mono text-blue-600 cursor-pointer hover:underline whitespace-nowrap" onClick={() => handleViewDetail(s)}>{s.sale_no}</td>
                       <td className="px-3 py-2 whitespace-nowrap"><Badge variant={s.sale_type === 'whole_fish' ? 'secondary' : 'default'}>{s.sale_type === 'whole_fish' ? '整鱼' : '成品'}</Badge></td>
@@ -526,26 +574,94 @@ export function FinishedProductSales() {
                       <td className="px-3 py-2 text-right whitespace-nowrap">{s.weight ? `${s.weight.toFixed(2)} kg` : '-'}</td>
                       <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{s.total_amount ? s.total_amount.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' }) : '-'}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">{s.net_amount ? s.net_amount.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' }) : '-'}</td>
-                      <td className="px-3 py-2 text-right text-green-600 whitespace-nowrap">{s.paid_amount ? s.paid_amount.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' }) : '-'}</td>
+                      <td className="px-3 py-2 text-right text-green-600 whitespace-nowrap">{s.paid_amount != null ? s.paid_amount.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' }) : '-'}</td>
                       <td className="px-3 py-2 text-right text-red-500 whitespace-nowrap">{s.after_sales_adjustment ? s.after_sales_adjustment.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' }) : '-'}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">{s.rounding || '-'}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">{s.discount || '-'}</td>
-                      <td className="px-3 py-2 text-center whitespace-nowrap"><span className={cn("px-2 py-0.5 rounded text-xs", paymentStatusMap[s.paid]?.color || paymentStatusMap[0].color)}>{paymentStatusMap[s.paid]?.label || '未收款'}</span></td>
+                      <td className="px-3 py-2 text-center whitespace-nowrap"><span className={cn("px-2 py-0.5 rounded text-xs", (s.payment_status ? paymentStatusMapV4[s.payment_status] : paymentStatusMap[s.paid])?.color || paymentStatusMap[0].color)}>{(s.payment_status ? paymentStatusMapV4[s.payment_status] : paymentStatusMap[s.paid])?.label || '未收款'}</span></td>
                       <td className="px-3 py-2 text-center whitespace-nowrap">{s.sale_type === 'whole_fish' ? <span className={cn("px-2 py-0.5 rounded text-xs", procurementStatusMap[s.procurement_status || s.status || 'pending']?.color || 'bg-gray-100 text-gray-700')}>{procurementStatusMap[s.procurement_status || s.status || 'pending']?.label || '待采购'}</span> : '-'}</td>
                     </tr>
                   ))}
+                  {/* 本页合计 */}
+                  {pageData.length > 0 && (
+                    <tr className="bg-gray-50 font-medium border-t-2">
+                      <td colSpan={9} className="px-3 py-2 text-right text-xs">本页合计:</td>
+                      <td className="px-3 py-2 text-right text-xs">{pageData.reduce((s, it) => s + (it.quantity || 0), 0)}</td>
+                      <td className="px-3 py-2 text-right text-xs">{pageData.reduce((s, it) => s + (it.weight || 0), 0).toFixed(2)} kg</td>
+                      <td className="px-3 py-2 text-right text-xs">¥{pageData.reduce((s, it) => s + (it.total_amount || 0), 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                      <td className="px-3 py-2 text-right text-xs">¥{pageData.reduce((s, it) => s + (it.net_amount || 0), 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                      <td className="px-3 py-2 text-right text-xs text-green-600">¥{pageData.reduce((s, it) => s + (it.paid_amount || 0), 0).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                      <td className="px-3 py-2 text-right text-xs text-red-500">{(() => { const t = pageData.reduce((s, it) => s + (it.after_sales_adjustment || 0), 0); return t > 0 ? `¥${t.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "-"; })()}</td>
+                      <td className="px-3 py-2 text-right text-xs">{(() => { const t = pageData.reduce((s, it) => s + (it.rounding || 0), 0); return t > 0 ? `¥${t.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "-"; })()}</td>
+                      <td className="px-3 py-2 text-right text-xs">{(() => { const t = pageData.reduce((s, it) => s + (it.discount || 0), 0); return t > 0 ? `¥${t.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : "-"; })()}</td>
+                      <td colSpan={2} />
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
           )}
-        </CardContent>
-      </Card>
+
+          {/* 汇总行 */}
+          {!loading && filteredSales.length > 0 && (
+            <div className="border-t bg-gray-50 px-4 py-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">显示 {(page - 1) * PAGE_SIZE + 1} - {Math.min(page * PAGE_SIZE, filteredSales.length)} / 共 {filteredSales.length} 条</span>
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <button className="px-2 py-1 border rounded text-xs hover:bg-gray-100 disabled:opacity-50" onClick={() => setPage(page - 1)} disabled={page <= 1}>上一页</button>
+                    <span className="text-xs">{page} / {totalPages}</span>
+                    <button className="px-2 py-1 border rounded text-xs hover:bg-gray-100 disabled:opacity-50" onClick={() => setPage(page + 1)} disabled={page >= totalPages}>下一页</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+      {/* 详情区 */}
+      {selectedSale && (
+        <div className="flex-none border rounded-lg overflow-auto bg-background">
+          <div className="p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <h3 className="font-semibold text-base">销售详情</h3>
+                <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">{selectedSale.sale_type === 'whole_fish' ? '整鱼' : '成品'}</span>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => { setDetailSale(selectedSale); setShowDetail(true); }}>
+                  <Eye className="h-4 w-4 mr-1" />完整详情
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedSale(null)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="text-muted-foreground text-xs mb-1">规格明细</div>
+            <div className="border rounded-md overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr><th className="px-3 py-1 text-xs">产品名称</th><th className="px-3 py-1 text-xs">规格</th><th className="px-3 py-1 text-xs">箱数</th><th className="px-3 py-1 text-xs">重量(kg)</th><th className="px-3 py-1 text-xs">单价</th><th className="px-3 py-1 text-xs">金额</th></tr>
+                </thead>
+                <tbody>
+                  {(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.map((p: any, i: number) => (
+                    <tr key={i} className="border-t"><td className="px-3 py-1">{p.product_name || selectedSale.product_name || '-'}</td><td className="px-3 py-1">{p.product_spec || '-'}</td><td className="px-3 py-1">{p.box_count || '-'}</td><td className="px-3 py-1">{p.weight_kg || '-'}</td><td className="px-3 py-1">{p.unit_price || '-'}</td><td className="px-3 py-1">{p.total_amount || '-'}</td></tr>
+                  )) : (
+                    <tr className="border-t"><td className="px-3 py-1">{selectedSale.product_name || '-'}</td><td className="px-3 py-1">-</td><td className="px-3 py-1">{selectedSale.quantity || '-'}</td><td className="px-3 py-1">{selectedSale.weight || '-'}</td><td className="px-3 py-1">{selectedSale.unit_price || '-'}</td><td className="px-3 py-1">{selectedSale.total_amount || '-'}</td></tr>
+                  )}
+                  <tr className="bg-gray-50 font-medium"><td className="px-3 py-1">合计</td><td className="px-3 py-1">-</td><td className="px-3 py-1">{(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.reduce((s: number, p: any) => s + (p.box_count || 0), 0) : (selectedSale.quantity || 0)}</td><td className="px-3 py-1">{(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.reduce((s: number, p: any) => s + (p.weight_kg || 0), 0) : (selectedSale.weight || 0)}</td><td className="px-3 py-1">-</td><td className="px-3 py-1">{(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.reduce((s: number, p: any) => s + (p.total_amount || 0), 0) : (selectedSale.total_amount || 0)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 销售弹窗 */}
       <Dialog open={showModal} onOpenChange={setShowModal}>
         <DialogContent className="sm:max-w-[1024px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingId ? '编辑销售单' : (form.sale_type === 'whole_fish' ? '新建整鱼销售' : '新建成品销售')}</DialogTitle>
+            <DialogTitle>{editingId ? '编辑销售单' : (isMadeToOrder ? '新建销售单' : (form.sale_type === 'whole_fish' ? '新建整鱼销售' : '新建成品销售'))}</DialogTitle>
             <DialogDescription>{form.sale_type === 'whole_fish' ? '销售国内采购的整鱼' : '销售加工后的成品'}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-2">
@@ -554,11 +670,11 @@ export function FinishedProductSales() {
               <div>
                 <Label>客户 *</Label>
                 <div className="relative">
-                  <Input value={customerSearch || form.customer} placeholder="搜索客户名称..." onFocus={() => { setShowCustomerList(true); setCustomerSearch(''); }} onChange={e => { setCustomerSearch(e.target.value); setShowCustomerList(true); }} onBlur={() => { setTimeout(() => setShowCustomerList(false), 200); }} />
+                  <Input value={customerSearch || form.customer} placeholder="搜索客户名称..." onFocus={() => { setShowCustomerList(true); setCustomerSearch(''); }} onChange={e => { setCustomerSearch(e.target.value); setShowCustomerList(true); }} onBlur={(e) => { if (!e.relatedTarget?.closest('[data-customer-list]')) setTimeout(() => setShowCustomerList(false), 200); }} />
                   {showCustomerList && (
-                    <div className="absolute z-50 w-full bg-white border rounded shadow-lg mt-1 max-h-48 overflow-auto">
-                      {filteredCustomers.length === 0 ? <div className="px-3 py-2 text-sm text-gray-400">{customers.length === 0 ? '加载中...' : '无匹配客户'}</div> : filteredCustomers.map(c => (
-                        <div key={c} className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm" onMouseDown={() => { setForm({...form, customer: c}); setShowCustomerList(false); setCustomerSearch(''); }}>{c}</div>
+                    <div className="absolute z-50 w-full bg-white border rounded shadow-lg mt-1 max-h-48 overflow-auto" data-customer-list tabIndex={-1}>
+                      {filteredCustomers.length === 0 ? <div className="px-3 py-2 text-sm text-gray-400">{customers.length === 0 ? '加载中...' : '无匹配客户'}</div> : filteredCustomers.map((c: any) => (
+                        <div key={c.name} className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm" onMouseDown={() => { handleCustomerSelect(c.name); setShowCustomerList(false); setCustomerSearch(''); }}>{c.name}</div>
                       ))}
                     </div>
                   )}
@@ -573,27 +689,38 @@ export function FinishedProductSales() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <Label>产品名称 *</Label>
-                <div className="relative">
-                  <Input className="h-9 text-sm" value={activeProductNameIdx === -1 ? String(productNameSearch) : String(form.product_name)} placeholder="输入产品名称搜索..."
-                    onFocus={(e) => { const rect = (e.target as HTMLInputElement).getBoundingClientRect(); setProductDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width }); setActiveProductNameIdx(-1); setProductNameSearch(form.product_name); }}
-                    onChange={e => { setProductNameSearch(e.target.value); setActiveProductNameIdx(-1); setForm({...form, product_name: e.target.value}); }}
-                    onBlur={() => { setActiveProductNameIdx(null); setProductNameSearch(''); setProductDropdownPos(null); }}
-                  />
-                  {activeProductNameIdx === -1 && productDropdownPos && createPortal(
-                    <div className="fixed bg-white border rounded shadow-lg max-h-40 overflow-auto z-[9999]" style={{ top: productDropdownPos.top, left: productDropdownPos.left, width: productDropdownPos.width }}>
-                      {filteredProductNames.length === 0 ? <div className="px-3 py-2 text-sm text-gray-400">无匹配产品</div> : filteredProductNames.map(g => (
-                        <div key={g.id} className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm" onMouseDown={() => { setForm(prev => ({ ...prev, product_name: g.name })); setActiveProductNameIdx(null); setProductNameSearch(''); setProductDropdownPos(null); }}>{g.name}</div>
-                      ))}
-                    </div>, document.body
-                  )}
-                </div>
+            {/* 成品定义V2：级联产品选择器（仅成品销售模式） */}
+            {form.sale_type === 'finished_product' && (
+              <div className="col-span-3">
+                <ProductSelectorV2
+                  customerLevel={customers.find((c: any) => c.name === form.customer)?.customer_level || "normal"}
+                  quantity={form.products.reduce((sum, p) => sum + (p.box_count || 0), 0)}
+                  onSelect={(product) => {
+                    if (product) {
+                      setForm(prev => ({
+                        ...prev,
+                        product_name: product.template.name,
+                      }));
+                      // 更新第一个产品明细
+                      setForm(prev => {
+                        const newProducts = [...prev.products];
+                        if (newProducts.length > 0) {
+                          newProducts[0] = {
+                            ...newProducts[0],
+                            variant_id: product.variant.id,
+                            product_name: product.template.name,
+                            product_spec: product.spec.name,
+                            unit_price: product.priceTier?.price || product.variant.cost_price || 0,
+                            total_amount: round2((newProducts[0].weight_kg || 0) * (product.priceTier?.price || product.variant.cost_price || 0)),
+                          };
+                        }
+                        return { ...prev, products: newProducts };
+                      });
+                    }
+                  }}
+                />
               </div>
-              <div><Label>宰杀日期</Label><Input type="date" value={form.slaughter_date} onChange={e => setForm({...form, slaughter_date: e.target.value})} /></div>
-              <div><Label>加工厂</Label><Input value={form.factory} onChange={e => setForm({...form, factory: e.target.value})} placeholder="加工厂名称" /></div>
-            </div>
+            )}
 
             <div className="grid grid-cols-3 gap-3">
               <div><Label>收货地址</Label><Input value={form.delivery_address} onChange={e => setForm({...form, delivery_address: e.target.value})} placeholder="客户收货地址" /></div>
@@ -605,7 +732,7 @@ export function FinishedProductSales() {
               <div className="flex items-center justify-between mb-2"><Label className="flex items-center gap-1"><Package className="w-4 h-4" /> 规格明细</Label><Button size="sm" variant="outline" onClick={addProduct}><Plus className="w-4 h-4 mr-1" /> 添加规格</Button></div>
               <div className="border rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
                       <th className="px-3 py-2 text-left w-[25%]">规格</th>
                       <th className="px-3 py-2 text-right w-[14%]">箱数</th>
@@ -666,43 +793,12 @@ export function FinishedProductSales() {
 
       {/* 详情弹窗 */}
       <Dialog open={showDetail} onOpenChange={setShowDetail}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>销售单详情</DialogTitle></DialogHeader>
-          {detailSale && (
-            <div className="space-y-3 mt-2">
-              <div className="grid grid-cols-3 gap-3 text-sm">
-                <div><span className="text-gray-500">单号:</span> <span className="font-mono font-medium">{detailSale.sale_no}</span></div>
-                <div><span className="text-gray-500">类型:</span> <Badge>{detailSale.sale_type === 'whole_fish' ? '整鱼' : '成品'}</Badge></div>
-                <div><span className="text-gray-500">日期:</span> {detailSale.sale_date}</div>
-                <div><span className="text-gray-500">客户:</span> {detailSale.customer}</div>
-                <div><span className="text-gray-500">业务员:</span> {detailSale.salesperson || '-'}</div>
-                <div><span className="text-gray-500">状态:</span> {detailSale.paid ? '已收款' : '未收款'}</div>
-                {detailSale.product_name && <div><span className="text-gray-500">产品:</span> {detailSale.product_name}</div>}
-                {detailSale.factory && <div><span className="text-gray-500">加工厂:</span> {detailSale.factory}</div>}
-                {detailSale.slaughter_date && <div><span className="text-gray-500">宰杀日期:</span> {detailSale.slaughter_date}</div>}
-                {detailSale.delivery_address && <div><span className="text-gray-500">收货地址:</span> {detailSale.delivery_address}</div>}
-                {detailSale.logistics_info && <div><span className="text-gray-500">物流:</span> {detailSale.logistics_info}</div>}
-              </div>
-              <div className="border rounded-lg overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr><th className="px-3 py-2 text-left">规格</th><th className="px-3 py-2 text-right">箱数</th><th className="px-3 py-2 text-right">重量(kg)</th><th className="px-3 py-2 text-right">单价</th><th className="px-3 py-2 text-right">金额</th></tr>
-                  </thead>
-                  <tbody>
-                    {detailSale.products?.map((p, i) => (
-                      <tr key={i} className="border-t"><td className="px-3 py-2">{p.product_spec}</td><td className="px-3 py-2 text-right">{p.box_count}</td><td className="px-3 py-2 text-right">{p.weight_kg?.toFixed(2)}</td><td className="px-3 py-2 text-right">{p.unit_price?.toFixed(2)}</td><td className="px-3 py-2 text-right font-medium">{p.total_amount?.toFixed(2)}</td></tr>
-                    )) || <tr><td colSpan={5} className="px-3 py-4 text-center text-gray-400">无明细</td></tr>}
-                  </tbody>
-                </table>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div>抹零: {detailSale.rounding?.toFixed(2)}</div><div>手续费: {detailSale.scan_fee?.toFixed(2)}</div>
-                <div>折扣: {detailSale.discount?.toFixed(2)}</div><div>售后调整: {detailSale.after_sales_adjustment?.toFixed(2)}</div>
-                <div>业务员提成: {detailSale.commission?.toFixed(2)}</div><div className="font-bold">净收入: {detailSale.net_amount?.toFixed(2)}</div>
-              </div>
-              <div className="text-sm text-gray-500">备注: {detailSale.remark || '-'}</div>
-            </div>
-          )}
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>销售单详情</DialogTitle>
+            <DialogDescription>{detailSale ? `${detailSale.sale_no ?? `#${detailSale.id}`} · ${detailSale.customer ?? '-'}` : ''}</DialogDescription>
+          </DialogHeader>
+          {detailSale && <FinishedSaleDetailDialog sale={detailSale} onClose={() => setShowDetail(false)} />}
         </DialogContent>
       </Dialog>
 
@@ -976,7 +1072,31 @@ export function FinishedProductSales() {
         </DialogContent>
       </Dialog>
 
-      {/* 删除确认弹窗 */}
+      {/* 批量删除确认弹窗 */}
+      <Dialog open={batchDeleteDialogOpen} onOpenChange={setBatchDeleteDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>确认批量删除</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            确定删除选中的 {selectedIds.size} 条销售记录吗？此操作不可撤销。
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBatchDeleteDialogOpen(false)}>取消</Button>
+            <Button variant="destructive" onClick={confirmBatchDelete} disabled={deleteLoading}>
+              {deleteLoading ? '删除中...' : '确认删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 退货表单弹窗 */}
+      <ReturnOrderForm
+        open={returnFormOpen}
+        onClose={() => { setReturnFormOpen(false); setReturnPrefillSale(null); }}
+        prefillSale={returnPrefillSale ?? undefined}
+      />
+
       {/* 删除确认弹窗 */}
       <Dialog open={!!deleteSale} onOpenChange={() => setDeleteSale(null)}>
         <DialogContent className="max-w-sm">
@@ -992,4 +1112,236 @@ export function FinishedProductSales() {
       </Dialog>
     </div>
   );
+}
+
+// ==================== 成品销售详情弹窗组件 ====================
+function FinishedSaleDetailDialog({ sale, onClose }: { sale: FinishedSale; onClose: () => void }) {
+  const [activeTab, setActiveTab] = useState("info");
+  const { data: bankAccountsData } = useQuery({
+    queryKey: ['bank-accounts'],
+    queryFn: async () => {
+      const res = await api.get('/v1/finance/bank-accounts');
+      return Array.isArray(res.data) ? res.data : (res.data?.items || []);
+    },
+  });
+  const bankAccounts = bankAccountsData || [];
+
+  const paymentMethodMap: Record<string, string> = {
+    bank_transfer: "银行转账",
+    cash: "现金",
+    check: "支票",
+    scan: "扫码",
+    balance: "余额抵扣",
+  };
+
+  const receipts = sale.receipts || [];
+  const aftersalesCount = 0; // TODO: 后端支持后接入
+  const returnOrders = sale.return_orders || []; // TODO: 后端支持后接入
+
+  const unpaid = Number(sale.net_amount || 0) - Number(sale.paid_amount || 0);
+
+  return (
+    <div className="py-2">
+      <div className="flex gap-2 mb-4">
+        <Button variant={activeTab === "info" ? "default" : "outline"} size="sm" onClick={() => setActiveTab("info")}>基本信息</Button>
+        <Button variant={activeTab === "receipts" ? "default" : "outline"} size="sm" onClick={() => setActiveTab("receipts")}>收款记录 ({receipts.length})</Button>
+        <Button variant={activeTab === "aftersales" ? "default" : "outline"} size="sm" onClick={() => setActiveTab("aftersales")}>售后/退货 ({aftersalesCount + returnOrders.length})</Button>
+      </div>
+
+      {/* 基本信息 */}
+      {activeTab === "info" && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div><span className="text-muted-foreground">销售单号:</span> <span className="ml-1 font-mono">{sale.sale_no ?? "-"}</span></div>
+            <div><span className="text-muted-foreground">类型:</span> <span className="ml-1"><Badge>{sale.sale_type === 'whole_fish' ? '整鱼' : '成品'}</Badge></span></div>
+            <div><span className="text-muted-foreground">日期:</span> <span className="ml-1">{sale.sale_date}</span></div>
+            <div><span className="text-muted-foreground">客户:</span> <span className="ml-1">{sale.customer ?? "-"}</span></div>
+            <div><span className="text-muted-foreground">业务员:</span> <span className="ml-1">{sale.salesperson ?? "-"}</span></div>
+            <div><span className="text-muted-foreground">状态:</span> <span className="ml-1">{sale.payment_status === 'fully_paid' ? '已收款' : sale.payment_status === 'partial_paid' ? '部分收款' : '未收款'}</span></div>
+            {sale.product_name && <div><span className="text-muted-foreground">产品:</span> <span className="ml-1">{sale.product_name}</span></div>}
+            {sale.factory && <div><span className="text-muted-foreground">加工厂:</span> <span className="ml-1">{sale.factory}</span></div>}
+            {sale.slaughter_date && <div><span className="text-muted-foreground">宰杀日期:</span> <span className="ml-1">{sale.slaughter_date}</span></div>}
+            {sale.delivery_address && <div><span className="text-muted-foreground">收货地址:</span> <span className="ml-1">{sale.delivery_address}</span></div>}
+            {sale.logistics_info && <div><span className="text-muted-foreground">物流:</span> <span className="ml-1">{sale.logistics_info}</span></div>}
+          </div>
+
+          {/* 规格明细 */}
+          {sale.products && sale.products.length > 0 && (
+            <div className="border rounded-md overflow-hidden">
+              <div className="bg-muted/50 px-3 py-2 text-xs font-medium">规格明细</div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">规格</TableHead>
+                    <TableHead className="text-xs text-right">箱数</TableHead>
+                    <TableHead className="text-xs text-right">重量(kg)</TableHead>
+                    <TableHead className="text-xs text-right">单价</TableHead>
+                    <TableHead className="text-xs text-right">金额</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sale.products.map((p) => (
+                    <TableRow key={p.id ?? p.product_spec}>
+                      <TableCell className="text-sm">{p.product_spec ?? "-"}</TableCell>
+                      <TableCell className="text-sm text-right">{p.box_count ?? "-"}</TableCell>
+                      <TableCell className="text-sm text-right">{Number(p.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-sm text-right">{Number(p.unit_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-sm text-right">¥{Number(p.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow className="bg-muted/50 font-medium text-sm">
+                    <TableCell colSpan={2} className="text-right">合计:</TableCell>
+                    <TableCell className="text-right">{sale.products.reduce((s, it) => s + Number(it.weight_kg || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
+                    <TableCell />
+                    <TableCell className="text-right">¥{sale.products.reduce((s, it) => s + Number(it.total_amount || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* 汇总金额 */}
+          <div className="bg-muted p-3 rounded-md space-y-2 text-sm">
+            <div className="flex justify-between"><span>毛金额</span><span>¥{Number(sale.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            {Number(sale.rounding) > 0 && <div className="flex justify-between text-red-500"><span>抹零调整</span><span>-¥{Number(sale.rounding).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            {Number(sale.after_sales_adjustment) > 0 && <div className="flex justify-between text-red-500"><span>售后调整</span><span>-¥{Number(sale.after_sales_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            {Number(sale.discount) > 0 && <div className="flex justify-between text-red-500"><span>折扣</span><span>-¥{Number(sale.discount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            {Number(sale.scan_fee) > 0 && <div className="flex justify-between text-red-500"><span>手续费</span><span>-¥{Number(sale.scan_fee).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            {Number(sale.commission) > 0 && <div className="flex justify-between text-red-500"><span>业务员提成</span><span>-¥{Number(sale.commission).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            <div className="flex justify-between font-semibold border-t pt-1"><span>净金额</span><span>¥{Number(sale.net_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            <div className="flex justify-between text-green-600"><span>已付</span><span>¥{Number(sale.paid_amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            {unpaid > 0 ? (
+              <div className="flex justify-between text-orange-600 font-medium"><span>未付</span><span>¥{unpaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            ) : unpaid < 0 ? (
+              <div className="flex justify-between text-blue-600 font-medium"><span>应退</span><span>¥{Math.abs(unpaid).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
+            ) : (
+              <div className="flex justify-between text-green-600 font-medium"><span>已结清</span><span>¥0.00</span></div>
+            )}
+          </div>
+
+          {sale.remark && <div className="text-sm text-muted-foreground">备注: {sale.remark}</div>}
+        </div>
+      )}
+
+      {/* 收款记录 */}
+      {activeTab === "receipts" && (
+        <div className="space-y-4">
+          {receipts.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">日期</TableHead>
+                  <TableHead className="text-xs">方式</TableHead>
+                  <TableHead className="text-xs">银行</TableHead>
+                  <TableHead className="text-xs text-right">金额</TableHead>
+                  <TableHead className="text-xs">备注</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {receipts.map((r) => (
+                  <TableRow key={r.id}>
+                    <TableCell className="text-sm">{r.receipt_date}</TableCell>
+                    <TableCell className="text-sm">{paymentMethodMap[r.payment_method] || r.payment_method}</TableCell>
+                    <TableCell className="text-sm">{(() => {
+                      const b = bankAccounts.find((ba: any) => ba.id === r.bank_account_id);
+                      return b ? `${b.bank_name} ${b.account_number?.slice(-4)}` : "-";
+                    })()}</TableCell>
+                    <TableCell className="text-sm text-right">¥{Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                    <TableCell className="text-sm">{r.notes ?? "-"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="text-sm text-muted-foreground text-center py-8">暂无收款记录</div>
+          )}
+        </div>
+      )}
+
+      {/* 售后/退货 */}
+      {activeTab === "aftersales" && (
+        <div className="space-y-4">
+          {/* 发起退货按钮 */}
+          <div className="flex justify-end">
+            <Button size="sm" variant="outline" className="text-orange-600" onClick={() => { toast.info("退货功能开发中"); }}>
+              <ArrowLeftRight className="h-4 w-4 mr-1" />发起退货
+            </Button>
+          </div>
+
+          {/* 售后记录 */}
+          {sale.aftersales && sale.aftersales.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium mb-2 text-muted-foreground">历史售后记录</h4>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">日期</TableHead>
+                    <TableHead className="text-xs">类型</TableHead>
+                    <TableHead className="text-xs text-right">金额</TableHead>
+                    <TableHead className="text-xs">状态</TableHead>
+                    <TableHead className="text-xs">原因</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sale.aftersales.map((a: any) => (
+                    <TableRow key={a.id}>
+                      <TableCell className="text-sm">{a.record_date}</TableCell>
+                      <TableCell className="text-sm">{a.type}</TableCell>
+                      <TableCell className="text-sm text-right">¥{Number(a.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      <TableCell className="text-sm">{a.status}</TableCell>
+                      <TableCell className="text-sm">{a.reason ?? "-"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* 退货单 */}
+          {sale.return_orders && sale.return_orders.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium mb-2 text-muted-foreground">退货记录</h4>
+              {sale.return_orders.map((ro: any) => (
+                <div key={ro.id} className="border rounded-md p-3 mb-2">
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-sm">{ro.return_no}</span>
+                    <Badge className={ro.status === "completed" ? "bg-green-100 text-green-800" : ro.status === "approved" ? "bg-blue-100 text-blue-800" : ro.status === "pending_approval" ? "bg-yellow-100 text-yellow-800" : "bg-gray-100 text-gray-800"}>
+                      {ro.status === "draft" ? "草稿" : ro.status === "pending_approval" ? "待审批" : ro.status === "approved" ? "已批准" : ro.status === "refunding" ? "退款中" : ro.status === "completed" ? "已完成" : ro.status === "rejected" ? "已拒绝" : ro.status === "cancelled" ? "已取消" : ro.status}
+                    </Badge>
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    退货日期: {ro.return_date}
+                  </div>
+                  <div className="text-sm mt-1">
+                    重量: {Number(ro.total_weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2 })} kg · 金额: ¥{Number(ro.total_amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                  </div>
+                  {ro.problem_description && (
+                    <div className="text-sm text-red-500 mt-1">原因: {ro.problem_description}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 售后调整合计 */}
+          {Number(sale.after_sales_adjustment) > 0 && (
+            <div className="flex justify-between text-red-500 font-medium border-t pt-2">
+              <span>售后调整合计</span>
+              <span>-¥{Number(sale.after_sales_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+          )}
+
+          {/* 空状态 */}
+          {(!sale.aftersales || sale.aftersales.length === 0) && (!sale.return_orders || sale.return_orders.length === 0) && Number(sale.after_sales_adjustment) === 0 && (
+            <div className="text-sm text-muted-foreground text-center py-8">暂无售后记录</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==================== 接口类型扩展 ====================
+interface FinishedSaleWithReturns extends FinishedSale {
+  return_orders?: any[];
 }

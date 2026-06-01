@@ -589,6 +589,53 @@ class FinancialCharts(BaseModel):
     profit_trend: List[dict] = Field(default_factory=list)
 
 
+class NettingStatementItem(BaseModel):
+    """往来对账单 - 应收应付综合"""
+    model_config = ConfigDict(from_attributes=True)
+    company_id: int
+    company_name: str
+    company_code: Optional[str] = None
+    company_type: Optional[str] = None  # customer / supplier / both
+
+    # 应收端
+    receivable_opening: Decimal = Decimal("0")
+    receivable_current_sales: Decimal = Decimal("0")
+    receivable_current_receipts: Decimal = Decimal("0")
+    receivable_closing: Decimal = Decimal("0")
+
+    # 应付端
+    payable_opening: Decimal = Decimal("0")
+    payable_current_purchase: Decimal = Decimal("0")
+    payable_current_expenses: Decimal = Decimal("0")
+    payable_current_payments: Decimal = Decimal("0")
+    payable_closing: Decimal = Decimal("0")
+
+    # 往来净额
+    netting_opening: Decimal = Decimal("0")   # 期初应收 - 期初应付
+    netting_closing: Decimal = Decimal("0")    # 期末应收 - 期末应付
+    netting_direction: str = "平"             # "应收" / "应付" / "平"
+
+    # 分组明细
+    sale_details: List[ReceivableSaleItem] = []
+    discount_details: List[ReceivableDiscountItem] = []
+    aftersales_details: List[ReceivableAftersalesItem] = []
+    receipt_details: List[ReceivableReceiptItem] = []
+    purchase_details: List[PayablePurchaseItem] = []
+    expense_details: List[PayableExpenseItem] = []
+    payment_details: List[PayablePaymentItem] = []
+
+
+class NettingStatementResponse(BaseModel):
+    """往来对账单响应"""
+    total: int
+    items: List[NettingStatementItem]
+    skip: int
+    limit: int
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    total_net_receivable: Decimal = Decimal("0")  # 总净应收
+    total_net_payable: Decimal = Decimal("0")     # 总净应付
+
 class FinancialStatements(BaseModel):
     """三大财务报表完整数据"""
     model_config = ConfigDict(from_attributes=True)

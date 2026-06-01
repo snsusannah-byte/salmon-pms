@@ -1,0 +1,105 @@
+# ============================================================
+# Salmon PMS — 本机 E 盘局域网部署方案
+# 适用场景：单台 Windows + WSL2 电脑，数据存 E 盘，局域网内共享
+# ============================================================
+
+version: "3.8"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-salmon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-salmon123}
+      POSTGRES_DB: ${POSTGRES_DB:-salmon_pms}
+    # 端口只绑定 127.0.0.1，禁止外网直连数据库
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # === 数据持久化到 E 盘 ===
+      - /mnt/e/salmon-pms-deploy/data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-salmon} -d ${POSTGRES_DB:-salmon_pms}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - salmon-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - /mnt/e/salmon-pms-deploy/data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - salmon-net
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-salmon}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-salmon12345}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - /mnt/e/salmon-pms-deploy/data/minio:/data
+    networks:
+      - salmon-net
+
+  backend:
+    # 使用开发目录下的 Dockerfile.prod 构建
+    build:
+      context: ${BACKEND_CONTEXT:-/home/sannah/.openclaw/workspace-codeingman/projects/salmon-pms/backend}
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: "false"
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    # 只绑定 127.0.0.1，由 nginx 反向代理
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - salmon-net
+
+  frontend:
+    build:
+      context: ${FRONTEND_CONTEXT:-/home/sannah/.openclaw/workspace-codeingman/projects/salmon-pms/frontend}
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
+    restart: unless-stopped
+    # === 绑定到 0.0.0.0:80，局域网所有设备通过 Windows IP 访问 ===
+    ports:
+      - "0.0.0.0:80:80"
+    depends_on:
+      - backend
+    networks:
+      - salmon-net
+
+networks:
+  salmon-net:
+    driver: bridge

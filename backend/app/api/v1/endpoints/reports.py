@@ -33,6 +33,8 @@ from app.models import (
     CommissionRecord,
     ReturnOrder,
     ReturnItem,
+    PurchaseOrder,
+    PurchaseOrderV2,
 )
 from app.schemas.report import (
     BatchReportSummaryItem,
@@ -65,6 +67,8 @@ from app.schemas.report import (
     BalanceSheet,
     CashFlowStatement,
     FinancialCharts,
+    NettingStatementItem,
+    NettingStatementResponse,
 )
 
 router = APIRouter()
@@ -97,7 +101,7 @@ async def _get_invoice_clearance(db: AsyncSession, invoice_id: int) -> Optional[
 
 
 async def _batch_get_taxes(db: AsyncSession, invoice_ids: List[int]) -> dict[int, Optional[ImportTax]]:
-    """批量获取发票税费记录 — 替代循环内多次单查"""
+    """批量获取发票税费记录 - 替代循环内多次单查"""
     if not invoice_ids:
         return {}
     result = await db.execute(
@@ -107,7 +111,7 @@ async def _batch_get_taxes(db: AsyncSession, invoice_ids: List[int]) -> dict[int
 
 
 async def _batch_get_clearances(db: AsyncSession, invoice_ids: List[int]) -> dict[int, Optional[ClearanceCost]]:
-    """批量获取发票清关费用记录 — 替代循环内多次单查"""
+    """批量获取发票清关费用记录 - 替代循环内多次单查"""
     if not invoice_ids:
         return {}
     result = await db.execute(
@@ -117,7 +121,7 @@ async def _batch_get_clearances(db: AsyncSession, invoice_ids: List[int]) -> dic
 
 
 async def _batch_get_company_names(db: AsyncSession, company_ids: List[int]) -> dict[int, str]:
-    """批量获取公司名称 — 替代循环内多次单查"""
+    """批量获取公司名称 - 替代循环内多次单查"""
     if not company_ids:
         return {}
     result = await db.execute(
@@ -281,11 +285,11 @@ async def _calculate_invoice_report_data(
 ) -> dict:
     """
     计算单票财报的核心数据
-    
+
     Args:
         include_sales: 是否包含销售数据
         sales_proportion: 销售分配比例 (用于合并批次中的单票)
-    
+
     Returns:
         包含所有计算字段的字典
     """
@@ -349,7 +353,7 @@ async def _calculate_invoice_report_data(
 
     if include_sales and batch_id:
         sales_list = await _get_batch_sales(db, batch_id)
-        
+
         # 从 CommissionRecord 表查询该批次的提成汇总
         sale_ids = [s.id for s in sales_list]
         if sale_ids:
@@ -357,7 +361,7 @@ async def _calculate_invoice_report_data(
                 select(func.sum(CommissionRecord.commission_amount)).where(CommissionRecord.sale_id.in_(sale_ids))
             )
             total_commission = _to_decimal(commission_result.scalar())
-        
+
         for sale in sales_list:
             customer_name = await _get_company_name(db, sale.customer_id)
             total_sales_amount += _to_decimal(sale.gross_amount)
@@ -383,7 +387,7 @@ async def _calculate_invoice_report_data(
                 "discount": _to_decimal(sale.discount),
                 "net_amount": _to_decimal(sale.net_amount),
             })
-        
+
         # 重新计算销售净额（不包含 commission，commission 单独显示）
         total_sales_net = (
             total_sales_amount
@@ -492,14 +496,14 @@ async def list_batch_reports(
 
     # 获取批次列表
     batch_result = await db.execute(
-        select(Batch).order_by(Batch.batch_date.desc()).offset(skip).limit(limit)
+        select(Batch).order_by(Batch.batch_date.desc(), Batch.id.desc()).offset(skip).limit(limit)
     )
     batches = batch_result.scalars().all()
 
     # 预计算所有已完成批次的累计利润
     cumulative_profit_map = {}
     running_cumulative = Decimal("0")
-    
+
     all_completed_result = await db.execute(
         select(Batch.id, Batch.batch_date)
         .join(BatchInvoice, BatchInvoice.batch_id == Batch.id)
@@ -509,7 +513,7 @@ async def list_batch_reports(
         .order_by(Batch.batch_date, Batch.id)
     )
     all_completed_batches = all_completed_result.all()
-    
+
     for (cb_id, cb_date) in all_completed_batches:
         cb_sales_result = await db.execute(
             select(WholeFishSale).where(WholeFishSale.batch_id == cb_id)
@@ -517,17 +521,57 @@ async def list_batch_reports(
         cb_sales_list = cb_sales_result.scalars().all()
         cb_sales_net = sum(_to_decimal(s.net_amount) for s in cb_sales_list)
 
-        cb_ex_result = await db.execute(
-            select(ExchangeRecord).where(ExchangeRecord.batch_id == cb_id)
-        )
-        cb_ex_list = cb_ex_result.scalars().all()
-        cb_ex_payment = sum(_to_decimal(e.amount_cny) for e in cb_ex_list)
-        cb_ex_fee = sum(_to_decimal(e.fee_cny) for e in cb_ex_list)
-
+        # 购汇：使用与 list_batch_reports 相同的逻辑（通过发票查询，支持合并购汇）
         cb_bi_result = await db.execute(
             select(BatchInvoice).where(BatchInvoice.batch_id == cb_id)
         )
         cb_inv_ids = [bi.invoice_id for bi in cb_bi_result.scalars().all()]
+        
+        cb_ex_payment = Decimal("0")
+        cb_ex_fee = Decimal("0")
+        cb_exchange_rate = None
+        cb_batch_exchange_applied = False
+        
+        # 批量预加载该批次所有发票的产品数据（合并购汇分摊需与主循环一致：优先 InvoiceProduct 合计）
+        cb_prod_map: dict[int, Decimal] = {}
+        if cb_inv_ids:
+            cb_all_prods_result = await db.execute(
+                select(InvoiceProduct).where(InvoiceProduct.invoice_id.in_(cb_inv_ids))
+            )
+            for p in cb_all_prods_result.scalars().all():
+                cb_prod_map[p.invoice_id] = cb_prod_map.get(p.invoice_id, Decimal("0")) + _to_decimal(p.total_amount)
+
+        for cb_inv_id in cb_inv_ids:
+            cb_inv_result = await db.execute(
+                select(ImportInvoice).where(ImportInvoice.id == cb_inv_id)
+            )
+            cb_inv = cb_inv_result.scalar_one_or_none()
+            if not cb_inv:
+                continue
+            
+            cb_ex = await _get_invoice_exchange(db, cb_inv_id, cb_id)
+            if cb_ex:
+                if cb_exchange_rate is None or cb_exchange_rate == 0:
+                    cb_exchange_rate = _to_decimal(cb_ex.exchange_rate)
+                if cb_ex.invoice_id == cb_inv_id:
+                    # 发票级别购汇
+                    cb_ex_payment += _to_decimal(cb_ex.amount_cny)
+                    cb_ex_fee += _to_decimal(cb_ex.fee_cny)
+                elif cb_ex.related_invoice_ids and cb_inv_id in cb_ex.related_invoice_ids:
+                    # 合并购汇：按当前发票金额占总购汇金额的比例分摊
+                    total_ex_usd = _to_decimal(cb_ex.amount_usd)
+                    inv_amount_usd = cb_prod_map.get(cb_inv_id, Decimal("0"))
+                    if inv_amount_usd == 0:
+                        inv_amount_usd = _to_decimal(cb_inv.total_amount_usd)
+                    if total_ex_usd > 0:
+                        proportion = inv_amount_usd / total_ex_usd
+                        cb_ex_payment += _to_decimal(cb_ex.amount_cny) * proportion
+                        cb_ex_fee += _to_decimal(cb_ex.fee_cny) * proportion
+                elif not cb_batch_exchange_applied:
+                    # 批次级别购汇，只计算一次
+                    cb_ex_payment += _to_decimal(cb_ex.amount_cny)
+                    cb_ex_fee += _to_decimal(cb_ex.fee_cny)
+                    cb_batch_exchange_applied = True
 
         # 批量预加载税费和清关（避免N+1）
         cb_taxes_map = await _batch_get_taxes(db, cb_inv_ids)
@@ -550,7 +594,7 @@ async def list_batch_reports(
                 )
 
         cb_expenses = cb_ex_payment + cb_ex_fee + cb_taxes + cb_clearance
-        
+
         # 损耗
         cb_shrinkage = Decimal("0")
         if cb_inv_ids:
@@ -563,13 +607,13 @@ async def list_batch_reports(
             if cb_import_weight > cb_sales_weight and cb_sales_weight > 0:
                 cb_diff = cb_import_weight - cb_sales_weight
                 cb_rate = Decimal("7.0")
-                if cb_ex_list and cb_ex_list[0].exchange_rate and cb_ex_list[0].exchange_rate > 0:
-                    cb_rate = _to_decimal(cb_ex_list[0].exchange_rate)
+                if cb_exchange_rate and cb_exchange_rate > 0:
+                    cb_rate = cb_exchange_rate
                 cb_import_amount = sum(_to_decimal(p.total_amount) for p in cb_prods)
                 if cb_import_amount > 0 and cb_import_weight > 0:
                     cb_unit_price = cb_import_amount / cb_import_weight
                     cb_shrinkage = cb_diff * cb_unit_price * cb_rate
-        
+
         cb_net_profit = cb_sales_net - cb_expenses - round(cb_shrinkage, 2)
         running_cumulative += cb_net_profit
         cumulative_profit_map[cb_id] = round(running_cumulative, 2)
@@ -670,36 +714,20 @@ async def list_batch_reports(
         total_sales_amount = Decimal("0")
         total_sales_net = Decimal("0")
         total_sales_weight = Decimal("0")
-        total_scan_fee = Decimal("0")
-        total_rounding = Decimal("0")
-        total_after_sales = Decimal("0")
-        total_discount = Decimal("0")
-        total_commission = Decimal("0")
-        
-        # 从 CommissionRecord 表查询提成
+
+        for sale in sales_list:
+            total_sales_amount += _to_decimal(sale.gross_amount)
+            total_sales_net += _to_decimal(sale.net_amount)
+            total_sales_weight += _to_decimal(sale.weight_kg)
+
+        # 从 CommissionRecord 表查询提成（仅用于显示）
         sale_ids = [s.id for s in sales_list]
+        total_commission = Decimal("0")
         if sale_ids:
             commission_result = await db.execute(
                 select(func.sum(CommissionRecord.commission_amount)).where(CommissionRecord.sale_id.in_(sale_ids))
             )
             total_commission = _to_decimal(commission_result.scalar())
-        
-        for sale in sales_list:
-            total_sales_amount += _to_decimal(sale.gross_amount)
-            total_scan_fee += _to_decimal(sale.scan_fee)
-            total_rounding += _to_decimal(sale.rounding_adjustment)
-            total_after_sales += _to_decimal(sale.after_sales_adjustment)
-            total_discount += _to_decimal(sale.discount)
-            total_sales_weight += _to_decimal(sale.weight_kg)
-        
-        # 重新计算销售净额（不包含 commission）
-        total_sales_net = (
-            total_sales_amount
-            - total_scan_fee
-            - total_rounding
-            - total_after_sales
-            - total_discount
-        )
 
         # 汇率默认值
         if exchange_rate is None or exchange_rate == 0:
@@ -721,8 +749,8 @@ async def list_batch_reports(
                 shrinkage = diff * unit_price_usd * exchange_rate
                 shrinkage = round(shrinkage, 2)
 
-        # 净利润 = (销售净额 - 业务员提成) - 支出合计 - 账面损耗
-        net_profit = (total_sales_net - total_commission) - total_expenses - shrinkage
+        # 净利润 = 销售净额 - 支出合计 - 账面损耗
+        net_profit = total_sales_net - total_expenses - shrinkage
 
         # 利润率
         profit_margin = None
@@ -757,6 +785,7 @@ async def list_batch_reports(
             net_profit=round(net_profit, 2),
             profit_margin=profit_margin,
             cumulative_profit=cumulative_profit_map.get(batch.id, Decimal("0")),
+            total_commission=round(total_commission, 2),
             is_locked=batch.is_locked or False,
         ))
 
@@ -773,9 +802,9 @@ async def lock_batch(
     batch = batch_result.scalar_one_or_none()
     if not batch:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="批次不存在")
-    
+
     batch.is_locked = not batch.is_locked
-    
+
     # 级联锁定/解锁关联的发票
     from app.models import ImportInvoice
     batch_invoice_result = await db.execute(
@@ -786,9 +815,9 @@ async def lock_batch(
     associated_invoices = batch_invoice_result.scalars().all()
     for inv in associated_invoices:
         inv.is_locked = batch.is_locked
-    
+
     await db.commit()
-    
+
     return {
         "success": True,
         "batch_id": batch_id,
@@ -1051,7 +1080,7 @@ async def get_batch_report(
     sales_count = 0
 
     sales_data = []
-    
+
     # 从 CommissionRecord 表查询提成汇总
     if sales_list:
         sale_ids = [s.id for s in sales_list]
@@ -1059,7 +1088,7 @@ async def get_batch_report(
             select(func.sum(CommissionRecord.commission_amount)).where(CommissionRecord.sale_id.in_(sale_ids))
         )
         total_commission = _to_decimal(commission_result.scalar())
-    
+
     for sale in sales_list:
         customer_name = await _get_company_name(db, sale.customer_id)
         total_sales_amount += _to_decimal(sale.gross_amount)
@@ -1169,7 +1198,7 @@ async def get_batch_report(
                 )
 
         cb_expenses = cb_ex_payment + cb_ex_fee + cb_taxes + cb_clearance
-        
+
         # 损耗
         cb_shrinkage = Decimal("0")
         if cb_inv_ids:
@@ -1188,7 +1217,7 @@ async def get_batch_report(
                 if cb_import_amount > 0 and cb_import_weight > 0:
                     cb_unit_price = cb_import_amount / cb_import_weight
                     cb_shrinkage = cb_diff * cb_unit_price * cb_rate
-        
+
         cumulative_profit += cb_sales_net - cb_expenses - round(cb_shrinkage, 2)
 
     # 利润率
@@ -1265,7 +1294,7 @@ async def list_invoice_reports(
     prods_map = {}
     for p in prods_map_result.scalars().all():
         prods_map.setdefault(p.invoice_id, []).append(p)
-    
+
     taxes_map = await _batch_get_taxes(db, all_inv_ids)
     clearances_map = await _batch_get_clearances(db, all_inv_ids)
 
@@ -1601,22 +1630,37 @@ async def list_receivable_statements(
 ):
     """
     应收款对账单 - 按客户汇总
-    
+
     公式：
     - 期初欠款 = 截至start_date之前所有销售净额 - 所有收款
     - 本期销售 = start_date到end_date的销售净额
     - 本期收款 = start_date到end_date的收款
     - 期末欠款 = 期初 + 本期销售 - 本期收款
-    
+
     支持客户筛选：不传customer_id则返回所有客户汇总
     不传日期则查询全部历史数据
     """
     from datetime import datetime as _dt
 
-    # 获取客户列表
-    customer_query = select(Company).where(Company.type == "customer").order_by(Company.name)
+    # 获取有销售记录的公司列表（不再限定 type == "customer"，支持既是供应商又是客户的场景）
+    from sqlalchemy import distinct
+    sale_company_ids_result = await db.execute(
+        select(distinct(WholeFishSale.customer_id)).where(WholeFishSale.customer_id.isnot(None))
+    )
+    fp_sale_company_ids_result = await db.execute(
+        select(distinct(FinishedProductSale.customer_id)).where(FinishedProductSale.customer_id.isnot(None))
+    )
+    sale_company_ids = set(
+        [r[0] for r in sale_company_ids_result.all() if r[0]] +
+        [r[0] for r in fp_sale_company_ids_result.all() if r[0]]
+    )
+
     if customer_id:
         customer_query = select(Company).where(Company.id == customer_id)
+    elif sale_company_ids:
+        customer_query = select(Company).where(Company.id.in_(sale_company_ids)).order_by(Company.name)
+    else:
+        customer_query = select(Company).where(Company.type == "customer").order_by(Company.name)
     customer_result = await db.execute(customer_query)
     customers = customer_result.scalars().all()
 
@@ -1779,7 +1823,7 @@ async def list_receivable_statements(
 
         # ========== 明细（兼容旧版）==========
         details: List[ReceivableCustomerItem] = []
-        
+
         # 期初余额行
         if opening_balance != 0:
             details.append(ReceivableCustomerItem(
@@ -2028,7 +2072,7 @@ async def list_receivable_statements(
                         payment_method=receipt.payment_method,
                         reference_no=None,
                     ))
-        
+
         # 客户预付款（TransactionRecord 中的真实银行收款）
         from sqlalchemy import and_
         txn_conditions = [
@@ -2041,7 +2085,7 @@ async def list_receivable_statements(
             txn_conditions.append(TransactionRecord.transaction_date >= start)
         if end is not None:
             txn_conditions.append(TransactionRecord.transaction_date <= end)
-        
+
         txn_deposit_result = await db.execute(
             select(TransactionRecord)
             .where(and_(*txn_conditions))
@@ -2054,7 +2098,7 @@ async def list_receivable_statements(
                 payment_method="prepayment",
                 reference_no=txn.description or txn.reference_no or None,
             ))
-        
+
         # 售后退款（TransactionRecord 中的支出，金额为负）
         refund_conditions = [
             TransactionRecord.counterparty_id == customer.id,
@@ -2066,7 +2110,7 @@ async def list_receivable_statements(
             refund_conditions.append(TransactionRecord.transaction_date >= start)
         if end is not None:
             refund_conditions.append(TransactionRecord.transaction_date <= end)
-        
+
         refund_txn_result = await db.execute(
             select(TransactionRecord)
             .where(and_(*refund_conditions))
@@ -2079,7 +2123,7 @@ async def list_receivable_statements(
                 payment_method="sales_refund",
                 reference_no=txn.description or txn.reference_no or None,
             ))
-        
+
         receipt_details.sort(key=lambda x: x.date)
 
         # 只保留有数据的客户，或欠款不为0的客户
@@ -2247,7 +2291,7 @@ async def list_payable_statements(
 ):
     """
     应付款对账单 - 按供应商/加工厂/出口商汇总
-    
+
     公式：
     - 期初欠款 = 截至start_date的采购额 - 截至start_date的付款
     - 本期采购 = start_date到end_date的新发票金额（USD×汇率）
@@ -2265,20 +2309,27 @@ async def list_payable_statements(
     start = _dt.strptime(start_date, "%Y-%m-%d").date()
     end = _dt.strptime(end_date, "%Y-%m-%d").date()
 
-    # 获取所有有采购发票关联的公司（不只是supplier，exporter也可能是收款方）
+    # 获取所有有采购发票关联的公司 + 国内采购单关联的供应商
     from sqlalchemy import distinct
     invoice_company_result = await db.execute(
         select(distinct(ImportInvoice.supplier_id))
         .where(ImportInvoice.supplier_id.isnot(None))
     )
-    supplier_ids = [r[0] for r in invoice_company_result.all() if r[0]]
-    
+    supplier_ids = set([r[0] for r in invoice_company_result.all() if r[0]])
+
+    # 加入国内采购单关联的供应商（PurchaseOrderV2 有实际数据）
+    domestic_po_result = await db.execute(
+        select(distinct(PurchaseOrderV2.supplier_id))
+        .where(PurchaseOrderV2.supplier_id.isnot(None))
+    )
+    supplier_ids.update([r[0] for r in domestic_po_result.all() if r[0]])
+
     if not supplier_ids:
         return PayableStatementResponse(
             total=0, items=[], skip=skip, limit=limit,
             start_date=start_date, end_date=end_date, total_payable=Decimal("0"),
         )
-    
+
     supplier_result = await db.execute(
         select(Company)
         .where(Company.id.in_(supplier_ids))
@@ -2298,7 +2349,15 @@ async def list_payable_statements(
         )
         all_invoices = invoice_result.scalars().all()
 
-        if not all_invoices:
+        # 该供应商相关的国内采购单（PurchaseOrderV2）
+        domestic_po_result = await db.execute(
+            select(PurchaseOrderV2)
+            .where(PurchaseOrderV2.supplier_id == supplier.id)
+            .order_by(PurchaseOrderV2.purchase_date)
+        )
+        all_domestic_pos = domestic_po_result.scalars().all()
+
+        if not all_invoices and not all_domestic_pos:
             continue
 
         # 该供应商相关的购汇记录（通过发票关联）
@@ -2324,7 +2383,7 @@ async def list_payable_statements(
                 amount_usd = sum(_to_decimal(p.total_amount) for p in prods)
                 if amount_usd == 0:
                     amount_usd = _to_decimal(inv.total_amount_usd)
-                
+
                 if is_usd:
                     # USD 供应商：直接用 USD 金额，不转换
                     opening_invoices += amount_usd
@@ -2350,7 +2409,13 @@ async def list_payable_statements(
                 for ex in all_exchanges
                 if ex.exchange_date < start
             )
-        opening_balance = opening_invoices - opening_payments
+        # 国内采购单也计入期初（CNY）
+        opening_domestic = Decimal("0")
+        for po in all_domestic_pos:
+            if start is not None and po.purchase_date < start:
+                opening_domestic += _to_decimal(po.total_amount)
+
+        opening_balance = opening_invoices + opening_domestic - opening_payments
 
         # 分组明细（新版）
         purchase_details: List[PayablePurchaseItem] = []
@@ -2361,25 +2426,25 @@ async def list_payable_statements(
         current_purchase = Decimal("0")
         current_expenses = Decimal("0")
         # 预加载本期发票的产品和税费（避免N+1）
-        period_inv_ids = [inv.id for inv in all_invoices if start <= inv.invoice_date <= end]
+        period_inv_ids = [inv.id for inv in all_invoices if (start is None or inv.invoice_date >= start) and (end is None or inv.invoice_date <= end)]
         prods_map_result = await db.execute(
             select(InvoiceProduct).where(InvoiceProduct.invoice_id.in_(period_inv_ids))
         )
         prods_map = {}
         for p in prods_map_result.scalars().all():
             prods_map.setdefault(p.invoice_id, []).append(p)
-        
+
         taxes_map = {}
         if not is_usd:
             taxes_map = await _batch_get_taxes(db, period_inv_ids)
 
         for inv in all_invoices:
-            if start <= inv.invoice_date <= end:
+            if (start is None or inv.invoice_date >= start) and (end is None or inv.invoice_date <= end):
                 prods = prods_map.get(inv.id, [])
                 amount_usd = sum(_to_decimal(p.total_amount) for p in prods)
                 if amount_usd == 0:
                     amount_usd = _to_decimal(inv.total_amount_usd)
-                
+
                 ex = await _get_invoice_exchange(db, inv.id, None)
                 rate = _to_decimal(ex.exchange_rate) if ex else Decimal("7.0")
                 if rate == 0:
@@ -2417,6 +2482,27 @@ async def list_payable_statements(
                             description="进口增值税",
                             amount=round(vat, 2),
                         ))
+
+        # 国内采购单计入本期采购（CNY）
+        for po in all_domestic_pos:
+            if start is not None and end is not None and start <= po.purchase_date <= end:
+                current_purchase += _to_decimal(po.total_amount)
+                purchase_details.append(PayablePurchaseItem(
+                    date=po.purchase_date,
+                    invoice_no=po.purchase_no or f"CG-{po.id}",
+                    amount_usd=Decimal("0"),
+                    exchange_rate=None,
+                    amount_cny=round(_to_decimal(po.total_amount), 2),
+                ))
+            elif start is None and end is None:
+                current_purchase += _to_decimal(po.total_amount)
+                purchase_details.append(PayablePurchaseItem(
+                    date=po.purchase_date,
+                    invoice_no=po.purchase_no or f"CG-{po.id}",
+                    amount_usd=Decimal("0"),
+                    exchange_rate=None,
+                    amount_cny=round(_to_decimal(po.total_amount), 2),
+                ))
 
         # 本期付款
         if is_usd:
@@ -2458,7 +2544,7 @@ async def list_payable_statements(
         # 明细
         details: List[PayableSupplierItem] = []
         currency_label = "USD" if is_usd else "CNY"
-        
+
         if opening_balance != 0:
             details.append(PayableSupplierItem(
                 date=start,
@@ -2470,7 +2556,7 @@ async def list_payable_statements(
             ))
 
         for inv in all_invoices:
-            if start <= inv.invoice_date <= end:
+            if (start is None or inv.invoice_date >= start) and (end is None or inv.invoice_date <= end):
                 prod_result = await db.execute(
                     select(InvoiceProduct).where(InvoiceProduct.invoice_id == inv.id)
                 )
@@ -2478,7 +2564,7 @@ async def list_payable_statements(
                 amount_usd = sum(_to_decimal(p.total_amount) for p in prods)
                 if amount_usd == 0:
                     amount_usd = _to_decimal(inv.total_amount_usd)
-                
+
                 if is_usd:
                     debit = amount_usd
                     desc = f"采购 {amount_usd:,.2f} USD"
@@ -2538,7 +2624,7 @@ async def list_payable_statements(
 
         # 先按日期排序，再计算累计余额
         details.sort(key=lambda x: x.date)
-        
+
         # 重新计算累计余额
         running_balance = Decimal("0")
         for d in details:
@@ -2549,7 +2635,7 @@ async def list_payable_statements(
             elif d.type in ["exchange", "payment"]:
                 running_balance -= d.credit
             d.balance = running_balance
-        
+
         # 期初条目固定在开头（如果有）
         opening_items = [d for d in details if d.type == "opening"]
         other_items = [d for d in details if d.type != "opening"]
@@ -2589,18 +2675,18 @@ async def list_payable_statements(
         .group_by(ClearanceCost.customs_broker_id, Company.name)
     )
     customs_broker_rows = customs_broker_result.all()
-    
+
     for row in customs_broker_rows:
         broker_id = row.customs_broker_id
         broker_name = row.broker_name or "未知报关行"
         broker_total = _to_decimal(row.total) or Decimal("0")
         if broker_total <= 0:
             continue
-        
+
         broker_details: List[PayableSupplierItem] = []
         broker_expense_details: List[PayableExpenseItem] = []
         broker_payment_details: List[PayablePaymentItem] = []
-        
+
         # 获取清关费用明细
         clearance_details = await db.execute(
             select(ClearanceCost, ImportInvoice.invoice_no)
@@ -2610,7 +2696,7 @@ async def list_payable_statements(
             .where(ClearanceCost.customs_broker_id == broker_id)
             .order_by(ClearanceCost.cost_date)
         )
-        
+
         for cc, inv_no in clearance_details.all():
             broker_details.append(PayableSupplierItem(
                 date=cc.cost_date,
@@ -2636,7 +2722,7 @@ async def list_payable_statements(
                 clearance_fee=_to_decimal(cc.clearance_fee) if cc.clearance_fee else None,
                 total_cost=_to_decimal(cc.total_cost) if cc.total_cost else None,
             ))
-        
+
         # 获取交易流水中的清关费支付（付款给该报关行）
         broker_payments = Decimal("0")
         transaction_result = await db.execute(
@@ -2668,10 +2754,10 @@ async def list_payable_statements(
                 reference_no=tx.reference_no or None,
                 description=tx.description or None,
             ))
-        
+
         # 先按日期排序，再计算累计余额
         broker_details.sort(key=lambda x: x.date)
-        
+
         # 重新计算累计余额（费用 - 付款）
         running_balance = Decimal("0")
         for d in broker_details:
@@ -2680,7 +2766,7 @@ async def list_payable_statements(
             elif d.type == "payment":
                 running_balance -= d.credit
             d.balance = running_balance
-        
+
         items.append(PayableStatementItem(
             supplier_id=broker_id,
             supplier_name=broker_name,
@@ -2827,7 +2913,7 @@ async def get_payable_monthly(
 ):
     """
     供应商月份对账单 - 按月汇总应付明细
-    
+
     例：威揽 2026年1-5月对账单
     """
     from datetime import datetime as _dt
@@ -3025,7 +3111,7 @@ async def get_financial_statements(
 ):
     """
     三大财务报表：利润表、资产负债表、现金流量表
-    
+
     参考 salmon-finance-v4 shareholder_report.py 实现
     """
     from datetime import datetime as _dt, timedelta
@@ -3145,7 +3231,7 @@ async def get_financial_statements(
             )
             total_commission += _to_decimal(commission_result.scalar())
 
-        # 购汇（支持多行汇总）——按周期过滤
+        # 购汇（支持多行汇总）--按周期过滤
         ex_result = await db.execute(
             select(ExchangeRecord)
             .where(
@@ -3749,4 +3835,274 @@ async def get_financial_statements(
         balance_sheet=balance_sheet,
         cash_flow=cash_flow,
         charts=charts,
+    )
+
+
+# ==================== 往来对账单 ====================
+
+@router.get("/netting-statements", response_model=NettingStatementResponse)
+async def list_netting_statements(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(30, ge=1, le=500),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    company_id: Optional[int] = Query(None, description="按公司筛选"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    往来对账单 - 应收应付综合
+
+    同时查询一家公司（或所有公司）的应收和应付，计算往来净额：
+    - netting = 应收期末 - 应付期末
+    - > 0: 对方欠我钱（净应收）
+    - < 0: 我欠对方钱（净应付）
+
+    支持既是客户又是供应商的公司（如：上海市海信食品有限公司）
+    """
+    from datetime import datetime as _dt
+    from sqlalchemy import distinct
+
+    # 日期处理：不传则查全部
+    start = None
+    end = None
+    if start_date:
+        start = _dt.strptime(start_date, "%Y-%m-%d").date()
+    if end_date:
+        end = _dt.strptime(end_date, "%Y-%m-%d").date()
+
+    # 获取所有有交易记录的公司ID（销售 + 采购 + 国内采购V2）
+    sale_ids_result = await db.execute(
+        select(distinct(WholeFishSale.customer_id)).where(WholeFishSale.customer_id.isnot(None))
+    )
+    fp_sale_ids_result = await db.execute(
+        select(distinct(FinishedProductSale.customer_id)).where(FinishedProductSale.customer_id.isnot(None))
+    )
+    inv_supplier_ids_result = await db.execute(
+        select(distinct(ImportInvoice.supplier_id)).where(ImportInvoice.supplier_id.isnot(None))
+    )
+    domestic_po_ids_result = await db.execute(
+        select(distinct(PurchaseOrder.supplier_id)).where(PurchaseOrder.supplier_id.isnot(None))
+    )
+    domestic_v2_ids_result = await db.execute(
+        select(distinct(PurchaseOrderV2.supplier_id)).where(PurchaseOrderV2.supplier_id.isnot(None))
+    )
+
+    all_company_ids = set()
+    all_company_ids.update([r[0] for r in sale_ids_result.all() if r[0]])
+    all_company_ids.update([r[0] for r in fp_sale_ids_result.all() if r[0]])
+    all_company_ids.update([r[0] for r in inv_supplier_ids_result.all() if r[0]])
+    all_company_ids.update([r[0] for r in domestic_po_ids_result.all() if r[0]])
+    all_company_ids.update([r[0] for r in domestic_v2_ids_result.all() if r[0]])
+
+    if company_id:
+        company_query = select(Company).where(Company.id == company_id)
+    elif all_company_ids:
+        company_query = select(Company).where(Company.id.in_(all_company_ids)).order_by(Company.name)
+    else:
+        return NettingStatementResponse(
+            total=0, items=[], skip=skip, limit=limit,
+            start_date=start_date, end_date=end_date,
+            total_net_receivable=Decimal("0"), total_net_payable=Decimal("0"),
+        )
+
+    company_result = await db.execute(company_query)
+    companies = company_result.scalars().all()
+
+    items: List[NettingStatementItem] = []
+    total_net_receivable = Decimal("0")
+    total_net_payable = Decimal("0")
+
+    for company in companies:
+        # ========== 应收端计算 ==========
+        sales_result = await db.execute(
+            select(WholeFishSale).where(WholeFishSale.customer_id == company.id)
+        )
+        all_wf_sales = sales_result.scalars().all()
+
+        fp_sales_result = await db.execute(
+            select(FinishedProductSale).where(FinishedProductSale.customer_id == company.id)
+        )
+        all_fp_sales = fp_sales_result.scalars().all()
+
+        wf_receipts_result = await db.execute(
+            select(SalesReceipt).join(WholeFishSale, SalesReceipt.sale_id == WholeFishSale.id)
+            .where(WholeFishSale.customer_id == company.id)
+        )
+        all_wf_receipts = wf_receipts_result.scalars().all()
+
+        fp_receipts_result = await db.execute(
+            select(FinishedProductReceipt).join(FinishedProductSale, FinishedProductReceipt.sale_id == FinishedProductSale.id)
+            .where(FinishedProductSale.customer_id == company.id)
+        )
+        all_fp_receipts = fp_receipts_result.scalars().all()
+
+        # 应收期初
+        receivable_opening = Decimal("0")
+        if start:
+            for s in all_wf_sales:
+                if s.status in ("pending", "partial_paid") and s.sale_date < start:
+                    receivable_opening += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
+            for s in all_fp_sales:
+                if s.status in ("pending", "partial_paid") and s.sale_date < start:
+                    receivable_opening += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
+
+        # 应收本期销售
+        receivable_current_sales = Decimal("0")
+        for s in all_wf_sales:
+            if (start is None or s.sale_date >= start) and (end is None or s.sale_date <= end):
+                receivable_current_sales += _to_decimal(s.net_amount)
+        for s in all_fp_sales:
+            if (start is None or s.sale_date >= start) and (end is None or s.sale_date <= end):
+                receivable_current_sales += _to_decimal(s.net_amount)
+
+        # 应收本期收款
+        receivable_current_receipts = Decimal("0")
+        for r in all_wf_receipts:
+            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
+                receivable_current_receipts += _to_decimal(r.amount)
+        for r in all_fp_receipts:
+            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
+                receivable_current_receipts += _to_decimal(r.amount)
+
+        # 应收期末
+        receivable_closing = Decimal("0")
+        for s in all_wf_sales:
+            if s.status in ("pending", "partial_paid"):
+                receivable_closing += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
+        for s in all_fp_sales:
+            if s.status in ("pending", "partial_paid"):
+                receivable_closing += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
+
+        # ========== 应付端计算 ==========
+        invoice_result = await db.execute(
+            select(ImportInvoice).where(ImportInvoice.supplier_id == company.id)
+        )
+        all_invoices = invoice_result.scalars().all()
+
+        domestic_po_result = await db.execute(
+            select(PurchaseOrder).where(PurchaseOrder.supplier_id == company.id)
+        )
+        all_domestic_pos = domestic_po_result.scalars().all()
+
+        domestic_v2_result = await db.execute(
+            select(PurchaseOrderV2).where(PurchaseOrderV2.supplier_id == company.id)
+        )
+        all_domestic_v2 = domestic_v2_result.scalars().all()
+
+        invoice_ids = [inv.id for inv in all_invoices]
+        exchange_result = await db.execute(
+            select(ExchangeRecord).where(ExchangeRecord.invoice_id.in_(invoice_ids))
+        )
+        all_exchanges = exchange_result.scalars().all()
+
+        is_usd = (company.currency or "CNY") == "USD"
+
+        # 应付期初
+        payable_opening = Decimal("0")
+        for inv in all_invoices:
+            if start is not None and inv.invoice_date < start:
+                prod_result = await db.execute(select(InvoiceProduct).where(InvoiceProduct.invoice_id == inv.id))
+                prods = prod_result.scalars().all()
+                amount_usd = sum(_to_decimal(p.total_amount) for p in prods) or _to_decimal(inv.total_amount_usd)
+                if is_usd:
+                    payable_opening += amount_usd
+                else:
+                    ex = await _get_invoice_exchange(db, inv.id, None)
+                    rate = _to_decimal(ex.exchange_rate) if ex else Decimal("7.0")
+                    payable_opening += amount_usd * (rate or Decimal("7.0"))
+
+        for po in all_domestic_pos:
+            if start is not None and po.order_date < start:
+                payable_opening += _to_decimal(po.total_amount)
+
+        for po in all_domestic_v2:
+            if start is not None and po.purchase_date < start:
+                payable_opening += _to_decimal(po.total_amount)
+
+        if is_usd:
+            opening_payments = sum(_to_decimal(ex.amount_usd) for ex in all_exchanges if start is not None and ex.exchange_date < start)
+        else:
+            opening_payments = sum(_to_decimal(ex.amount_cny) for ex in all_exchanges if start is not None and ex.exchange_date < start)
+        payable_opening -= opening_payments
+
+        # 应付本期采购
+        payable_current_purchase = Decimal("0")
+        for inv in all_invoices:
+            if (start is None or inv.invoice_date >= start) and (end is None or inv.invoice_date <= end):
+                prod_result = await db.execute(select(InvoiceProduct).where(InvoiceProduct.invoice_id == inv.id))
+                prods = prod_result.scalars().all()
+                amount_usd = sum(_to_decimal(p.total_amount) for p in prods) or _to_decimal(inv.total_amount_usd)
+                ex = await _get_invoice_exchange(db, inv.id, None)
+                rate = _to_decimal(ex.exchange_rate) if ex else Decimal("7.0")
+                payable_current_purchase += amount_usd * (rate or Decimal("7.0"))
+
+        for po in all_domestic_pos:
+            if (start is None or po.order_date >= start) and (end is None or po.order_date <= end):
+                payable_current_purchase += _to_decimal(po.total_amount)
+
+        for po in all_domestic_v2:
+            if (start is None or po.purchase_date >= start) and (end is None or po.purchase_date <= end):
+                payable_current_purchase += _to_decimal(po.total_amount)
+
+        # 应付本期付款
+        if is_usd:
+            payable_current_payments = sum(_to_decimal(ex.amount_usd) for ex in all_exchanges if (start is None or ex.exchange_date >= start) and (end is None or ex.exchange_date <= end))
+        else:
+            payable_current_payments = sum(
+                _to_decimal(ex.amount_cny) + _to_decimal(ex.fee_cny)
+                for ex in all_exchanges if (start is None or ex.exchange_date >= start) and (end is None or ex.exchange_date <= end)
+            )
+
+        # 应付期末
+        payable_closing = payable_opening + payable_current_purchase - payable_current_payments
+
+        # 往来净额
+        netting_opening = receivable_opening - payable_opening
+        netting_closing = receivable_closing - payable_closing
+
+        if netting_closing > 0:
+            netting_direction = "应收"
+        elif netting_closing < 0:
+            netting_direction = "应付"
+        else:
+            netting_direction = "平"
+
+        # 如果没有任何交易，跳过
+        if (receivable_closing == 0 and payable_closing == 0 and
+            receivable_current_sales == 0 and payable_current_purchase == 0):
+            continue
+
+        items.append(NettingStatementItem(
+            company_id=company.id,
+            company_name=company.name,
+            company_code=company.code,
+            company_type="both" if (all_wf_sales or all_fp_sales) and (all_invoices or all_domestic_pos or all_domestic_v2) else ("customer" if (all_wf_sales or all_fp_sales) else "supplier"),
+            receivable_opening=round(receivable_opening, 2),
+            receivable_current_sales=round(receivable_current_sales, 2),
+            receivable_current_receipts=round(receivable_current_receipts, 2),
+            receivable_closing=round(receivable_closing, 2),
+            payable_opening=round(payable_opening, 2),
+            payable_current_purchase=round(payable_current_purchase, 2),
+            payable_current_expenses=Decimal("0"),
+            payable_current_payments=round(payable_current_payments, 2),
+            payable_closing=round(payable_closing, 2),
+            netting_opening=round(netting_opening, 2),
+            netting_closing=round(netting_closing, 2),
+            netting_direction=netting_direction,
+        ))
+
+        if netting_closing > 0:
+            total_net_receivable += netting_closing
+        else:
+            total_net_payable += abs(netting_closing)
+
+    return NettingStatementResponse(
+        total=len(items),
+        items=items[skip:skip+limit],
+        skip=skip,
+        limit=limit,
+        start_date=start_date,
+        end_date=end_date,
+        total_net_receivable=round(total_net_receivable, 2),
+        total_net_payable=round(total_net_payable, 2),
     )

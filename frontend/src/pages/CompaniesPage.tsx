@@ -23,6 +23,7 @@ import { CompanyFormDialog } from "@/components/CompanyFormDialog";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { Plus, Search, Building2, Fish, Ship, Store, User, Truck, HardHat, Home, Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { BatchImportButton } from "@/components/BatchImportButton";
+import { useAuth } from "@/lib/permissions";
 
 const typeMap: Record<string, { label: string; icon: React.ElementType; color: string; role: string }> = {
   processing_plant: { label: "加工厂", icon: Building2, color: "bg-blue-100 text-blue-800", role: "upstream" },
@@ -81,14 +82,15 @@ export function CompaniesPage() {
   const [editingCompany, setEditingCompany] = useState<any>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Company | null>(null);
+  const { isAdmin } = useAuth();
 
   const { data, isLoading } = useQuery<CompanyListResponse>({
-    queryKey: ["companies", search, type, page, "upstream"],
+    queryKey: ["companies", search, type, page, "business_partner"],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.append("search", search);
       if (type && type !== "all") params.append("type", type);
-      params.append("business_role", "upstream");
+      params.append("business_role", "business_partner");
       params.append("skip", String((page - 1) * PAGE_SIZE));
       params.append("limit", String(PAGE_SIZE));
       const res = await api.get(`/v1/companies/?${params.toString()}`);
@@ -219,6 +221,7 @@ export function CompaniesPage() {
               <TableHead>合作日期</TableHead>
               <TableHead>信用额度</TableHead>
               <TableHead>预付款余额</TableHead>
+              <TableHead>期末欠款</TableHead>
               <TableHead className="w-[200px]">备注</TableHead>
               <TableHead className="w-[120px]">操作</TableHead>
             </TableRow>
@@ -226,13 +229,13 @@ export function CompaniesPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
-                <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
                   暂无数据，点击右上角新增主体
                 </TableCell>
               </TableRow>
@@ -305,6 +308,15 @@ export function CompaniesPage() {
                         </span>
                       ) : "-"}
                     </TableCell>
+                    <TableCell>
+                      {company.type === "supplier" ? (
+                        <span className={Number(company.payable_cny || 0) > 0 ? "text-red-600 font-medium" : "text-muted-foreground"}
+                          title={`payable_cny=${company.payable_cny} (type=${typeof company.payable_cny})`}
+                        >
+                          ¥{Number(company.payable_cny || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      ) : "-"}
+                    </TableCell>
                     <TableCell className="max-w-[200px]">
                       <div className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-3">
                         {company.notes ?? "-"}
@@ -315,9 +327,11 @@ export function CompaniesPage() {
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(company)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600" onClick={() => handleDelete(company)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {isAdmin && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600" onClick={() => handleDelete(company)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/select";
 import { InvoiceFormDialog } from "@/components/InvoiceFormDialog";
 import { InvoiceDetailDrawer } from "@/components/InvoiceDetailDrawer";
-import { Plus, Search, Eye, Pencil, Trash2, Lock, Unlock, DollarSign } from "lucide-react";
+import { Plus, Search, Eye, Pencil, Trash2, Lock, Unlock, DollarSign, X } from "lucide-react";
 import { toast } from "sonner";
 import { BatchImportButton } from "@/components/BatchImportButton";
 
@@ -32,7 +32,6 @@ const customsStatusMap: Record<string, { label: string; color: string }> = {
   pending_customs: { label: "待报关", color: "bg-yellow-100 text-yellow-800" },
   customs_processing: { label: "已报关", color: "bg-blue-100 text-blue-800" },
   cleared: { label: "已结关", color: "bg-green-100 text-green-800" },
-  // 兼容旧数据（已不使用的状态映射到新状态）
   pending_shipment: { label: "待报关", color: "bg-yellow-100 text-yellow-800" },
   in_transit: { label: "已报关", color: "bg-blue-100 text-blue-800" },
   picked_up: { label: "已结关", color: "bg-green-100 text-green-800" },
@@ -47,11 +46,10 @@ const customsStatusMap: Record<string, { label: string; color: string }> = {
 const exchangeStatusMap: Record<string, { label: string; color: string }> = {
   not_exchanged: { label: "未购汇", color: "bg-gray-100 text-gray-800" },
   completed: { label: "已购汇", color: "bg-green-100 text-green-800" },
-  // partial 视为已购汇（兼容旧数据，业务上不存在部分购汇）
   partial: { label: "已购汇", color: "bg-green-100 text-green-800" },
   NOT_EXCHANGED: { label: "未购汇", color: "bg-gray-100 text-gray-800" },
   COMPLETED: { label: "已购汇", color: "bg-green-100 text-green-800" },
-  PARTIAL: { label: "已购汇", color: "bg-green-100 text-gray-800" },
+  PARTIAL: { label: "已购汇", color: "bg-green-100 text-green-800" },
 };
 
 interface InvoiceProduct {
@@ -82,7 +80,7 @@ interface Invoice {
   eta: string | null;
   awb_no: string | null;
   gross_weight_kg: string | null;
-  net_weight_kg_sum?: string | null; // 产品明细净重汇总（后端计算）
+  net_weight_kg_sum?: string | null;
   departure_date: string | null;
   flight_info: string | null;
   origin_certificate: string | null;
@@ -123,6 +121,7 @@ export function InvoicesPage() {
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailInvoiceId, setDetailInvoiceId] = useState<number | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery<InvoiceListResponse>({
@@ -139,7 +138,6 @@ export function InvoicesPage() {
     },
   });
 
-  // 查询全部数据用于汇总统计（不分页）
   const { data: allData } = useQuery<InvoiceListResponse>({
     queryKey: ["invoices", search, customsStatus, exchangeStatus, "all"],
     queryFn: async () => {
@@ -152,7 +150,7 @@ export function InvoicesPage() {
       const res = await api.get(`/v1/invoices/?${params.toString()}`);
       return res.data;
     },
-    enabled: true, // Always load
+    enabled: true,
   });
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
@@ -183,6 +181,9 @@ export function InvoicesPage() {
       await api.delete(`/v1/invoices/${deleteConfirm.id}`);
       toast.success("发票已删除");
       queryClient.invalidateQueries({ queryKey: ["invoices"] });
+      if (selectedInvoice?.id === deleteConfirm.id) {
+        setSelectedInvoice(null);
+      }
     } catch (error: any) {
       const detail = error.response?.data?.detail;
       let msg: string;
@@ -229,7 +230,7 @@ export function InvoicesPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="h-full flex flex-col gap-4">
       <InvoiceFormDialog
         open={formOpen}
         onOpenChange={setFormOpen}
@@ -248,251 +249,317 @@ export function InvoicesPage() {
         }}
       />
 
-      {/* 标题栏 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">进口单证</h1>
-          <p className="text-sm text-muted-foreground">
-            共 {data?.total ?? 0} 张发票
-          </p>
+      {/* ==================== 功能区 ==================== */}
+      <div className="flex-none space-y-3">
+        {/* 搜索行：标题 + 搜索 + 筛选 + 操作按钮 */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-2xl font-bold">进口单证</h1>
+              <p className="text-sm text-muted-foreground">
+                共 {data?.total ?? 0} 张发票
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <div className="relative w-[160px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="搜索发票号..."
+                  value={search}
+                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                  className="pl-9 w-[160px]"
+                />
+              </div>
+              <Select value={customsStatus} onValueChange={(v) => { setCustomsStatus(v ?? "all"); setPage(1); }}>
+                <SelectTrigger className="w-[90px]">
+                  <SelectValue>
+                    {customsStatus === "all" ? "全部报关" : customsStatusMap[customsStatus]?.label || "全部报关"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部报关</SelectItem>
+                  <SelectItem value="pending_customs">待报关</SelectItem>
+                  <SelectItem value="customs_processing">已报关</SelectItem>
+                  <SelectItem value="cleared">已结关</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={exchangeStatus} onValueChange={(v) => { setExchangeStatus(v ?? "all"); setPage(1); }}>
+                <SelectTrigger className="w-[90px]">
+                  <SelectValue>
+                    {exchangeStatus === "all" ? "全部购汇" : exchangeStatusMap[exchangeStatus]?.label || "全部购汇"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部购汇</SelectItem>
+                  <SelectItem value="not_exchanged">未购汇</SelectItem>
+                  <SelectItem value="completed">已购汇</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <BatchImportButton type="invoices" />
+            <Button onClick={handleAdd}>
+              <Plus className="h-4 w-4 mr-2" />
+              新增发票
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <BatchImportButton type="invoices" />
-          <Button onClick={handleAdd}>
-            <Plus className="h-4 w-4 mr-2" />
-            新增发票
-          </Button>
+
+        {/* 汇总行 */}
+        <div className="grid grid-cols-4 gap-4">
+          <div className="bg-muted/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted-foreground">发票总数</div>
+            <div className="text-lg font-bold">{allData?.total ?? data?.total ?? 0}</div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted-foreground">总箱数</div>
+            <div className="text-lg font-bold text-primary">
+              {(allData?.items ?? []).reduce((sum, inv) => sum + (parseInt(String(inv.total_boxes)) || 0), 0)}
+            </div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted-foreground">总重量(kg)</div>
+            <div className="text-lg font-bold text-primary">
+              {(allData?.items ?? []).reduce((sum, inv) => sum + (parseFloat(String((inv as any).net_weight_kg_sum || inv.total_weight_kg)) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </div>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-3 text-center">
+            <div className="text-xs text-muted-foreground">总金额(USD)</div>
+            <div className="text-lg font-bold text-primary">
+              ${(allData?.items ?? []).reduce((sum, inv) => sum + (parseFloat(String(inv.total_amount_usd)) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* 筛选栏 */}
-      <div className="flex gap-4">
-        <div className="relative w-[160px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="搜索发票号..."
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="pl-9 w-[160px]"
-          />
-        </div>
-        <Select value={customsStatus} onValueChange={(v) => { setCustomsStatus(v ?? "all"); setPage(1); }}>
-          <SelectTrigger className="w-[90px]">
-            <SelectValue>
-              {customsStatus === "all" ? "全部报关" : customsStatusMap[customsStatus]?.label || "全部报关"}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部报关</SelectItem>
-            <SelectItem value="pending_customs">待报关</SelectItem>
-            <SelectItem value="customs_processing">已报关</SelectItem>
-            <SelectItem value="cleared">已结关</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={exchangeStatus} onValueChange={(v) => { setExchangeStatus(v ?? "all"); setPage(1); }}>
-          <SelectTrigger className="w-[90px]">
-            <SelectValue>
-              {exchangeStatus === "all" ? "全部购汇" : exchangeStatusMap[exchangeStatus]?.label || "全部购汇"}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部购汇</SelectItem>
-            <SelectItem value="not_exchanged">未购汇</SelectItem>
-            <SelectItem value="completed">已购汇</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {/* ==================== 列表区 + 详情区 ==================== */}
+      <div className="flex-1 flex flex-col min-h-0 gap-4">
 
-      {/* 全局统计卡片 */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-muted/50 rounded-lg p-3 text-center">
-          <div className="text-xs text-muted-foreground">发票总数</div>
-          <div className="text-lg font-bold">{allData?.total ?? data?.total ?? 0}</div>
-        </div>
-        <div className="bg-muted/50 rounded-lg p-3 text-center">
-          <div className="text-xs text-muted-foreground">总箱数</div>
-          <div className="text-lg font-bold text-primary">
-            {(allData?.items ?? []).reduce((sum, inv) => sum + (parseInt(String(inv.total_boxes)) || 0), 0)}
-          </div>
-        </div>
-        <div className="bg-muted/50 rounded-lg p-3 text-center">
-          <div className="text-xs text-muted-foreground">总重量(kg)</div>
-          <div className="text-lg font-bold text-primary">
-            {(allData?.items ?? []).reduce((sum, inv) => sum + (parseFloat(String((inv as any).net_weight_kg_sum || inv.total_weight_kg)) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-          </div>
-        </div>
-        <div className="bg-muted/50 rounded-lg p-3 text-center">
-          <div className="text-xs text-muted-foreground">总金额(USD)</div>
-          <div className="text-lg font-bold text-primary">
-            ${(allData?.items ?? []).reduce((sum, inv) => sum + (parseFloat(String(inv.total_amount_usd)) || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-          </div>
-        </div>
-      </div>
-
-      {/* 数据表格 */}
-      <div className="border rounded-lg">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>发票号</TableHead>
-              <TableHead>发票日期</TableHead>
-              <TableHead>宰杀日期</TableHead>
-              <TableHead>ETA</TableHead>
-              <TableHead>加工厂</TableHead>
-              <TableHead>出口商</TableHead>
-              <TableHead>规格(箱数)</TableHead>
-              <TableHead>总箱数</TableHead>
-              <TableHead>总净重(kg)</TableHead>
-              <TableHead>总金额(USD)</TableHead>
-              <TableHead>AWB</TableHead>
-              <TableHead>报关状态</TableHead>
-              <TableHead>购汇状态</TableHead>
-              <TableHead className="w-[120px]">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
-                  加载中...
-                </TableCell>
-              </TableRow>
-            ) : (data?.items?.length ?? 0) === 0 ? (
-              <TableRow>
-                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
-                  暂无数据
-                </TableCell>
-              </TableRow>
-            ) : (
-              data?.items.map((invoice) => {
-                const customsInfo = customsStatusMap[invoice.customs_status] ?? { label: invoice.customs_status, color: "" };
-                const exchangeInfo = exchangeStatusMap[invoice.exchange_status] ?? { label: invoice.exchange_status, color: "" };
-                // 规格汇总：规格 + 箱数
-                const specSummary = invoice.products.map(p => `${p.product_spec}(${p.box_count})`).join(", ");
-                return (
-                  <TableRow key={invoice.id}>
-                    <TableCell className="font-medium">
-                      {invoice.is_locked && <Lock className="h-3 w-3 inline mr-1 text-red-500" />}
-                      {invoice.parent_invoice_id && (
-                        <span className="text-xs text-muted-foreground mr-1">└</span>
-                      )}
-                      {invoice.invoice_no}
-                      {(invoice.is_master === true || invoice.is_master === null) && !invoice.parent_invoice_id && (
-                        <Badge variant="outline" className="ml-1 text-[10px] h-4 px-1 bg-blue-50 text-blue-600">主</Badge>
-                      )}
-                      {invoice.parent_invoice_id && invoice.parent_invoice_no && (
-                        <span className="text-xs text-muted-foreground ml-1">({invoice.parent_invoice_no})</span>
-                      )}
-                    </TableCell>
-                    <TableCell>{invoice.invoice_date}</TableCell>
-                    <TableCell>{invoice.kill_date ?? "-"}</TableCell>
-                    <TableCell>{invoice.eta ? new Date(invoice.eta).toLocaleString('zh-CN', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}).replace(/\//g, '-') : "-"}</TableCell>
-                    <TableCell>{invoice.processing_plant_code ?? invoice.processing_plant_name ?? "-"}</TableCell>
-                    <TableCell>{invoice.exporter_name ?? "-"}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground max-w-[150px] truncate" title={specSummary}>
-                      {specSummary || "-"}
-                    </TableCell>
-                    <TableCell>{invoice.total_boxes}</TableCell>
-                    <TableCell>{Number((invoice as any).net_weight_kg_sum || invoice.total_weight_kg).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
-                    <TableCell>${Number(invoice.total_amount_usd).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
-                    <TableCell>{invoice.awb_no ?? "-"}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className={customsInfo.color}>
-                        {customsInfo.label}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className={exchangeInfo.color}>
-                        {exchangeInfo.label}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleView(invoice)} title="查看">
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        {/* 锁定/解锁按钮始终显示 */}
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleLockToggle(invoice)} title={invoice.is_locked ? "解锁" : "锁定"}>
-                          {invoice.is_locked ? <Unlock className="h-4 w-4 text-orange-500" /> : <Lock className="h-4 w-4 text-muted-foreground" />}
-                        </Button>
-                        {!invoice.is_locked && (
-                          <>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(invoice)} title="编辑">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            {invoice.sub_invoices && invoice.sub_invoices.length > 0 ? (
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-red-300 cursor-not-allowed" disabled title={`存在 ${invoice.sub_invoices.length} 条从票，请先删除从票`}>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            ) : (
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleDelete(invoice)} title="删除">
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {((invoice.is_master === true || invoice.is_master === null) || invoice.parent_invoice_id) && (
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500" onClick={() => handleAllocate(invoice)} title="费用分摊">
-                                <DollarSign className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </div>
+        {/* 列表区 — 自适应高度，超出时内部滚动 */}
+        <div className="flex-none flex flex-col min-h-0 border rounded-lg overflow-hidden">
+          <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead className="sticky top-0 bg-background z-10 w-[140px]">发票号</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">发票日期</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">宰杀日期</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">ETA</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">加工厂</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">出口商</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">规格(箱数)</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">总箱数</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">总净重(kg)</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">总金额(USD)</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">AWB</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">报关状态</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">购汇状态</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10 w-[140px]">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                      加载中...
                     </TableCell>
                   </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-          {/* 汇总行 */}
-          {!isLoading && data && data.items.length > 0 && (
-            <tfoot className="bg-muted/50 border-t">
-              <TableRow className="font-medium text-sm">
-                <TableCell colSpan={7} className="text-right">本页合计：</TableCell>
-                <TableCell>
-                  {data.items.reduce((sum, inv) => sum + (inv.total_boxes || 0), 0)}
-                </TableCell>
-                <TableCell>
-                  {data.items.reduce((sum, inv) => sum + Number((inv as any).net_weight_kg_sum || inv.total_weight_kg || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                </TableCell>
-                <TableCell className="text-primary font-semibold">
-                  ${data.items.reduce((sum, inv) => sum + Number(inv.total_amount_usd || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                </TableCell>
-                <TableCell colSpan={4}></TableCell>
-              </TableRow>
-            </tfoot>
-          )}
-        </Table>
-      </div>
-
-      {/* 分页 */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
-            显示 {(page - 1) * PAGE_SIZE + 1} - {Math.min(page * PAGE_SIZE, data?.total ?? 0)} / 共 {data?.total ?? 0} 条
+                ) : (data?.items?.length ?? 0) === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                      暂无数据
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  data?.items.map((invoice) => {
+                    const customsInfo = customsStatusMap[invoice.customs_status] ?? { label: invoice.customs_status, color: "" };
+                    const exchangeInfo = exchangeStatusMap[invoice.exchange_status] ?? { label: invoice.exchange_status, color: "" };
+                    const specSummary = invoice.products.map(p => `${p.product_spec}(${p.box_count})`).join(", ");
+                    const isSelected = selectedInvoice?.id === invoice.id;
+                    return (
+                      <TableRow
+                        key={invoice.id}
+                        className={cn(
+                          "cursor-pointer transition-colors",
+                          isSelected && "bg-primary/10 hover:bg-primary/15"
+                        )}
+                        onClick={() => setSelectedInvoice(invoice)}
+                      >
+                        <TableCell className="font-medium">
+                          {invoice.is_locked && <Lock className="h-3 w-3 inline mr-1 text-red-500" />}
+                          {invoice.parent_invoice_id && (
+                            <span className="text-xs text-muted-foreground mr-1">└</span>
+                          )}
+                          {invoice.invoice_no}
+                          {(invoice.is_master === true || invoice.is_master === null) && !invoice.parent_invoice_id && (
+                            <Badge variant="outline" className="ml-1 text-[10px] h-4 px-1 bg-blue-50 text-blue-600">主</Badge>
+                          )}
+                          {invoice.parent_invoice_id && invoice.parent_invoice_no && (
+                            <span className="text-xs text-muted-foreground ml-1">({invoice.parent_invoice_no})</span>
+                          )}
+                        </TableCell>
+                        <TableCell>{invoice.invoice_date}</TableCell>
+                        <TableCell>{invoice.kill_date ?? "-"}</TableCell>
+                        <TableCell>{invoice.eta ? new Date(invoice.eta).toLocaleString('zh-CN', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}).replace(/\//g, '-') : "-"}</TableCell>
+                        <TableCell>{invoice.processing_plant_code ?? invoice.processing_plant_name ?? "-"}</TableCell>
+                        <TableCell>{invoice.exporter_name ?? "-"}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground max-w-[150px] truncate" title={specSummary}>
+                          {specSummary || "-"}
+                        </TableCell>
+                        <TableCell>{invoice.total_boxes}</TableCell>
+                        <TableCell>{Number((invoice as any).net_weight_kg_sum || invoice.total_weight_kg).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                        <TableCell>${Number(invoice.total_amount_usd).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                        <TableCell>{invoice.awb_no ?? "-"}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className={customsInfo.color}>
+                            {customsInfo.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className={exchangeInfo.color}>
+                            {exchangeInfo.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleView(invoice); }} title="查看">
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleLockToggle(invoice); }} title={invoice.is_locked ? "解锁" : "锁定"}>
+                              {invoice.is_locked ? <Unlock className="h-4 w-4 text-orange-500" /> : <Lock className="h-4 w-4 text-muted-foreground" />}
+                            </Button>
+                            {!invoice.is_locked && (
+                              <>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => { e.stopPropagation(); handleEdit(invoice); }} title="编辑">
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                {invoice.sub_invoices && invoice.sub_invoices.length > 0 ? (
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-300 cursor-not-allowed" disabled title={`存在 ${invoice.sub_invoices.length} 条从票，请先删除从票`}>
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                ) : (
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={(e) => { e.stopPropagation(); handleDelete(invoice); }} title="删除">
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                )}
+                                {((invoice.is_master === true || invoice.is_master === null) || invoice.parent_invoice_id) && (
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-500" onClick={(e) => { e.stopPropagation(); handleAllocate(invoice); }} title="费用分摊">
+                                    <DollarSign className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(page - 1)}
-              disabled={page <= 1}
-            >
-              上一页
-            </Button>
-            <span className="text-sm">
-              {page} / {totalPages}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage(page + 1)}
-              disabled={page >= totalPages}
-            >
-              下一页
-            </Button>
+
+          {/* 分页 + 汇总行 */}
+          <div className="flex-none border-t bg-muted/30">
+            {!isLoading && data && data.items.length > 0 && (
+              <div className="flex items-center justify-between px-4 py-2 text-sm">
+                <div className="flex items-center gap-4">
+                  <span className="text-muted-foreground">
+                    显示 {(page - 1) * PAGE_SIZE + 1} - {Math.min(page * PAGE_SIZE, data?.total ?? 0)} / 共 {data?.total ?? 0} 条
+                  </span>
+                  <span className="text-muted-foreground">|</span>
+                  <span>本页合计：箱数 {data.items.reduce((sum, inv) => sum + (inv.total_boxes || 0), 0)} · 净重 {data.items.reduce((sum, inv) => sum + Number((inv as any).net_weight_kg_sum || inv.total_weight_kg || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})} kg · 金额 ${data.items.reduce((sum, inv) => sum + Number(inv.total_amount_usd || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                </div>
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setPage(page - 1)} disabled={page <= 1}>上一页</Button>
+                    <span className="text-sm">{page} / {totalPages}</span>
+                    <Button variant="outline" size="sm" onClick={() => setPage(page + 1)} disabled={page >= totalPages}>下一页</Button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
-      )}
+
+        {/* ==================== 详情区 ==================== */}
+        {selectedInvoice && (
+          <div className="flex-none border rounded-lg overflow-auto bg-background">
+            <div className="p-3 space-y-3">
+              {/* 详情头部 */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <h3 className="font-semibold text-base">发票详情</h3>
+                  <Badge variant="secondary" className={customsStatusMap[selectedInvoice.customs_status]?.color || ""}>
+                    {customsStatusMap[selectedInvoice.customs_status]?.label || selectedInvoice.customs_status}
+                  </Badge>
+                  <Badge variant="secondary" className={exchangeStatusMap[selectedInvoice.exchange_status]?.color || ""}>
+                    {exchangeStatusMap[selectedInvoice.exchange_status]?.label || selectedInvoice.exchange_status}
+                  </Badge>
+                  {selectedInvoice.is_locked && (
+                    <Badge variant="outline" className="text-red-500 border-red-200">
+                      <Lock className="h-3 w-3 mr-1" />已锁定
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => handleView(selectedInvoice)}>
+                    <Eye className="h-4 w-4 mr-1" />完整详情
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedInvoice(null)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* 产品明细（在上） */}
+              {selectedInvoice.products.length > 0 && (
+                <div>
+                  <div className="text-muted-foreground text-xs mb-1">产品明细 ({selectedInvoice.products.length} 项)</div>
+                  <div className="border rounded-md overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/30">
+                          <TableHead className="text-xs h-7">规格</TableHead>
+                          <TableHead className="text-xs h-7">箱数</TableHead>
+                          <TableHead className="text-xs h-7">净重(kg)</TableHead>
+                          <TableHead className="text-xs h-7">单价(USD)</TableHead>
+                          <TableHead className="text-xs h-7">金额(USD)</TableHead>
+                          <TableHead className="text-xs h-7">备注</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedInvoice.products.map((p) => (
+                          <TableRow key={p.id} className="h-7">
+                            <TableCell className="text-sm py-0.5">{p.product_spec}</TableCell>
+                            <TableCell className="text-sm py-0.5">{p.box_count}</TableCell>
+                            <TableCell className="text-sm py-0.5">{p.net_weight_kg}</TableCell>
+                            <TableCell className="text-sm py-0.5">${p.unit_price}</TableCell>
+                            <TableCell className="text-sm py-0.5">${p.total_amount}</TableCell>
+                            <TableCell className="text-sm py-0.5 text-muted-foreground">{p.notes ?? "-"}</TableCell>
+                          </TableRow>
+                        ))}
+                        {/* 汇总行 */}
+                        <TableRow className="bg-muted/20 font-medium h-7">
+                          <TableCell className="text-sm py-0.5">合计</TableCell>
+                          <TableCell className="text-sm py-0.5">{selectedInvoice.products.reduce((s, p) => s + p.box_count, 0)}</TableCell>
+                          <TableCell className="text-sm py-0.5">{selectedInvoice.products.reduce((s, p) => s + parseFloat(p.net_weight_kg), 0).toFixed(3)}</TableCell>
+                          <TableCell className="text-sm py-0.5">-</TableCell>
+                          <TableCell className="text-sm py-0.5">${selectedInvoice.products.reduce((s, p) => s + parseFloat(p.total_amount), 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                          <TableCell className="text-sm py-0.5">-</TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ==================== 弹窗 ==================== */}
 
       {/* 费用分摊弹窗 */}
       {allocateInvoice && (

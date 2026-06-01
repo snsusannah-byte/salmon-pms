@@ -72,7 +72,8 @@ class ReturnOrderBase(BaseModel):
     """退货单基础"""
     sale_type: str = Field(..., pattern="^(whole_fish|finished_product)$", description="销售类型")
     whole_fish_sale_id: Optional[int] = Field(None, description="整鱼销售单ID")
-    finished_product_sale_id: Optional[int] = Field(None, description="成品销售单ID")
+    finished_product_sale_id: Optional[int] = Field(None, description="成品销售单ID(v1)")
+    finished_product_sale_v2_id: Optional[int] = Field(None, description="成品销售单ID(v2)")
     return_date: date = Field(..., description="退货日期")
     customer_id: int = Field(..., description="客户ID")
     processing_plant_id: Optional[int] = Field(None, description="加工厂ID")
@@ -100,6 +101,7 @@ class ReturnOrderUpdate(BaseModel):
     internal_notes: Optional[str] = None
     refund_method: Optional[RefundMethod] = Field(None, description="退款方式")
     bank_account_id: Optional[int] = Field(None, description="退款银行账户")
+    finished_product_sale_v2_id: Optional[int] = Field(None, description="成品销售单ID(v2)")
     items: Optional[List[ReturnItemCreate]] = Field(None, description="替换全部明细（草稿/待审批状态）")
 
 

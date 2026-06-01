@@ -50,7 +50,7 @@ export function ReceivableStatementsTab() {
     queryKey: ["customers-list"],
     queryFn: async () => {
       const res = await api.get("/v1/companies/?limit=500");
-      return (res.data?.items || []) as { id: number; name: string; code?: string }[];
+      return (res.data?.items || []) as { id: number; name: string; code?: string; type?: string }[];
     },
   });
 
@@ -159,7 +159,7 @@ export function ReceivableStatementsTab() {
                     </button>
                   )}
                 </div>
-                {customerSearch && filteredCustomers.length > 0 && (
+    {customerSearch && filteredCustomers.length > 0 && (
                   <div className="absolute z-50 w-full bg-white border rounded shadow-lg mt-1 max-h-48 overflow-auto">
                     {filteredCustomers.map(c => (
                       <div
@@ -167,7 +167,13 @@ export function ReceivableStatementsTab() {
                         className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
                         onClick={() => { setSelectedCustomerId(String(c.id)); setCustomerSearch(c.name); }}
                       >
-                        {c.name} {c.code ? `(${c.code})` : ""}
+                        <div className="flex items-center justify-between">
+                          <span>{c.name}</span>
+                          <span className="text-xs text-muted-foreground">ID:{c.id}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {c.code ? `编码:${c.code} · ` : ''}类型:{c.type || '未知'}
+                        </div>
                       </div>
                     ))}
                   </div>

@@ -1,0 +1,100 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-salmon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-salmon123}
+      POSTGRES_DB: ${POSTGRES_DB:-salmon_pms}
+    ports:
+      - "127.0.0.1:5432:5432"  # 仅本机可访问，禁止外网直连
+    volumes:
+      # 数据映射到宿主机真实目录，便于备份
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-salmon} -d ${POSTGRES_DB:-salmon_pms}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - salmon-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"  # 仅本机可访问
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - salmon-net
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-salmon}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-salmon12345}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - ./data/minio:/data
+    networks:
+      - salmon-net
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.prod
+      args:
+        # 构建时可传入的参数
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: "false"
+      # CORS 白名单，包含部署机局域网IP和可能访问的IP
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
+    ports:
+      - "127.0.0.1:8000:8000"  # 仅本机可访问，由nginx反向代理
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks:
+      - salmon-net
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        # 生产构建时前端API地址（使用相对路径，由nginx反向代理）
+        VITE_API_URL: /api
+    restart: unless-stopped
+    ports:
+      - "80:80"   # 局域网访问入口
+      - "443:443" # HTTPS（可选，需配置证书）
+    depends_on:
+      - backend
+    networks:
+      - salmon-net
+
+networks:
+  salmon-net:
+    driver: bridge

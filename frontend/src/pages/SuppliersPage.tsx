@@ -46,6 +46,8 @@ interface Supplier {
   is_active: boolean;
   supplier_category: string | null;
   created_at: string;
+  payable_cny: number | null;
+  payable_usd: number | null;
 }
 
 interface CompanyListResponse {
@@ -97,16 +99,13 @@ export function SuppliersPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailSupplier, setDetailSupplier] = useState<Supplier | null>(null);
 
-  // 供应商列表
+  // 供应商列表（含应付款数据）
   const { data, isLoading } = useQuery<CompanyListResponse>({
     queryKey: ["suppliers", search, page],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.append("search", search);
-      params.append("exclude_type", "customer");
-      params.append("exclude_type", "processing_plant");
-      params.append("exclude_type", "fish_farm");
-      params.append("exclude_type", "exporter");
+      params.append("type", "supplier");
       params.append("skip", String((page - 1) * PAGE_SIZE));
       params.append("limit", String(PAGE_SIZE));
       const res = await api.get(`/v1/companies/?${params.toString()}`);
@@ -114,7 +113,7 @@ export function SuppliersPage() {
     },
   });
 
-  // 应付款数据（用于列表展示）
+  // 应付款数据（用于详情弹窗展示）
   const { data: payableData } = useQuery<PayableResponse>({
     queryKey: ["payable-summary"],
     queryFn: async () => {
@@ -386,6 +385,11 @@ export function SuppliersPage() {
       </div>
 
       {/* 搜索 */}
+      {payableData && (
+        <div className="text-xs text-muted-foreground">
+          应付款数据: {payableData.items?.length || 0} 条, 总欠款: ¥{payableData.total_payable || 0}
+        </div>
+      )}
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
@@ -456,14 +460,17 @@ export function SuppliersPage() {
                       {s.cooperation_date ? new Date(s.cooperation_date).toLocaleDateString("zh-CN") : "-"}
                     </TableCell>
                     <TableCell className="text-right">
-                      {closingBalance > 0 ? (
-                        <span className="text-red-600 font-medium">
-                          {fmt(closingBalance, s.currency)}
-                          {s.currency === "USD" && <span className="text-[10px] ml-1 text-gray-400">USD</span>}
-                        </span>
-                      ) : (
-                        <span className="text-green-600 text-sm">已结清</span>
-                      )}
+                      {(() => {
+                        const payable = s.payable_cny;
+                        console.log(`Supplier ${s.id} (${s.name}): payable_cny=`, payable);
+                        return payable && Number(payable) > 0 ? (
+                          <span className="text-red-600 font-medium">
+                            {fmt(payable, s.currency)}
+                          </span>
+                        ) : (
+                          <span className="text-green-600 text-sm">已结清</span>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">

@@ -1,116 +1,98 @@
 #!/bin/bash
-# Salmon PMS 上线部署脚本
-# 从 dev 分支合并到 main 并部署到生产环境
+# ============================================================
+# Salmon PMS 部署机一键更新脚本
+# 用法: ./deploy.sh
+# ============================================================
 
 set -e
 
-PROJECT_DIR="$(dirname "$0")/.."
-cd "$PROJECT_DIR"
+DEPLOY_DIR="/srv/salmon-pms"
+LOG_FILE="/var/log/salmon-pms-deploy.log"
 
-echo "🚀 Salmon PMS 上线流程"
-echo "======================"
-echo ""
+# 颜色输出
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-# 1. 检查分支状态
-echo "📋 步骤 1/8: 检查当前分支..."
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ "$CURRENT_BRANCH" != "main" ]; then
-    echo "⚠️  当前不在 main 分支 ($CURRENT_BRANCH)，切换到 main..."
-    git checkout main
-fi
+log() {
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] $1${NC}" | tee -a "$LOG_FILE"
+}
 
-# 2. 备份数据库
-echo ""
-echo "💾 步骤 2/8: 备份生产数据库..."
-if ! ./scripts/backup-db.sh; then
-    echo "❌ 备份失败！停止上线。"
+warn() {
+    echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] 警告: $1${NC}" | tee -a "$LOG_FILE"
+}
+
+error() {
+    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] 错误: $1${NC}" | tee -a "$LOG_FILE"
     exit 1
+}
+
+# 检查是否以root运行（Docker需要）
+if [ "$EUID" -ne 0 ]; then
+    warn "建议以 root 运行，否则 Docker 命令可能需要 sudo"
 fi
 
-# 3. 拉取最新 main
-echo ""
-echo "📥 步骤 3/8: 更新 main 分支..."
-git pull origin main || true
+log "开始部署 Salmon PMS..."
 
-# 4. 合并 dev
-echo ""
-echo "🔀 步骤 4/8: 合并 dev 分支..."
-if ! git merge dev -m "Merge dev into main for release $(date +%Y%m%d-%H%M)"; then
-    echo "❌ 合并冲突！需要手动解决。"
-    echo "   解决冲突后运行: git add . && git commit && $0"
-    exit 1
-fi
+# 进入部署目录
+cd "$DEPLOY_DIR" || error "部署目录不存在: $DEPLOY_DIR"
 
-# 5. 打标签
-echo ""
-echo "🏷️  步骤 5/8: 创建版本标签..."
-VERSION=$(date +%Y%m%d-%H%M)
-git tag -a "v$VERSION" -m "Release v$VERSION"
-echo "✅ 标签: v$VERSION"
-
-# 6. 推送
-echo ""
-echo "📤 步骤 6/8: 推送代码..."
-git push origin main
-git push origin "v$VERSION"
-
-# 7. 数据库迁移
-echo ""
-echo "🗄️  步骤 7/8: 执行数据库迁移..."
-cd backend
-if [ -f .venv/bin/activate ]; then
-    source .venv/bin/activate
-    alembic upgrade head || echo "⚠️  迁移执行失败或无需迁移"
+# 拉取最新代码
+log "拉取最新代码..."
+if [ -d ".git" ]; then
+    git fetch origin
+    LOCAL=$(git rev-parse @)
+    REMOTE=$(git rev-parse @{u})
+    if [ "$LOCAL" = "$REMOTE" ]; then
+        log "代码已是最新，无需更新"
+        exit 0
+    fi
+    git pull origin main || error "Git pull 失败"
 else
-    echo "⚠️  未找到 .venv，跳过迁移"
+    error "部署目录不是 Git 仓库"
 fi
-cd ..
 
-# 8. 重新部署
-echo ""
-echo "🐳 步骤 8/8: 重新部署 Docker 容器..."
-cd docker
-docker compose down
-docker compose up -d --build
-
-echo ""
-echo "⏳ 等待服务启动..."
-sleep 10
-
-# 验证
-echo ""
-echo "🔍 验证服务状态..."
-if docker compose ps | grep -q "Up"; then
-    echo "✅ Docker 容器运行正常"
+# 备份数据库（更新前自动备份）
+log "更新前自动备份数据库..."
+if [ -f "scripts/backup.sh" ]; then
+    bash scripts/backup.sh || warn "自动备份失败，继续部署"
 else
-    echo "❌ Docker 容器启动异常，请检查日志: docker compose logs"
-    exit 1
+    warn "备份脚本不存在，跳过自动备份"
 fi
+
+# 执行数据库迁移（如需要）
+log "检查数据库迁移..."
+if docker compose -f docker-compose.prod.yml ps db | grep -q "healthy"; then
+    log "数据库运行正常"
+else
+    warn "数据库状态未知，继续部署..."
+fi
+
+# 构建并启动容器
+log "构建并重启服务..."
+docker compose -f docker-compose.prod.yml down || warn "停止旧容器失败"
+docker compose -f docker-compose.prod.yml up --build -d || error "构建/启动失败"
+
+# 等待服务就绪
+log "等待服务就绪..."
+sleep 5
 
 # 健康检查
-echo ""
-echo "🔍 健康检查..."
-for i in {1..5}; do
-    if curl -s http://localhost:8000/health >/dev/null 2>&1 || curl -s http://localhost:8000/ >/dev/null 2>&1; then
-        echo "✅ 后端服务响应正常"
+for i in {1..10}; do
+    if curl -sf http://localhost/health > /dev/null 2>&1; then
+        log "✅ 服务健康检查通过"
         break
     fi
-    echo "  尝试 $i/5..."
-    sleep 3
-    if [ $i -eq 5 ]; then
-        echo "⚠️  后端服务未响应，请手动检查"
+    if [ "$i" -eq 10 ]; then
+        error "服务启动后健康检查失败，请查看日志: docker compose -f docker-compose.prod.yml logs"
     fi
+    warn "健康检查重试 $i/10..."
+    sleep 3
 done
 
-echo ""
-echo "🎉 上线完成！版本: v$VERSION"
-echo ""
-echo "📱 访问地址:"
-echo "   前端: http://localhost:5173"
-echo "   后端: http://localhost:8000"
-echo ""
-echo "⚠️  请用户验收："
-echo "   1. 打开 http://localhost:5173"
-echo "   2. 检查原有功能是否正常"
-echo "   3. 检查新功能是否可用"
-echo "   4. 如发现问题，立即说'回滚'执行回滚操作"
+# 清理旧镜像
+log "清理未使用的 Docker 资源..."
+docker system prune -f --volumes || warn "清理旧资源失败"
+
+log "✅ 部署完成！访问地址: http://$(hostname -I | awk '{print $1}')"

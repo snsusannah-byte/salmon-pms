@@ -1,0 +1,22 @@
+[Unit]
+Description=Salmon PMS Backend (FastAPI + Uvicorn)
+After=network.target postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=sannah
+WorkingDirectory=/home/sannah/.openclaw/workspace-codeingman/projects/salmon-pms/backend
+Environment="DATABASE_URL=postgresql+asyncpg://salmon:001978@localhost:5432/salmon_pms"
+Environment="REDIS_URL=redis://localhost:6379/0"
+Environment="MINIO_ENDPOINT=localhost:9000"
+Environment="MINIO_ACCESS_KEY=salmon"
+Environment="MINIO_SECRET_KEY=001978"
+Environment="SECRET_KEY=填入openssl rand -hex 32生成的密钥"
+Environment="DEBUG=false"
+Environment="CORS_ORIGINS=[\"http://localhost\",\"http://127.0.0.1\"]"
+ExecStart=/home/sannah/.openclaw/workspace-codeingman/projects/salmon-pms/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

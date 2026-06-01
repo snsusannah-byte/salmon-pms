@@ -265,18 +265,20 @@ class CompanyService:
     
     @staticmethod
     async def get_supplier_payables(db: AsyncSession, supplier_ids: List[int]) -> dict[int, dict]:
-        """批量获取供应商应付款
+        """批量获取供应商应付款（包含进口发票 + 辅料采购 + 清关费用）
         
         Returns:
             {supplier_id: {payable_usd, payable_cny}}
         """
         from sqlalchemy import func
-        from app.models import ImportInvoice
+        from app.models import ImportInvoice, MaterialPurchaseOrder, ClearanceCost
         
         if not supplier_ids:
             return {}
         
-        # 查询每个供应商的发票总额(USD)
+        payables = {}
+        
+        # 1. 查询进口发票应付款(USD)
         result = await db.execute(
             select(
                 ImportInvoice.supplier_id,
@@ -287,16 +289,90 @@ class CompanyService:
             .group_by(ImportInvoice.supplier_id)
         )
         
-        payables = {}
         for row in result.mappings():
             supplier_id = row["supplier_id"]
             total_usd = row["total_usd"] or 0
-            # 使用平均汇率 6.928 转换为 CNY（后续可从 exchange_records 动态获取）
-            exchange_rate = 6.928
+            exchange_rate = Decimal("6.928")
             payables[supplier_id] = {
                 "payable_usd": float(total_usd),
                 "payable_cny": float(total_usd * exchange_rate),
             }
+        
+        # 2. 查询辅料采购应付款(CNY)
+        mpo_result = await db.execute(
+            select(
+                MaterialPurchaseOrder.supplier_id,
+                func.sum(MaterialPurchaseOrder.actual_total - MaterialPurchaseOrder.paid_amount).label("remaining_cny"),
+            )
+            .where(
+                MaterialPurchaseOrder.supplier_id.in_(supplier_ids),
+                MaterialPurchaseOrder.status != "cancelled",
+            )
+            .group_by(MaterialPurchaseOrder.supplier_id)
+        )
+        
+        for row in mpo_result.mappings():
+            supplier_id = row["supplier_id"]
+            remaining_cny = row["remaining_cny"] or 0
+            if supplier_id in payables:
+                payables[supplier_id]["payable_cny"] += float(remaining_cny)
+            else:
+                payables[supplier_id] = {
+                    "payable_usd": 0,
+                    "payable_cny": float(remaining_cny),
+                }
+        
+        # 3. 查询报关行清关费用(CNY) - 通过 customs_broker_id 关联
+        clearance_costs = {}
+        cc_result = await db.execute(
+            select(
+                ClearanceCost.customs_broker_id,
+                func.sum(ClearanceCost.total_cost).label("total_clearance_cost"),
+            )
+            .where(
+                ClearanceCost.customs_broker_id.in_(supplier_ids),
+                ClearanceCost.customs_broker_id.is_not(None),
+            )
+            .group_by(ClearanceCost.customs_broker_id)
+        )
+        
+        for row in cc_result.mappings():
+            supplier_id = row["customs_broker_id"]
+            total_cost = row["total_clearance_cost"] or 0
+            clearance_costs[supplier_id] = float(total_cost)
+            if supplier_id in payables:
+                payables[supplier_id]["payable_cny"] += float(total_cost)
+            else:
+                payables[supplier_id] = {
+                    "payable_usd": 0,
+                    "payable_cny": float(total_cost),
+                }
+        
+        # 4. 查询已付款（交易流水中给供应商的支出）- 只扣除报关行（ClearanceCost）
+        if clearance_costs:
+            from app.models import TransactionRecord
+            paid_result = await db.execute(
+                select(
+                    TransactionRecord.counterparty_id,
+                    func.sum(TransactionRecord.amount).label("total_paid"),
+                )
+                .where(
+                    TransactionRecord.counterparty_id.in_(list(clearance_costs.keys())),
+                    TransactionRecord.type == "expense",
+                )
+                .group_by(TransactionRecord.counterparty_id)
+            )
+            
+            for row in paid_result.mappings():
+                supplier_id = row["counterparty_id"]
+                total_paid = row["total_paid"] or 0
+                if supplier_id in payables:
+                    payables[supplier_id]["payable_cny"] = max(0, payables[supplier_id]["payable_cny"] - float(total_paid))
+                else:
+                    payables[supplier_id] = {
+                        "payable_usd": 0,
+                        "payable_cny": max(0, float(total_paid) - float(total_paid)),
+                    }
         
         return payables
     

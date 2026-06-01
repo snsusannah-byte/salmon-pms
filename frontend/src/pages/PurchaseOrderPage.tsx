@@ -223,7 +223,7 @@ function CreateOrderDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>供应商 *</Label>
-              <Select value={supplierId} onValueChange={setSupplierId}>
+              <Select value={supplierId} onValueChange={(val) => setSupplierId(val ?? "")}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择供应商" />
                 </SelectTrigger>
@@ -236,7 +236,7 @@ function CreateOrderDialog({
             </div>
             <div className="space-y-2">
               <Label>采购类型</Label>
-              <Select value={productType} onValueChange={setProductType}>
+              <Select value={productType} onValueChange={(val) => setProductType(val ?? "")}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -283,7 +283,7 @@ function CreateOrderDialog({
                   {items.map((item, index) => (
                     <TableRow key={index}>
                       <TableCell>
-                        <Select value={item.product_id} onValueChange={(v) => handleItemChange(index, "product_id", v)}>
+                        <Select value={item.product_id} onValueChange={(v) => handleItemChange(index, "product_id", v ?? "")}>
                           <SelectTrigger className="w-[200px]">
                             <SelectValue placeholder="选择产品" />
                           </SelectTrigger>
@@ -295,7 +295,7 @@ function CreateOrderDialog({
                         </Select>
                       </TableCell>
                       <TableCell>
-                        <Select value={item.item_type} onValueChange={(v) => handleItemChange(index, "item_type", v)}>
+                        <Select value={item.item_type} onValueChange={(v) => handleItemChange(index, "item_type", v ?? "")}>
                           <SelectTrigger className="w-[100px]">
                             <SelectValue />
                           </SelectTrigger>
@@ -315,7 +315,7 @@ function CreateOrderDialog({
                         />
                       </TableCell>
                       <TableCell>
-                        <Select value={item.unit} onValueChange={(v) => handleItemChange(index, "unit", v)}>
+                        <Select value={item.unit} onValueChange={(v) => handleItemChange(index, "unit", v ?? "")}>
                           <SelectTrigger className="w-[80px]">
                             <SelectValue />
                           </SelectTrigger>
@@ -393,6 +393,7 @@ export function PurchaseOrderPage() {
   });
 
   const [deleteOrderId, setDeleteOrderId] = useState<number | null>(null);
+  const queryClient = useQueryClient();
 
   const deleteMutation = useMutation({
     mutationFn: deletePurchaseOrder,
@@ -447,7 +448,7 @@ export function PurchaseOrderPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(val) => setStatusFilter(val ?? "")}>
               <SelectTrigger className="w-32">
                 <SelectValue placeholder="状态" />
               </SelectTrigger>

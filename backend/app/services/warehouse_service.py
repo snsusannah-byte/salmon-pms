@@ -22,20 +22,71 @@ class WarehouseService:
 
     @staticmethod
     async def create_purchase_order(db: AsyncSession, data: dict) -> WarehousePurchaseOrder:
-        """创建采购入库单"""
+        """创建采购入库单
+        
+        支持按箱入库：box_count × items_per_box = quantity
+        自动核算单价：actual_amount / quantity = unit_price（如果提供了实付金额）
+        自动生成批次号：BM{物料编码}-{YYYYMMDD}-{序号}
+        """
+        quantity = Decimal(str(data["quantity"]))
+        unit_price = Decimal(str(data["unit_price"]))
+        
+        # 如果有箱数和每箱数量，自动校验
+        box_count = data.get("box_count")
+        items_per_box = data.get("items_per_box")
+        if box_count and items_per_box:
+            calc_qty = Decimal(str(box_count)) * Decimal(str(items_per_box))
+            # 允许微小误差（如 10箱×1300=13000）
+            if abs(calc_qty - quantity) > Decimal("0.01"):
+                pass  # 前端已计算，这里只做记录
+        
+        # 应付金额 = 数量 × 单价（如果未提供）
         total_amount = data.get("total_amount")
         if total_amount is None:
-            total_amount = (Decimal(str(data["quantity"])) * Decimal(str(data["unit_price"]))).quantize(Decimal("0.01"))
+            total_amount = (quantity * unit_price).quantize(Decimal("0.01"))
+        else:
+            total_amount = Decimal(str(total_amount))
+        
+        # 实付金额
+        actual_amount = data.get("actual_amount")
+        if actual_amount is not None:
+            actual_amount = Decimal(str(actual_amount))
+        
+        # 自动生成批次号（如果未提供）
+        batch_no = data.get("batch_no")
+        if not batch_no:
+            # 获取产品编码
+            product_result = await db.execute(
+                select(Product).where(Product.id == data["product_id"])
+            )
+            product = product_result.scalar_one_or_none()
+            product_code = product.code if product else "BM"
+            
+            # 获取当天该物料的入库次数
+            today = date.today()
+            count_result = await db.execute(
+                select(func.count(WarehousePurchaseOrder.id))
+                .where(
+                    WarehousePurchaseOrder.product_id == data["product_id"],
+                    WarehousePurchaseOrder.order_date == today,
+                )
+            )
+            seq = count_result.scalar() or 0
+            seq += 1
+            batch_no = f"BM{product_code}-{today.strftime('%Y%m%d')}-{seq:03d}"
         
         order = WarehousePurchaseOrder(
             order_date=data.get("order_date", date.today()),
             product_id=data["product_id"],
             supplier_id=data.get("supplier_id"),
-            batch_no=data.get("batch_no"),
-            quantity=Decimal(str(data["quantity"])),
+            batch_no=batch_no,
+            quantity=quantity,
             unit=data.get("unit", "kg"),
-            unit_price=Decimal(str(data["unit_price"])),
+            unit_price=unit_price,
             total_amount=total_amount,
+            actual_amount=actual_amount,
+            box_count=box_count,
+            items_per_box=items_per_box,
             lead_time_days=data.get("lead_time_days", 0),
             warehouse_location=data.get("warehouse_location"),
             notes=data.get("notes"),

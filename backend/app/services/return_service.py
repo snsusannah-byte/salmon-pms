@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     ReturnOrder, ReturnItem, ReturnAttachment,
     ReturnReason, ReturnStatus, RefundMethod, ReturnAttachmentType,
-    WholeFishSale, WholeFishSaleItem, FinishedProductSale, FinishedProductSaleItem,
+    WholeFishSale, WholeFishSaleItem, FinishedProductSale, FinishedProductSaleItem, FinishedProductSaleV2,
     Company, BankAccount, TransactionRecord, TransactionType, TransactionCategory,
     ImportInvoice, BatchInvoice, MaterialTraceability, DailySlaughterRecord,
     SalesStatus, User,
@@ -48,6 +48,7 @@ class ReturnService:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         search: Optional[str] = None,
+        finished_product_sale_v2_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> Tuple[List[ReturnOrder], int]:
@@ -60,6 +61,8 @@ class ReturnService:
         filters = []
         if sale_type:
             filters.append(ReturnOrder.sale_type == sale_type)
+        if finished_product_sale_v2_id:
+            filters.append(ReturnOrder.finished_product_sale_v2_id == finished_product_sale_v2_id)
         if customer_id:
             filters.append(ReturnOrder.customer_id == customer_id)
         if processing_plant_id:
@@ -123,7 +126,7 @@ class ReturnService:
     # ==================== 加工厂自动识别 ====================
 
     @staticmethod
-    async def _detect_processing_plant(db: AsyncSession, sale_type: str, sale_id: int) -> Tuple[Optional[int], Optional[str], Optional[str]]:
+    async def _detect_processing_plant(db: AsyncSession, sale_type: str, sale_id: int, is_v2: bool = False) -> Tuple[Optional[int], Optional[str], Optional[str]]:
         """自动识别加工厂，返回 (plant_id, plant_name, eu_no)"""
         if sale_type == "whole_fish":
             result = await db.execute(
@@ -142,7 +145,56 @@ class ReturnService:
                     inv = inv_result.scalar_one_or_none()
                     if inv and inv.processing_plant_id:
                         comp_result = await db.execute(
-                            select(Company.name, Company.eu_registration_no).where(Company.id == inv.processing_plant_id)
+                            select(Company.name, Company.registration_code).where(Company.id == inv.processing_plant_id)
+                        )
+                        row = comp_result.one_or_none()
+                        if row:
+                            return inv.processing_plant_id, row[0], row[1]
+                        return inv.processing_plant_id, None, None
+
+        elif sale_type == "finished_product" and is_v2:
+            # V2 成品销售
+            # 追溯链
+            trace_result = await db.execute(
+                select(MaterialTraceability)
+                .where(MaterialTraceability.finished_product_sale_v2_id == sale_id)
+                .limit(1)
+            )
+            trace = trace_result.scalar_one_or_none()
+            if trace and trace.source_invoice_id:
+                inv_result = await db.execute(
+                    select(ImportInvoice).where(ImportInvoice.id == trace.source_invoice_id)
+                )
+                inv = inv_result.scalar_one_or_none()
+                if inv and inv.processing_plant_id:
+                    comp_result = await db.execute(
+                        select(Company.name, Company.registration_code).where(Company.id == inv.processing_plant_id)
+                    )
+                    row = comp_result.one_or_none()
+                    if row:
+                        return inv.processing_plant_id, row[0], row[1]
+                    return inv.processing_plant_id, None, None
+
+            # 追溯链找不到，尝试宰杀记录
+            fp_result = await db.execute(
+                select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id)
+            )
+            fp_sale = fp_result.scalar_one_or_none()
+            if fp_sale:
+                ds_result = await db.execute(
+                    select(DailySlaughterRecord)
+                    .where(DailySlaughterRecord.source_sale_v2_id == sale_id)
+                    .limit(1)
+                )
+                ds = ds_result.scalar_one_or_none()
+                if ds and ds.source_invoice_id:
+                    inv_result = await db.execute(
+                        select(ImportInvoice).where(ImportInvoice.id == ds.source_invoice_id)
+                    )
+                    inv = inv_result.scalar_one_or_none()
+                    if inv and inv.processing_plant_id:
+                        comp_result = await db.execute(
+                            select(Company.name, Company.registration_code).where(Company.id == inv.processing_plant_id)
                         )
                         row = comp_result.one_or_none()
                         if row:
@@ -150,6 +202,7 @@ class ReturnService:
                         return inv.processing_plant_id, None, None
 
         elif sale_type == "finished_product":
+            # V1 成品销售
             # 追溯链
             trace_result = await db.execute(
                 select(MaterialTraceability)
@@ -164,7 +217,7 @@ class ReturnService:
                 inv = inv_result.scalar_one_or_none()
                 if inv and inv.processing_plant_id:
                     comp_result = await db.execute(
-                        select(Company.name, Company.eu_registration_no).where(Company.id == inv.processing_plant_id)
+                        select(Company.name, Company.registration_code).where(Company.id == inv.processing_plant_id)
                     )
                     row = comp_result.one_or_none()
                     if row:
@@ -190,7 +243,7 @@ class ReturnService:
                     inv = inv_result.scalar_one_or_none()
                     if inv and inv.processing_plant_id:
                         comp_result = await db.execute(
-                            select(Company.name, Company.eu_registration_no).where(Company.id == inv.processing_plant_id)
+                            select(Company.name, Company.registration_code).where(Company.id == inv.processing_plant_id)
                         )
                         row = comp_result.one_or_none()
                         if row:
@@ -207,13 +260,14 @@ class ReturnService:
 
         # 校验：退货金额不能超过销售金额
         sale_type = data.get("sale_type")
-        sale_id = data.get("whole_fish_sale_id") or data.get("finished_product_sale_id")
+        sale_id = data.get("whole_fish_sale_id") or data.get("finished_product_sale_v2_id") or data.get("finished_product_sale_id")
         if sale_id:
-            await ReturnService._validate_return_amount(db, sale_type, sale_id, items_data)
+            await ReturnService._validate_return_amount(db, sale_type, sale_id, items_data, data.get("finished_product_sale_v2_id") is not None)
 
         # 自动识别加工厂
         if not data.get("processing_plant_id") and sale_id:
-            plant_id, plant_name, eu_no = await ReturnService._detect_processing_plant(db, sale_type, sale_id)
+            is_v2 = data.get("finished_product_sale_v2_id") is not None
+            plant_id, plant_name, eu_no = await ReturnService._detect_processing_plant(db, sale_type, sale_id, is_v2)
             if plant_id:
                 data["processing_plant_id"] = plant_id
                 data["processing_plant_name"] = plant_name
@@ -270,7 +324,7 @@ class ReturnService:
         return order
 
     @staticmethod
-    async def _validate_return_amount(db: AsyncSession, sale_type: str, sale_id: int, items_data: List[dict]):
+    async def _validate_return_amount(db: AsyncSession, sale_type: str, sale_id: int, items_data: List[dict], is_v2: bool = False):
         """校验退货总额不超过销售金额"""
         from fastapi import HTTPException
 
@@ -293,6 +347,20 @@ class ReturnService:
                     ReturnOrder.status != ReturnStatus.CANCELLED,
                 )
             )
+            gross_amount = sale.gross_amount or Decimal("0")
+        elif is_v2:
+            sale_result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
+            sale = sale_result.scalar_one_or_none()
+            if not sale:
+                raise HTTPException(status_code=404, detail="成品销售单(v2)不存在")
+            existing_result = await db.execute(
+                select(func.coalesce(func.sum(ReturnOrder.total_amount), Decimal("0")))
+                .where(
+                    ReturnOrder.finished_product_sale_v2_id == sale_id,
+                    ReturnOrder.status != ReturnStatus.CANCELLED,
+                )
+            )
+            gross_amount = sale.total_amount or Decimal("0")
         else:
             sale_result = await db.execute(select(FinishedProductSale).where(FinishedProductSale.id == sale_id))
             sale = sale_result.scalar_one_or_none()
@@ -305,9 +373,9 @@ class ReturnService:
                     ReturnOrder.status != ReturnStatus.CANCELLED,
                 )
             )
+            gross_amount = sale.gross_amount or Decimal("0")
 
         existing_return = existing_result.scalar() or Decimal("0")
-        gross_amount = sale.gross_amount or Decimal("0")
 
         if total_return + existing_return > gross_amount:
             raise HTTPException(
@@ -349,10 +417,11 @@ class ReturnService:
 
             # 重新校验
             sale_type = order.sale_type
-            sale_id = order.whole_fish_sale_id or order.finished_product_sale_id
+            sale_id = order.whole_fish_sale_id or order.finished_product_sale_v2_id or order.finished_product_sale_id
             if sale_id:
                 # 校验时不包含当前退货单自己
-                await ReturnService._validate_return_amount_for_update(db, sale_type, sale_id, order.id, items_data)
+                is_v2 = order.finished_product_sale_v2_id is not None
+                await ReturnService._validate_return_amount_for_update(db, sale_type, sale_id, order.id, items_data, is_v2)
 
             # 创建新明细（简化版）
             total_weight = Decimal("0")
@@ -384,7 +453,7 @@ class ReturnService:
         return order
 
     @staticmethod
-    async def _validate_return_amount_for_update(db: AsyncSession, sale_type: str, sale_id: int, exclude_order_id: int, items_data: List[dict]):
+    async def _validate_return_amount_for_update(db: AsyncSession, sale_type: str, sale_id: int, exclude_order_id: int, items_data: List[dict], is_v2: bool = False):
         total_return = Decimal("0")
         for item in items_data:
             w = Decimal(str(item.get("weight_kg", 0) or 0))
@@ -402,6 +471,19 @@ class ReturnService:
                     ReturnOrder.id != exclude_order_id,
                 )
             )
+            gross_amount = sale.gross_amount or Decimal("0")
+        elif is_v2:
+            sale_result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
+            sale = sale_result.scalar_one_or_none()
+            existing_result = await db.execute(
+                select(func.coalesce(func.sum(ReturnOrder.total_amount), Decimal("0")))
+                .where(
+                    ReturnOrder.finished_product_sale_v2_id == sale_id,
+                    ReturnOrder.status != ReturnStatus.CANCELLED,
+                    ReturnOrder.id != exclude_order_id,
+                )
+            )
+            gross_amount = sale.total_amount or Decimal("0")
         else:
             sale_result = await db.execute(select(FinishedProductSale).where(FinishedProductSale.id == sale_id))
             sale = sale_result.scalar_one_or_none()
@@ -413,9 +495,9 @@ class ReturnService:
                     ReturnOrder.id != exclude_order_id,
                 )
             )
+            gross_amount = sale.gross_amount or Decimal("0")
 
         existing_return = existing_result.scalar() or Decimal("0")
-        gross_amount = sale.gross_amount or Decimal("0")
 
         if total_return + existing_return > gross_amount:
             from fastapi import HTTPException
@@ -607,6 +689,11 @@ class ReturnService:
                 select(WholeFishSale).where(WholeFishSale.id == order.whole_fish_sale_id)
             )
             sale = result.scalar_one_or_none()
+        elif order.sale_type == "finished_product" and order.finished_product_sale_v2_id:
+            result = await db.execute(
+                select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == order.finished_product_sale_v2_id)
+            )
+            sale = result.scalar_one_or_none()
         elif order.sale_type == "finished_product" and order.finished_product_sale_id:
             result = await db.execute(
                 select(FinishedProductSale).where(FinishedProductSale.id == order.finished_product_sale_id)
@@ -616,11 +703,18 @@ class ReturnService:
         if not sale:
             return
 
-        # 计算该销售单所有有效退货单的总金额
-        total_return = Decimal("0")
-        for ro in sale.return_orders:
-            if ro.status not in [ReturnStatus.CANCELLED, ReturnStatus.REJECTED]:
-                total_return += ro.total_amount or Decimal("0")
+        # 计算该销售单所有有效退货单的总金额（使用显式查询避免 lazy loading 问题）
+        from sqlalchemy import func as sa_func
+        total_return_result = await db.execute(
+            select(sa_func.coalesce(sa_func.sum(ReturnOrder.total_amount), Decimal("0")))
+            .where(
+                ReturnOrder.whole_fish_sale_id == order.whole_fish_sale_id if order.sale_type == "whole_fish" else
+                ReturnOrder.finished_product_sale_v2_id == order.finished_product_sale_v2_id if order.finished_product_sale_v2_id else
+                ReturnOrder.finished_product_sale_id == order.finished_product_sale_id,
+                ReturnOrder.status.notin_([ReturnStatus.CANCELLED, ReturnStatus.REJECTED])
+            )
+        )
+        total_return = total_return_result.scalar() or Decimal("0")
 
         # 加上旧的 aftersales 金额
         old_aftersales = Decimal("0")
@@ -632,32 +726,70 @@ class ReturnService:
         sale.after_sales_adjustment = total_return + old_aftersales
 
         # 重新计算净金额
-        sale.net_amount = max(
-            Decimal("0"),
-            sale.gross_amount
-            - (sale.scan_fee or Decimal("0"))
-            - (sale.rounding_adjustment or Decimal("0"))
-            - sale.after_sales_adjustment
-            - (sale.discount or Decimal("0"))
-            - (sale.commission or Decimal("0"))
-        )
+        if isinstance(sale, FinishedProductSaleV2):
+            # V2 字段名不同
+            sale.net_amount = max(
+                Decimal("0"),
+                (sale.total_amount or Decimal("0"))
+                - (sale.scan_fee or Decimal("0"))
+                - (sale.rounding or Decimal("0"))
+                - sale.after_sales_adjustment
+                - (sale.discount or Decimal("0"))
+                - (sale.commission or Decimal("0"))
+            )
+            # V2 status 是字符串
+            paid = sale.paid_amount or Decimal("0")
+            net = sale.net_amount or Decimal("0")
+            if paid >= net:
+                sale.status = "paid"
+            elif paid > 0:
+                # V2 没有 partial_paid 状态，保持 ordered 或 pending
+                if sale.status in ("ordered", "purchased", "arrived", "shipped"):
+                    pass  # 保持原有状态
+                else:
+                    sale.status = "pending"
+            else:
+                if sale.status in ("ordered", "purchased", "arrived", "shipped"):
+                    pass
+                else:
+                    sale.status = "pending"
 
-        # 更新收款状态
-        paid = sale.paid_amount or Decimal("0")
-        net = sale.net_amount or Decimal("0")
-        if paid >= net:
-            sale.status = SalesStatus.FULLY_PAID
-        elif paid > 0:
-            sale.status = SalesStatus.PARTIAL_PAID
+            # 如果有进行中的退货，标记为售后中（V2 没有 AFTER_SALES 枚举，用字符串）
+            has_active_return = any(
+                r.status in [ReturnStatus.DRAFT, ReturnStatus.PENDING_APPROVAL, ReturnStatus.APPROVED]
+                for r in sale.return_orders
+            )
+            if has_active_return:
+                # 保持原有状态或标记为售后处理中，这里我们用特殊标记或者保持现有状态
+                pass  # V2 状态机不支持 after_sales，保持原状态
         else:
-            sale.status = SalesStatus.PENDING
+            # V1 / 整鱼销售
+            sale.net_amount = max(
+                Decimal("0"),
+                sale.gross_amount
+                - (sale.scan_fee or Decimal("0"))
+                - (sale.rounding_adjustment or Decimal("0"))
+                - sale.after_sales_adjustment
+                - (sale.discount or Decimal("0"))
+                - (sale.commission or Decimal("0"))
+            )
 
-        # 如果有进行中的退货，标记为售后中
-        if any(
-            r.status in [ReturnStatus.DRAFT, ReturnStatus.PENDING_APPROVAL, ReturnStatus.APPROVED]
-            for r in sale.return_orders
-        ):
-            sale.status = SalesStatus.AFTER_SALES
+            # 更新收款状态
+            paid = sale.paid_amount or Decimal("0")
+            net = sale.net_amount or Decimal("0")
+            if paid >= net:
+                sale.status = SalesStatus.FULLY_PAID
+            elif paid > 0:
+                sale.status = SalesStatus.PARTIAL_PAID
+            else:
+                sale.status = SalesStatus.PENDING
+
+            # 如果有进行中的退货，标记为售后中
+            if any(
+                r.status in [ReturnStatus.DRAFT, ReturnStatus.PENDING_APPROVAL, ReturnStatus.APPROVED]
+                for r in sale.return_orders
+            ):
+                sale.status = SalesStatus.AFTER_SALES
 
     # ==================== 附件管理 ====================
 

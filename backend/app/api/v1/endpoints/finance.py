@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 
 from app.core.database import get_db
+from app.core.permissions import require_finance, require_admin, log_operation
 from app.schemas.finance import (
     ExchangeRecordCreate, ExchangeRecordUpdate, ExchangeRecordResponse,
     ImportTaxCreate, ImportTaxUpdate, ImportTaxResponse,
@@ -13,7 +14,7 @@ from app.schemas.finance import (
     ImportFeeCreate, ImportFeeUpdate,
 )
 from app.services.finance_service import FinanceService
-from app.models import BatchInvoice, Batch
+from app.models import BatchInvoice, Batch, User
 from sqlalchemy import select
 
 router = APIRouter()
@@ -175,6 +176,7 @@ async def update_bank_account(
 async def delete_bank_account(
     account_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
 ):
     """删除银行账户（软删除）"""
     from sqlalchemy import select
@@ -536,6 +538,7 @@ async def update_transaction(
 async def delete_transaction(
     record_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_finance),
 ):
     """删除交易记录"""
     from sqlalchemy import select
@@ -638,6 +641,7 @@ async def batch_unlock_transactions(
 async def lock_transaction(
     record_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_finance),
 ):
     """锁定交易记录"""
     from sqlalchemy import select
@@ -656,6 +660,7 @@ async def lock_transaction(
 async def unlock_transaction(
     record_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_finance),
 ):
     """解锁交易记录"""
     from sqlalchemy import select

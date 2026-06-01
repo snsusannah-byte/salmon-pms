@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_warehouse, require_admin, log_operation
 from app.schemas.warehouse_v2 import (
     WarehouseCreate,
     WarehouseListResponse,
@@ -28,7 +29,7 @@ from app.schemas.warehouse_v2 import (
     StockMovementListResponse,
 )
 from app.services.warehouse_v2_service import WarehouseV2Service
-from app.models import Product, ImportInvoice, WholeFishSale
+from app.models import Product, ImportInvoice, WholeFishSale, User
 from sqlalchemy import select
 
 router = APIRouter()
@@ -143,6 +144,7 @@ async def list_warehouses(
 async def create_warehouse(
     data: WarehouseCreate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
 ):
     wh = await WarehouseV2Service.create_warehouse(db, data.model_dump())
     return WarehouseResponse.model_validate(wh)
@@ -164,6 +166,7 @@ async def update_warehouse(
     warehouse_id: int,
     data: WarehouseUpdate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
 ):
     wh = await WarehouseV2Service.get_warehouse(db, warehouse_id)
     if not wh:
@@ -243,6 +246,7 @@ async def get_inbound(
 async def confirm_inbound(
     inbound_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_warehouse),
 ):
     inbound = await WarehouseV2Service.get_inbound(db, inbound_id)
     if not inbound:
@@ -258,6 +262,7 @@ async def confirm_inbound(
 async def cancel_inbound(
     inbound_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_warehouse),
 ):
     inbound = await WarehouseV2Service.get_inbound(db, inbound_id)
     if not inbound:
@@ -311,6 +316,7 @@ async def get_outbound(
 async def confirm_outbound(
     outbound_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_warehouse),
 ):
     outbound = await WarehouseV2Service.get_outbound(db, outbound_id)
     if not outbound:
@@ -326,6 +332,7 @@ async def confirm_outbound(
 async def cancel_outbound(
     outbound_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_warehouse),
 ):
     outbound = await WarehouseV2Service.get_outbound(db, outbound_id)
     if not outbound:
@@ -378,6 +385,7 @@ async def get_transfer(
 async def confirm_transfer(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_warehouse),
 ):
     transfer = await WarehouseV2Service.get_transfer(db, transfer_id)
     if not transfer:
@@ -397,6 +405,7 @@ async def confirm_transfer(
 async def cancel_transfer(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_warehouse),
 ):
     transfer = await WarehouseV2Service.get_transfer(db, transfer_id)
     if not transfer:

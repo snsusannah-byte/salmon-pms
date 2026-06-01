@@ -28,6 +28,8 @@ from app.models import (
     FinishedProductReceipt,
     FinishedProductAftersales,
     BankAccount,
+    TransactionRecord,
+    ReturnOrder,
 )
 from app.models.enums import StockMovementType
 
@@ -71,7 +73,7 @@ async def _get_or_create_product(db: AsyncSession, name: str, spec: str, unit: s
     product = result.scalar_one_or_none()
     if product:
         return product.id
-    
+
     # 创建新产品
     from datetime import datetime
     code = f"{category.upper()}-{datetime.now().strftime('%Y%m%d%H%M%S')}-{name[:10]}"
@@ -113,7 +115,7 @@ async def _update_stock_inbound(db: AsyncSession, warehouse_id: int, product_id:
     if total_cost:
         stock.total_cost = (stock.total_cost or Decimal("0")) + total_cost
     stock.last_in_date = _date.today()
-    
+
     # 创建库存变动记录
     movement = StockMovement(
         warehouse_id=warehouse_id,
@@ -142,12 +144,12 @@ async def _update_stock_outbound(db: AsyncSession, warehouse_id: int, product_id
         raise HTTPException(status_code=500, detail=f"仓库 {warehouse_id} 中没有该产品库存")
     if stock.available_qty < qty:
         raise HTTPException(status_code=400, detail=f"库存不足：可用 {stock.available_qty}，需要 {qty}")
-    
+
     qty_before = stock.current_qty
     stock.current_qty = stock.current_qty - qty
     stock.available_qty = stock.available_qty - qty
     stock.last_out_date = _date.today()
-    
+
     # 扣减批次剩余量（先进先出：按入库日期排序）
     from app.models.warehouse import StockInbound
     inbound_result = await db.execute(
@@ -172,7 +174,7 @@ async def _update_stock_outbound(db: AsyncSession, warehouse_id: int, product_id
             remaining_to_deduct = remaining_to_deduct - inbound.remaining_qty
             inbound.remaining_qty = Decimal("0")
             inbound.remaining_box_count = 0
-    
+
     # 创建库存变动记录
     movement = StockMovement(
         warehouse_id=warehouse_id,
@@ -191,14 +193,21 @@ async def _update_stock_outbound(db: AsyncSession, warehouse_id: int, product_id
     db.add(movement)
 
 async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) -> list:
-    """采购入库后自动推仓库入库记录 + 更新库存"""
+    """采购入库后自动推仓库入库记录 + 更新库存
+
+    以销定采（sale_id 有值）不走仓库入库流程，直接返回空列表。
+    """
+    # 以销定采：采购后直接发货给客户，不经过仓库存储
+    if order.sale_id:
+        return []
+
     # 根据采购类型决定仓库
     warehouse_code = "ZB-DOMESTIC" if order.order_type == "raw_material" else "FL-MATERIAL"
     warehouse_id = await _get_warehouse_id(db, warehouse_code)
     supplier_id = order.supplier_id
-    
+
     inbounds = []
-    
+
     # 预查询当天最大入库单号，避免循环内单号冲突
     today = order.purchase_date or _date.today()
     prefix = f"RK{today.strftime('%Y%m%d')}"
@@ -210,7 +219,7 @@ async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) 
     )
     last_inbound = last_result.scalar()
     last_num = int(last_inbound.split('-')[-1]) if last_inbound else 0
-    
+
     for i, product in enumerate(order.products):
         # 优先用 product_name 查找，和出库逻辑保持一致
         product_name = product.product_name or product.product_spec or "未命名产品"
@@ -221,15 +230,15 @@ async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) 
             unit="kg",
             category="raw_material"
         )
-        
+
         qty = Decimal(str(product.weight_kg or 0))
         unit_cost_val = Decimal(str(product.unit_price or 0))
         total_cost_val = Decimal(str(product.total_amount or 0))
-        
+
         # 生成入库单号（预分配，避免冲突）
         next_num = last_num + i + 1
         inbound_no = f"{prefix}-{next_num:03d}"
-        
+
         # 生成批次号：MMDD-加工厂缩写-NNN
         slaughter_date = order.slaughter_date or order.purchase_date or _date.today()
         factory_abbr = (product.factory or "")[:4] if product.factory else ""
@@ -259,12 +268,12 @@ async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) 
             remaining_box_count=product.box_count,
         )
         db.add(inbound)
-        
+
         # 更新库存数量
         await _update_stock_inbound(db, warehouse_id, product_id, qty, unit_cost_val, total_cost_val, ref_type="purchase_order", ref_no=order.purchase_no, ref_id=order.id, notes=f"采购入库单 {order.purchase_no} 自动入库")
-        
+
         inbounds.append(inbound_no)
-    
+
     await db.commit()
     return inbounds
 
@@ -274,7 +283,7 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
     # 整鱼出 ZB-DOMESTIC，成品出 FB-FISH
     warehouse_code = "ZB-DOMESTIC" if sale.sale_type == "whole_fish" else "FB-FISH"
     warehouse_id = await _get_warehouse_id(db, warehouse_code)
-    
+
     outbounds = []
     for product in sale.products:
         # 查找产品（同时匹配 product_name + product_spec，因为 name 不唯一）
@@ -301,7 +310,7 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
             )
             result = await db.execute(select(Product).where(Product.id == p_id))
             p = result.scalar_one()
-        
+
         # 生成出库单号
         today = _date.today()
         prefix = f"CK{today.strftime('%Y%m%d')}"
@@ -312,7 +321,7 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
         )
         count = result.scalar() or 0
         outbound_no = f"{prefix}-{count + len(outbounds) + 1:03d}"
-        
+
         outbound = StockOutbound(
             outbound_no=outbound_no,
             dest_type="sale",
@@ -329,13 +338,13 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
             notes=f"销售单 {sale.sale_no} 自动出库",
         )
         db.add(outbound)
-        
+
         # 扣减库存
         qty = Decimal(str(product.weight_kg or 0))
         await _update_stock_outbound(db, warehouse_id, p.id, qty, ref_type="finished_product_sale", ref_no=sale.sale_no, ref_id=sale.id, notes=f"销售单 {sale.sale_no} 自动出库")
-        
+
         outbounds.append(outbound_no)
-    
+
     await db.commit()
     return outbounds
 
@@ -350,14 +359,14 @@ async def api_get_products_by_name(category: Optional[str] = None, db: AsyncSess
         query = query.where(Product.category == category)
     result = await db.execute(query.order_by(Product.name, Product.spec))
     products = result.scalars().all()
-    
+
     # 按名称分组
     name_map: dict = {}
     for p in products:
         if p.name not in name_map:
             name_map[p.name] = {"id": p.id, "name": p.name, "unit": p.unit, "specs": []}
         name_map[p.name]["specs"].append({"id": p.id, "spec": p.spec, "code": p.code, "unit": p.unit})
-    
+
     return {"success": True, "data": list(name_map.values())}
 
 
@@ -379,7 +388,7 @@ async def api_get_customers(
     return {
         "success": True,
         "data": [
-            {"id": c.id, "name": c.name, "code": c.code, "contact_person": c.contact_person, "phone": c.phone}
+            {"id": c.id, "name": c.name, "code": c.code, "contact_person": c.contact_person, "phone": c.phone, "address": c.address, "logistics_info": c.logistics_info, "customer_level": c.customer_level}
             for c in customers
         ]
     }
@@ -389,16 +398,29 @@ async def api_get_customers(
 
 @router.get("/suppliers")
 async def api_get_suppliers(
+    company_type: Optional[str] = Query(None, description="公司类型过滤，如 supplier"),
+    supplier_category: Optional[str] = Query(None, description="供应商分类过滤，如 material_supply"),
     limit: int = Query(500, ge=1, le=1000),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取所有供应商（Company.type = supplier）"""
-    result = await db.execute(
-        select(Company)
-        .where(Company.type == CompanyType.SUPPLIER)
-        .order_by(Company.name)
-        .limit(limit)
-    )
+    """获取公司列表（支持既是客户又是供应商的场景）"""
+    from app.models.company import Company
+    from app.models.enums import CompanyType, SupplierCategory
+
+    query = select(Company).order_by(Company.name)
+
+    if company_type:
+        try:
+            ct = CompanyType(company_type)
+            query = query.where(Company.type == ct)
+        except ValueError:
+            pass
+
+    if supplier_category:
+        query = query.where(Company.supplier_category == supplier_category)
+
+    query = query.limit(limit)
+    result = await db.execute(query)
     suppliers = result.scalars().all()
     return {
         "success": True,
@@ -411,6 +433,8 @@ async def api_get_suppliers(
                 "phone": s.phone,
                 "address": s.address,
                 "notes": s.notes,
+                "company_type": s.type.value if s.type else None,
+                "supplier_category": s.supplier_category,
             }
             for s in suppliers
         ]
@@ -471,6 +495,7 @@ async def api_get_purchase_orders(db: AsyncSession = Depends(get_db)):
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
                     "unit_price": float(p.unit_price) if p.unit_price else 0,
                     "total_amount": float(p.total_amount) if p.total_amount else 0,
+                    "unit": p.unit or "kg",
                 }
                 for p in products
             ],
@@ -573,7 +598,7 @@ async def api_create_purchase_order(data: dict, db: AsyncSession = Depends(get_d
             except Exception:
                 pass
         purchase_no = f"CG{date_str}-{str(max_seq + 1).zfill(3)}"
-    
+
     order = PurchaseOrderV2(
         purchase_no=purchase_no,
         purchase_date=_parse_date(data.get("purchase_date")),
@@ -590,7 +615,7 @@ async def api_create_purchase_order(data: dict, db: AsyncSession = Depends(get_d
     )
     db.add(order)
     await db.flush()
-    
+
     for p in data.get("products", []):
         product = PurchaseOrderProductV2(
             purchase_order_id=order.id,
@@ -599,11 +624,12 @@ async def api_create_purchase_order(data: dict, db: AsyncSession = Depends(get_d
             factory=p.get("factory"),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
+            unit=p.get("unit"),
             unit_price=Decimal(str(p.get("unit_price", 0))),
             total_amount=Decimal(str(p.get("total_amount", 0))),
         )
         db.add(product)
-    
+
     await db.commit()
 
     # 重新加载 order 及其 products（async SQLAlchemy 不支持懒加载）
@@ -663,7 +689,7 @@ async def api_update_purchase_order(order_id: int, data: dict, db: AsyncSession 
     order = result.scalar_one_or_none()
     if not order:
         raise HTTPException(status_code=404, detail="采购入库单不存在")
-    
+
     order.purchase_no = data.get("purchase_no", order.purchase_no)
     order.purchase_date = _parse_date(data.get("purchase_date")) or order.purchase_date
     order.supplier_id = data.get("supplier_id", order.supplier_id)
@@ -675,7 +701,7 @@ async def api_update_purchase_order(order_id: int, data: dict, db: AsyncSession 
     order.remark = data.get("remark", order.remark)
     order.status = data.get("status", order.status)
     order.sale_id = data.get("sale_id", order.sale_id)  # 以销定采：更新关联销售单
-    
+
     # 删除旧明细
     await db.execute(
         select(PurchaseOrderProductV2).where(PurchaseOrderProductV2.purchase_order_id == order_id)
@@ -685,19 +711,22 @@ async def api_update_purchase_order(order_id: int, data: dict, db: AsyncSession 
     )
     for p in old_products.scalars().all():
         await db.delete(p)
-    
+
     # 创建新明细
     for p in data.get("products", []):
         product = PurchaseOrderProductV2(
             purchase_order_id=order.id,
+            product_name=p.get("product_name"),
             product_spec=p.get("product_spec", ""),
+            factory=p.get("factory"),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
+            unit=p.get("unit"),
             unit_price=Decimal(str(p.get("unit_price", 0))),
             total_amount=Decimal(str(p.get("total_amount", 0))),
         )
         db.add(product)
-    
+
     await db.commit()
 
     # 重新加载 order 及其 products
@@ -813,13 +842,29 @@ async def api_delete_purchase_order(order_id: int, db: AsyncSession = Depends(ge
 # ==================== 成品销售管理 ====================
 
 @router.get("/finished-product-sales")
-async def api_get_finished_sales(db: AsyncSession = Depends(get_db)):
+async def api_get_finished_sales(
+    sale_type: Optional[str] = Query(None, description="销售类型: whole_fish/finished_product"),
+    ids: Optional[str] = Query(None, description="按ID列表过滤，逗号分隔"),
+    db: AsyncSession = Depends(get_db)
+):
     """获取所有成品销售记录（以销定采：包含关联采购单信息）"""
     from app.models.finished_product import FinishedProductReceipt
     from sqlalchemy import func
 
-    result = await db.execute(select(FinishedProductSaleV2).order_by(FinishedProductSaleV2.created_at.desc()))
+    query = select(FinishedProductSaleV2)
+    if ids:
+        try:
+            id_list = [int(x.strip()) for x in ids.split(",") if x.strip()]
+            if id_list:
+                query = query.where(FinishedProductSaleV2.id.in_(id_list))
+        except ValueError:
+            pass
+    result = await db.execute(query.order_by(FinishedProductSaleV2.created_at.desc()))
     sales = result.scalars().all()
+
+    # 按 sale_type 过滤
+    if sale_type:
+        sales = [s for s in sales if s.sale_type == sale_type]
 
     # 批量查询关联采购单（以销定采）
     sale_ids = [s.id for s in sales]
@@ -844,10 +889,13 @@ async def api_get_finished_sales(db: AsyncSession = Depends(get_db)):
         )
         first_product = products_result.scalar_one_or_none()
 
-        # 查已收金额
+        # 查已收金额（支持 sale_v2_id）
         receipt_result = await db.execute(
             select(func.sum(FinishedProductReceipt.amount))
-            .where(FinishedProductReceipt.sale_id == s.id)
+            .where(
+                (FinishedProductReceipt.sale_id == s.id) |
+                (FinishedProductReceipt.sale_v2_id == s.id)
+            )
         )
         paid_amount = float(receipt_result.scalar() or 0)
 
@@ -863,17 +911,16 @@ async def api_get_finished_sales(db: AsyncSession = Depends(get_db)):
         # 以销定采：批次号直接取销售单上的
         batch_no = s.batch_no or ""
 
-        # 以销定采：关联采购单信息
+        # 以销定采状态流转（独立于销售单的 status/paid 状态）
         related_purchases = purchase_map.get(s.id, [])
         purchase_count = len(related_purchases)
         purchase_total_weight = sum(float(po.total_weight or 0) for po in related_purchases)
         purchase_total_amount = sum(float(po.total_amount or 0) for po in related_purchases)
 
-        # 以销定采状态流转
-        procurement_status = s.status
-        if procurement_status == "pending" and purchase_count > 0:
+        # 采购状态：只看采购单，不看收款状态
+        procurement_status = "pending"
+        if purchase_count > 0:
             procurement_status = "ordered"
-        if procurement_status in ["ordered", "purchased"] and purchase_count > 0:
             # 检查是否全部到货
             all_arrived = all(po.status in ["completed", "arrived"] for po in related_purchases)
             if all_arrived:
@@ -915,6 +962,7 @@ async def api_get_finished_sales(db: AsyncSession = Depends(get_db)):
             "factory": s.factory,
             "products": [
                 {
+                    "variant_id": p.variant_id,
                     "product_spec": p.product_spec,
                     "box_count": p.box_count,
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
@@ -938,7 +986,7 @@ async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)
     sale = result.scalar_one_or_none()
     if not sale:
         raise HTTPException(status_code=404, detail="销售记录不存在")
-    
+
     products_result = await db.execute(
         select(FinishedSaleProductV2).where(FinishedSaleProductV2.sale_id == sale_id)
     )
@@ -987,7 +1035,19 @@ async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)
         select(FinishedProductReceipt).where(FinishedProductReceipt.sale_v2_id == sale_id)
     )
     receipts = receipt_result.scalars().all()
-    
+
+    # 查售后记录
+    aftersales_result = await db.execute(
+        select(FinishedProductAftersales).where(FinishedProductAftersales.sale_id == sale_id)
+    )
+    aftersales = aftersales_result.scalars().all()
+
+    # 查退货单（关联 finished_product_sale_v2_id）
+    return_result = await db.execute(
+        select(ReturnOrder).where(ReturnOrder.finished_product_sale_v2_id == sale_id)
+    )
+    return_orders = return_result.scalars().all()
+
     return {
         "success": True,
         "data": {
@@ -1020,6 +1080,7 @@ async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)
             "products": [
                 {
                     "id": p.id,
+                    "variant_id": p.variant_id,
                     "product_spec": p.product_spec,
                     "box_count": p.box_count,
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
@@ -1048,7 +1109,7 @@ async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)
             "receipts": [
                 {
                     "id": r.id,
-                    "sale_id": r.sale_id,
+                    "sale_id": r.sale_v2_id,
                     "receipt_date": r.receipt_date.isoformat() if r.receipt_date else None,
                     "amount": float(r.amount) if r.amount else 0,
                     "payment_method": r.payment_method or "bank_transfer",
@@ -1057,6 +1118,33 @@ async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)
                     "notes": r.notes,
                 }
                 for r in receipts
+            ],
+            "aftersales": [
+                {
+                    "id": a.id,
+                    "sale_id": a.sale_id,
+                    "record_date": a.record_date.isoformat() if a.record_date else None,
+                    "type": a.type,
+                    "amount": float(a.amount) if a.amount else 0,
+                    "reason": a.reason,
+                    "status": a.status,
+                    "notes": a.notes,
+                }
+                for a in aftersales
+            ],
+            "return_orders": [
+                {
+                    "id": ro.id,
+                    "return_no": ro.return_no,
+                    "return_date": ro.return_date.isoformat() if ro.return_date else None,
+                    "status": ro.status.value if ro.status else "draft",
+                    "total_weight_kg": float(ro.total_weight_kg) if ro.total_weight_kg else 0,
+                    "total_amount": float(ro.total_amount) if ro.total_amount else 0,
+                    "refund_amount": float(ro.refund_amount) if ro.refund_amount else 0,
+                    "problem_description": ro.problem_description,
+                    "customer_feedback": ro.customer_feedback,
+                }
+                for ro in return_orders
             ],
         }
     }
@@ -1083,13 +1171,13 @@ async def api_create_finished_sale(data: dict, db: AsyncSession = Depends(get_db
             except Exception:
                 pass
         sale_no = f"{prefix}{date_str}-{str(max_seq + 1).zfill(3)}"
-    
+
     # 以销定采：汇总产品明细
     products = data.get("products", [])
     total_amount = sum(Decimal(str(p.get("total_amount", 0))) for p in products)
     total_weight = sum(float(p.get("weight_kg", 0)) for p in products)
     total_boxes = sum(p.get("box_count", 0) for p in products)
-    
+
     # 费用
     discount = Decimal(str(data.get("discount", 0)))
     scan_fee = Decimal(str(data.get("scan_fee", 0)))
@@ -1097,13 +1185,13 @@ async def api_create_finished_sale(data: dict, db: AsyncSession = Depends(get_db
     after_sales_adjustment = Decimal(str(data.get("after_sales_adjustment", 0)))
     commission = Decimal(str(data.get("commission", 0)))
     net_amount = total_amount - discount - scan_fee - rounding - after_sales_adjustment - commission
-    
+
     # 以销定采：生成批次号（MMDD-加工厂缩写-NNN）
     from datetime import date as _date
     today = _date.today()
     order_factory = data.get("factory", "")
     batch_no = f"{today.strftime('%m%d')}-{order_factory[:4] if order_factory else 'UNK'}-{sale_no.split('-')[-1]}"
-    
+
     sale = FinishedProductSaleV2(
         sale_no=sale_no,
         sale_type=data.get("sale_type", "whole_fish"),
@@ -1133,10 +1221,11 @@ async def api_create_finished_sale(data: dict, db: AsyncSession = Depends(get_db
     )
     db.add(sale)
     await db.flush()
-    
+
     for p in products:
         product = FinishedSaleProductV2(
             sale_id=sale.id,
+            variant_id=p.get("variant_id"),
             product_spec=p.get("product_spec", ""),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
@@ -1147,7 +1236,7 @@ async def api_create_finished_sale(data: dict, db: AsyncSession = Depends(get_db
             after_sales_adjustment=Decimal(str(p.get("after_sales_adjustment", 0))),
         )
         db.add(product)
-    
+
     await db.commit()
     return {"success": True, "data": {"id": sale.id, "sale_no": sale.sale_no, "batch_no": batch_no}}
 
@@ -1155,43 +1244,58 @@ async def api_create_finished_sale(data: dict, db: AsyncSession = Depends(get_db
 
 @router.put("/finished-product-sales/{sale_id}")
 async def api_update_finished_sale(sale_id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    """更新成品销售记录"""
+    """更新成品销售记录（自动重算 actual_amount / net_amount）"""
     result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
     sale = result.scalar_one_or_none()
     if not sale:
         raise HTTPException(status_code=404, detail="销售记录不存在")
-    
+
+    # 直接字段更新
     for field in ["sale_no", "sale_type", "source_id", "source_no", "customer", "salesperson",
                   "product_name", "factory", "delivery_address", "logistics_info", "remark"]:
         if field in data:
             setattr(sale, field, data[field])
-    
+
     if "sale_date" in data:
         sale.sale_date = _parse_date(data["sale_date"])
-    
+
     if "slaughter_date" in data:
         sale.slaughter_date = _parse_date(data["slaughter_date"])
-    
-    for field in ["quantity", "weight", "unit_price", "total_amount", "discount", "scan_fee",
-                  "rounding", "after_sales_adjustment", "commission", "actual_amount", "net_amount"]:
+
+    for field in ["quantity", "weight", "unit_price", "total_amount"]:
         if field in data:
             val = data[field]
             setattr(sale, field, Decimal(str(val)) if val is not None else None)
-    
+
     if "paid" in data:
         sale.paid = 1 if data["paid"] else 0
-    
+
+    # 费用/调整字段（触发自动重算）
+    cost_fields = ["discount", "scan_fee", "rounding", "after_sales_adjustment", "commission"]
+    recalc_needed = any(field in data for field in cost_fields)
+    for field in cost_fields:
+        if field in data:
+            val = data[field]
+            setattr(sale, field, Decimal(str(val)) if val is not None else Decimal("0"))
+
+    # 自动重算 actual_amount / net_amount
+    if recalc_needed:
+        total = sale.total_amount or Decimal("0")
+        sale.actual_amount = total - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - (sale.rounding or Decimal("0"))
+        sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
+
     # 删除旧明细
     old_products = await db.execute(
         select(FinishedSaleProductV2).where(FinishedSaleProductV2.sale_id == sale_id)
     )
     for p in old_products.scalars().all():
         await db.delete(p)
-    
+
     # 创建新明细
     for p in data.get("products", []):
         product = FinishedSaleProductV2(
             sale_id=sale.id,
+            variant_id=p.get("variant_id"),
             product_spec=p.get("product_spec", ""),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
@@ -1202,19 +1306,18 @@ async def api_update_finished_sale(sale_id: int, data: dict, db: AsyncSession = 
             after_sales_adjustment=Decimal(str(p.get("after_sales_adjustment", 0))),
         )
         db.add(product)
-    
+
     await db.commit()
     return {"success": True}
 
 
-@router.delete("/finished-product-sales/{sale_id}")
 @router.delete("/finished-product-sales/{sale_id}")
 async def api_delete_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)):
     """删除成品销售记录（以销定采：不需要回退库存）"""
     from sqlalchemy.orm import selectinload
     from app.models.finished_product import FinishedSaleProductV2
     from sqlalchemy import delete as sa_delete
-    
+
     result = await db.execute(
         select(FinishedProductSaleV2)
         .options(selectinload(FinishedProductSaleV2.products))
@@ -1223,26 +1326,122 @@ async def api_delete_finished_sale(sale_id: int, db: AsyncSession = Depends(get_
     sale = result.scalar_one_or_none()
     if not sale:
         raise HTTPException(status_code=404, detail="销售记录不存在")
-    
-    # 1. 删除收款记录
+
+    # 先查出所有收款记录（用于删除关联交易流水 & 恢复余额抵扣）
+    receipt_result = await db.execute(
+        select(FinishedProductReceipt).where(FinishedProductReceipt.sale_v2_id == sale_id)
+    )
+    receipts = receipt_result.scalars().all()
+
+    # 1. 同步删除关联交易流水
+    for receipt in receipts:
+        if receipt.transaction_id:
+            trans_result = await db.execute(
+                select(TransactionRecord).where(TransactionRecord.id == receipt.transaction_id)
+            )
+            transaction = trans_result.scalar_one_or_none()
+            if transaction:
+                await db.delete(transaction)
+
+    # 2. 余额抵扣：恢复客户预付余额
+    for receipt in receipts:
+        if receipt.payment_method == "balance" and receipt.amount and receipt.amount > 0 and sale.customer:
+            company_result = await db.execute(
+                select(Company).where(Company.name == sale.customer, Company.type == CompanyType.CUSTOMER)
+            )
+            company = company_result.scalar_one_or_none()
+            if company:
+                company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + receipt.amount
+
+    # 3. 删除收款记录
     await db.execute(
         sa_delete(FinishedProductReceipt).where(FinishedProductReceipt.sale_v2_id == sale_id)
     )
-    
-    # 2. 删除售后记录
+
+    # 4. 删除售后记录
     await db.execute(
         sa_delete(FinishedProductAftersales).where(FinishedProductAftersales.sale_id == sale_id)
     )
-    
-    # 3. 删除产品明细
+
+    # 5. 删除产品明细
     await db.execute(
         sa_delete(FinishedSaleProductV2).where(FinishedSaleProductV2.sale_id == sale_id)
     )
-    
-    # 4. 删除销售单
+
+    # 6. 删除销售单
     await db.delete(sale)
     await db.commit()
     return {"success": True}
+
+
+@router.post("/finished-product-sales/batch-delete")
+async def api_batch_delete_finished_sales(data: dict, db: AsyncSession = Depends(get_db)):
+    """批量删除成品销售记录"""
+    from sqlalchemy.orm import selectinload
+    from app.models.finished_product import FinishedSaleProductV2
+    from sqlalchemy import delete as sa_delete
+
+    ids = data.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="未提供删除ID列表")
+
+    deleted = 0
+    errors = []
+    for sale_id in ids:
+        try:
+            result = await db.execute(
+                select(FinishedProductSaleV2)
+                .options(selectinload(FinishedProductSaleV2.products))
+                .where(FinishedProductSaleV2.id == sale_id)
+            )
+            sale = result.scalar_one_or_none()
+            if not sale:
+                errors.append(f"销售记录 #{sale_id} 不存在")
+                continue
+
+            # 先查出所有收款记录（用于删除关联交易流水 & 恢复余额抵扣）
+            receipt_result = await db.execute(
+                select(FinishedProductReceipt).where(FinishedProductReceipt.sale_v2_id == sale_id)
+            )
+            receipts = receipt_result.scalars().all()
+
+            # 同步删除关联交易流水
+            for receipt in receipts:
+                if receipt.transaction_id:
+                    trans_result = await db.execute(
+                        select(TransactionRecord).where(TransactionRecord.id == receipt.transaction_id)
+                    )
+                    transaction = trans_result.scalar_one_or_none()
+                    if transaction:
+                        await db.delete(transaction)
+
+            # 余额抵扣：恢复客户预付余额
+            for receipt in receipts:
+                if receipt.payment_method == "balance" and receipt.amount and receipt.amount > 0 and sale.customer:
+                    company_result = await db.execute(
+                        select(Company).where(Company.name == sale.customer, Company.type == CompanyType.CUSTOMER)
+                    )
+                    company = company_result.scalar_one_or_none()
+                    if company:
+                        company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + receipt.amount
+
+            # 删除关联记录
+            await db.execute(
+                sa_delete(FinishedProductReceipt).where(FinishedProductReceipt.sale_v2_id == sale_id)
+            )
+            await db.execute(
+                sa_delete(FinishedProductAftersales).where(FinishedProductAftersales.sale_id == sale_id)
+            )
+            await db.execute(
+                sa_delete(FinishedSaleProductV2).where(FinishedSaleProductV2.sale_id == sale_id)
+            )
+            await db.delete(sale)
+            deleted += 1
+        except Exception as e:
+            errors.append(f"销售记录 #{sale_id} 删除失败: {str(e)}")
+
+    await db.commit()
+    return {"success": True, "deleted": deleted, "errors": errors}
 
 
 
@@ -1275,16 +1474,52 @@ async def api_list_finished_sale_receipts(sale_id: int, db: AsyncSession = Depen
 
 @router.post("/finished-product-sales/{sale_id}/receipts")
 async def api_create_finished_sale_receipt(sale_id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    """创建成品销售收款记录"""
+    """创建成品销售收款记录（同步创建交易流水）"""
+    from app.models.enums import TransactionType, TransactionCategory
+
     sale_result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
     sale = sale_result.scalar_one_or_none()
     if not sale:
         raise HTTPException(status_code=404, detail="销售记录不存在")
 
+    received_amount = Decimal(str(data.get("amount", 0)))
+    if received_amount <= 0:
+        raise HTTPException(status_code=400, detail="收款金额必须大于0")
+
+    # 余额抵扣：校验客户余额
+    is_balance_payment = data.get("payment_method") == "balance"
+    company = None
+    if is_balance_payment:
+        company_result = await db.execute(
+            select(Company).where(
+                Company.name == sale.customer,
+                Company.type == CompanyType.CUSTOMER
+            )
+        )
+        company = company_result.scalar_one_or_none()
+        if not company:
+            raise HTTPException(status_code=404, detail="客户不存在，无法使用余额抵扣")
+        available_balance = Decimal(str(company.prepaid_balance or 0))
+        if available_balance < received_amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"客户预付款余额不足（当前余额 ¥{available_balance}，需扣款 ¥{received_amount}）"
+            )
+        data["bank_account_id"] = None
+
+    # 抹零处理
+    user_rounding = Decimal(str(data.pop("rounding_adjustment", 0) or 0))
+    if user_rounding > 0:
+        sale.rounding = (sale.rounding or Decimal("0")) + user_rounding
+        # 抹零变化后重算 actual_amount / net_amount
+        sale.actual_amount = sale.total_amount - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - (sale.rounding or Decimal("0"))
+        sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
+        await db.flush()
+
     receipt = FinishedProductReceipt(
         sale_v2_id=sale_id,
         receipt_date=_parse_date(data.get("receipt_date")),
-        amount=Decimal(str(data.get("amount", 0))),
+        amount=received_amount,
         payment_method=data.get("payment_method", "bank_transfer"),
         bank_account_id=data.get("bank_account_id"),
         reference_no=data.get("reference_no"),
@@ -1292,6 +1527,36 @@ async def api_create_finished_sale_receipt(sale_id: int, data: dict, db: AsyncSe
     )
     db.add(receipt)
     await db.flush()
+
+    # 非余额抵扣：同步创建交易流水
+    if not is_balance_payment:
+        bank_account_id = data.get("bank_account_id")
+        user_notes = data.get("notes")
+        desc = "销售收款"
+        if user_notes:
+            desc = f"{desc} - {user_notes}"
+
+        transaction = TransactionRecord(
+            transaction_date=_parse_date(data.get("receipt_date")),
+            type=TransactionType.INCOME,
+            category=TransactionCategory.MAIN_BUSINESS_REVENUE,
+            amount=received_amount,
+            currency="CNY",
+            to_account_id=bank_account_id,
+            counterparty_name=sale.customer,
+            reference_no=data.get("reference_no") or sale.sale_no or f"#{sale.id}",
+            description=desc,
+            notes=user_notes,
+            is_confirmed=True,
+        )
+        transaction.related_sale_ids = [sale.id]
+        db.add(transaction)
+        await db.flush()
+        receipt.transaction_id = transaction.id
+
+    # 余额抵扣：扣减客户预付余额
+    if is_balance_payment and company:
+        company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) - received_amount
 
     # 重新计算已收金额
     receipt_result = await db.execute(
@@ -1329,7 +1594,7 @@ async def api_create_finished_sale_receipt(sale_id: int, data: dict, db: AsyncSe
 
 @router.delete("/finished-product-sales/{sale_id}/receipts/{receipt_id}")
 async def api_delete_finished_sale_receipt(sale_id: int, receipt_id: int, db: AsyncSession = Depends(get_db)):
-    """删除成品销售收款记录"""
+    """删除成品销售收款记录（同步删除关联交易流水）"""
     receipt_result = await db.execute(
         select(FinishedProductReceipt)
         .where(FinishedProductReceipt.id == receipt_id, FinishedProductReceipt.sale_v2_id == sale_id)
@@ -1337,6 +1602,27 @@ async def api_delete_finished_sale_receipt(sale_id: int, receipt_id: int, db: As
     receipt = receipt_result.scalar_one_or_none()
     if not receipt:
         raise HTTPException(status_code=404, detail="收款记录不存在")
+
+    # 同步删除关联的交易流水
+    if receipt.transaction_id:
+        trans_result = await db.execute(
+            select(TransactionRecord).where(TransactionRecord.id == receipt.transaction_id)
+        )
+        transaction = trans_result.scalar_one_or_none()
+        if transaction:
+            await db.delete(transaction)
+
+    # 余额抵扣：恢复客户预付余额
+    if receipt.payment_method == "balance" and receipt.amount and receipt.amount > 0:
+        sale_result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
+        sale = sale_result.scalar_one_or_none()
+        if sale and sale.customer:
+            company_result = await db.execute(
+                select(Company).where(Company.name == sale.customer, Company.type == CompanyType.CUSTOMER)
+            )
+            company = company_result.scalar_one_or_none()
+            if company:
+                company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + receipt.amount
 
     await db.delete(receipt)
     await db.flush()
@@ -1360,6 +1646,115 @@ async def api_delete_finished_sale_receipt(sale_id: int, receipt_id: int, db: As
             sale.paid = 1
         else:
             sale.paid = 0
+
+    await db.commit()
+    return {"success": True}
+
+
+# ==================== 售后记录 ====================
+
+@router.get("/finished-product-sales/{sale_id}/aftersales")
+async def api_list_finished_sale_aftersales(sale_id: int, db: AsyncSession = Depends(get_db)):
+    """成品销售售后记录列表"""
+    result = await db.execute(
+        select(FinishedProductAftersales).where(FinishedProductAftersales.sale_id == sale_id)
+    )
+    records = result.scalars().all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "id": r.id,
+                "sale_id": r.sale_id,
+                "record_date": r.record_date.isoformat() if r.record_date else None,
+                "type": r.type,
+                "amount": float(r.amount) if r.amount else 0,
+                "reason": r.reason,
+                "status": r.status,
+                "notes": r.notes,
+            }
+            for r in records
+        ],
+    }
+
+
+@router.post("/finished-product-sales/{sale_id}/aftersales")
+async def api_create_finished_sale_aftersales(sale_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+    """创建成品销售售后记录（同步更新销售单 after_sales_adjustment 和 net_amount）"""
+    sale_result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
+    sale = sale_result.scalar_one_or_none()
+    if not sale:
+        raise HTTPException(status_code=404, detail="销售记录不存在")
+
+    record = FinishedProductAftersales(
+        sale_id=sale_id,
+        record_date=_parse_date(data.get("record_date")),
+        type=data.get("type", "refund"),
+        amount=Decimal(str(data.get("amount", 0))),
+        reason=data.get("reason"),
+        status=data.get("status", "pending"),
+        notes=data.get("notes"),
+    )
+    db.add(record)
+    await db.flush()
+
+    # 重新汇总售后调整金额
+    agg_result = await db.execute(
+        select(func.sum(FinishedProductAftersales.amount))
+        .where(FinishedProductAftersales.sale_id == sale_id)
+    )
+    total_aftersales = agg_result.scalar() or Decimal("0")
+    sale.after_sales_adjustment = total_aftersales
+
+    # 重算 net_amount
+    total = sale.total_amount or Decimal("0")
+    sale.actual_amount = total - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - (sale.rounding or Decimal("0"))
+    sale.net_amount = sale.actual_amount - total_aftersales - (sale.commission or Decimal("0"))
+
+    await db.commit()
+    return {
+        "success": True,
+        "data": {
+            "id": record.id,
+            "sale_id": record.sale_id,
+            "record_date": record.record_date.isoformat() if record.record_date else None,
+            "type": record.type,
+            "amount": float(record.amount) if record.amount else 0,
+            "reason": record.reason,
+            "status": record.status,
+            "notes": record.notes,
+        },
+    }
+
+
+@router.delete("/finished-product-sales/{sale_id}/aftersales/{record_id}")
+async def api_delete_finished_sale_aftersales(sale_id: int, record_id: int, db: AsyncSession = Depends(get_db)):
+    """删除成品销售售后记录（同步更新销售单 after_sales_adjustment 和 net_amount）"""
+    result = await db.execute(
+        select(FinishedProductAftersales)
+        .where(FinishedProductAftersales.id == record_id, FinishedProductAftersales.sale_id == sale_id)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail="售后记录不存在")
+
+    await db.delete(record)
+    await db.flush()
+
+    # 重新汇总售后调整金额
+    agg_result = await db.execute(
+        select(func.sum(FinishedProductAftersales.amount))
+        .where(FinishedProductAftersales.sale_id == sale_id)
+    )
+    total_aftersales = agg_result.scalar() or Decimal("0")
+
+    sale_result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
+    sale = sale_result.scalar_one_or_none()
+    if sale:
+        sale.after_sales_adjustment = total_aftersales
+        total = sale.total_amount or Decimal("0")
+        sale.actual_amount = total - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - (sale.rounding or Decimal("0"))
+        sale.net_amount = sale.actual_amount - total_aftersales - (sale.commission or Decimal("0"))
 
     await db.commit()
     return {"success": True}

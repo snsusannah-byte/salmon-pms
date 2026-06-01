@@ -10,15 +10,16 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, desc
 
 from app.core.database import get_db
+from app.core.permissions import require_admin, require_finance, log_operation
 from app.core.config import settings
 from app.models import (
     ReturnOrder, ReturnItem, ReturnAttachment,
     ReturnStatus, RefundMethod, ReturnAttachmentType,
     Company, BankAccount, User,
-    WholeFishSale, FinishedProductSale,
+    WholeFishSale, FinishedProductSale, FinishedProductSaleV2,
 )
 from app.schemas.returns import (
     ReturnOrderCreate, ReturnOrderUpdate, ReturnOrderResponse,
@@ -74,6 +75,9 @@ async def _build_return_response(db: AsyncSession, order: ReturnOrder) -> Return
     if order.whole_fish_sale_id:
         r = await db.execute(select(WholeFishSale.sale_no).where(WholeFishSale.id == order.whole_fish_sale_id))
         sale_no = r.scalar()
+    elif order.finished_product_sale_v2_id:
+        r = await db.execute(select(FinishedProductSaleV2.sale_no).where(FinishedProductSaleV2.id == order.finished_product_sale_v2_id))
+        sale_no = r.scalar()
     elif order.finished_product_sale_id:
         r = await db.execute(select(FinishedProductSale.sale_no).where(FinishedProductSale.id == order.finished_product_sale_id))
         sale_no = r.scalar()
@@ -113,6 +117,7 @@ async def _build_return_response(db: AsyncSession, order: ReturnOrder) -> Return
         sale_type=order.sale_type,
         whole_fish_sale_id=order.whole_fish_sale_id,
         finished_product_sale_id=order.finished_product_sale_id,
+        finished_product_sale_v2_id=order.finished_product_sale_v2_id,
         return_date=order.return_date,
         customer_id=order.customer_id,
         processing_plant_id=order.processing_plant_id,
@@ -151,6 +156,7 @@ async def list_returns(
     start_date: Optional[date] = Query(None, description="开始日期"),
     end_date: Optional[date] = Query(None, description="结束日期"),
     search: Optional[str] = Query(None, description="搜索退货单号/客户/问题描述"),
+    finished_product_sale_v2_id: Optional[int] = Query(None, description="成品销售单v2 ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -165,6 +171,7 @@ async def list_returns(
         start_date=start_date,
         end_date=end_date,
         search=search,
+        finished_product_sale_v2_id=finished_product_sale_v2_id,
         skip=skip,
         limit=limit,
     )
@@ -183,6 +190,9 @@ async def create_return(
     # TODO: 从认证中获取当前用户ID
     created_by_id = None
     payload = data.model_dump()
+    # 如果是成品销售(v2)，传递 finished_product_sale_v2_id
+    if payload.get("sale_type") == "finished_product" and payload.get("finished_product_sale_v2_id"):
+        payload["finished_product_sale_v2_id"] = payload.pop("finished_product_sale_v2_id")
     order = await ReturnService.create_return_order(db, payload, created_by_id)
     return await _build_return_response(db, order)
 
@@ -216,6 +226,9 @@ async def update_return(
     # 检查关联销售单的批次是否锁定
     if order.whole_fish_sale_id:
         await _check_batch_locked(db, sale_id=order.whole_fish_sale_id)
+    elif order.finished_product_sale_v2_id:
+        # V2 销售单没有 batch_id，跳过批次锁定检查
+        pass
     elif order.finished_product_sale_id:
         sale = await db.get(FinishedProductSale, order.finished_product_sale_id)
         if sale and sale.batch_id:
@@ -242,6 +255,9 @@ async def delete_return(
     # 检查关联销售单的批次是否锁定
     if order.whole_fish_sale_id:
         await _check_batch_locked(db, sale_id=order.whole_fish_sale_id)
+    elif order.finished_product_sale_v2_id:
+        # V2 销售单没有 batch_id，跳过批次锁定检查
+        pass
     elif order.finished_product_sale_id:
         sale = await db.get(FinishedProductSale, order.finished_product_sale_id)
         if sale and sale.batch_id:
@@ -464,10 +480,18 @@ async def list_returns_by_sale(
             .order_by(desc(ReturnOrder.return_date))
         )
     elif sale_type == "finished_product":
+        # 先尝试查 v2
         result = await db.execute(
-            select(ReturnOrder).where(ReturnOrder.finished_product_sale_id == sale_id)
+            select(ReturnOrder).where(ReturnOrder.finished_product_sale_v2_id == sale_id)
             .order_by(desc(ReturnOrder.return_date))
         )
+        # 如果没结果，再查 v1
+        orders = result.scalars().all()
+        if not orders:
+            result = await db.execute(
+                select(ReturnOrder).where(ReturnOrder.finished_product_sale_id == sale_id)
+                .order_by(desc(ReturnOrder.return_date))
+            )
     else:
         raise HTTPException(status_code=400, detail="销售类型必须是 whole_fish 或 finished_product")
 

@@ -27,6 +27,13 @@ import { BrandsPage } from "@/pages/BrandsPage";
 import { FinishedProductsPage } from "@/pages/FinishedProductsPage";
 import { TraceabilityPage } from "@/pages/TraceabilityPage";
 import ReturnsPage from "@/pages/ReturnsPage";
+import MaterialPurchasePage from "@/pages/MaterialPurchasePage";
+
+// 成品定义 V2 管理页面
+import { ProductSeriesPage } from "@/pages/ProductSeriesPage";
+import { ProductTemplatePage } from "@/pages/ProductTemplatePage";
+import { SkuPricingPage } from "@/pages/SkuPricingPage";
+import { AuditLogsPage } from "@/pages/AuditLogsPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 
 // V4 迁移页面 (salmon-finance-v4)
@@ -55,8 +62,10 @@ const router = createBrowserRouter([
       { path: "batches", element: <BatchesPage /> },
       { path: "whole-fish-sales", element: <WholeFishSalesPage /> },
       { path: "finished-product-sales", element: <FinishedProductSales /> },
+      { path: "made-to-order", element: <FinishedProductSales key="made-to-order" /> },
       { path: "production", element: <ProductionManagementPage /> },
       { path: "materials", element: <MaterialManagementPage /> },
+      { path: "material-purchases", element: <MaterialPurchasePage /> },
       { path: "warehouse", element: <Navigate to="/warehouse-v2" replace /> },
       { path: "warehouse-v2", element: <WarehouseV2Page /> },
       { path: "purchase-orders", element: <PurchaseOrderEntry /> },
@@ -68,7 +77,9 @@ const router = createBrowserRouter([
       { path: "reports/receivable", element: <ReportsPage /> },
       { path: "reports/payable", element: <ReportsPage /> },
       { path: "reports/financial", element: <ReportsPage /> },
+      { path: "reports/netting", element: <ReportsPage /> },
       { path: "settings", element: <SettingsPage /> },
+      { path: "audit-logs", element: <AuditLogsPage /> },
       { path: "suppliers", element: <SuppliersPage /> },
       { path: "salespersons", element: <SalespersonPage /> },
       { path: "commissions", element: <CommissionPage /> },
@@ -76,6 +87,10 @@ const router = createBrowserRouter([
       { path: "loss-records", element: <LossRecordsPage /> },
       { path: "notifications", element: <NotificationsPage /> },
       { path: "bank-accounts", element: <BankAccountsPage /> },
+      // 成品定义 V2
+      { path: "product-series", element: <ProductSeriesPage /> },
+      { path: "product-templates", element: <ProductTemplatePage /> },
+      { path: "sku-pricing", element: <SkuPricingPage /> },
       // V4 迁移路由
       { path: "domestic-suppliers", element: <Navigate to="/suppliers" replace /> },
       { path: "*", element: <NotFoundPage /> },

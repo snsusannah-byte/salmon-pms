@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 
 from app.core.database import get_db
+from app.core.permissions import require_admin, log_operation
 from app.models import CompanyType, User, SupplierCategory, CustomerCategory
 from app.schemas.company import (
     CompanyCreate,
@@ -26,6 +27,7 @@ async def _build_company_response(db: AsyncSession, company, payables: dict = No
     
     payable = payables.get(company.id) if payables else None
     
+    print(f"DEBUG _build_company_response: company.id={company.id}, name={company.name}, payable={payable}")
     data = {
         "id": company.id,
         "name": company.name,
@@ -52,8 +54,11 @@ async def _build_company_response(db: AsyncSession, company, payables: dict = No
         "logistics_info": company.logistics_info,
         "salesperson_id": company.salesperson_id,
         "customer_category": company.customer_category.value if company.customer_category else None,
+        "customer_level": company.customer_level,
         "supplier_category": company.supplier_category if company.supplier_category else None,
         "prepaid_balance": company.prepaid_balance,
+        "customer_type": company.customer_type,
+        "is_internal": company.is_internal,
         "is_active": company.is_active,
         "notes": company.notes,
         "salesperson_name": salesperson_name,
@@ -102,9 +107,10 @@ async def list_companies(
         limit=limit,
     )
     
-    # 批量获取应付款（仅供应商）
-    supplier_ids = [item.id for item in items if str(item.type) == "supplier"]
+    supplier_ids = [item.id for item in items if hasattr(item.type, 'value') and item.type.value == "supplier"]
+    print(f"DEBUG list_companies: items count={len(items)}, supplier_ids={supplier_ids}")
     payables = await CompanyService.get_supplier_payables(db, supplier_ids)
+    print(f"DEBUG list_companies: payables={payables}")
     
     result_items = []
     for item in items:
@@ -213,11 +219,12 @@ async def delete_company(
     company_id: int,
     hard: bool = Query(False, description="是否硬删除（仅限管理员）"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
 ):
     """删除主体
     
     - 默认软删除（标记 is_active=false）
-    - hard=true 时硬删除（从数据库中移除）—— 需要管理员权限
+    - hard=true 时硬删除（从数据库中移除）—— 仅限管理员
     """
     company = await CompanyService.get_by_id(db, company_id)
     if not company:
@@ -227,10 +234,10 @@ async def delete_company(
         )
     
     if hard:
-        # TODO: 加管理员权限校验
         import logging
         logger = logging.getLogger(__name__)
-        logger.warning(f"硬删除主体: ID={company_id}, name={company.name}, code={company.code}")
+        logger.warning(f"硬删除主体: ID={company_id}, name={company.name}, code={company.code}, by={user.username}")
+        await log_operation(db, user.id, "hard_delete", "companies", "Company", company_id, f"硬删除 {company.name}")
         await CompanyService.hard_delete(db, company)
     else:
         await CompanyService.delete(db, company)

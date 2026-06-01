@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import ProductCategory, Brand, Product
+from app.core.permissions import require_warehouse, log_operation
+from app.models import ProductCategory, Brand, Product, User
 from app.schemas.product import (
     ProductCreate,
     ProductUpdate,
@@ -148,6 +149,7 @@ async def update_product(
 async def delete_product(
     product_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_warehouse),
 ):
     """删除产品"""
     success = await ProductService.delete(db, product_id)

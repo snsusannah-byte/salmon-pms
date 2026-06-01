@@ -6,7 +6,7 @@
 from datetime import date
 from decimal import Decimal
 from enum import Enum as PyEnum
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -205,10 +205,15 @@ class WarehousePurchaseOrder(Base, TimestampMixin):
     supplier_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"))  # 供应商
     
     batch_no: Mapped[Optional[str]] = mapped_column(String(100))  # 采购批次号
-    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)  # 数量（重量kg或件数）
-    unit: Mapped[str] = mapped_column(String(20), default="kg")  # 单位 kg/件/个
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)  # 数量（总个数/重量）
+    unit: Mapped[str] = mapped_column(String(20), default="kg")  # 单位 kg/件/个/张
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)  # 成本单价
-    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 总金额
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 应付总金额（数量×单价）
+    actual_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 实付金额（可能与应付不同）
+    
+    # 包装信息（按箱入库时填写）
+    box_count: Mapped[Optional[int]] = mapped_column(Integer)  # 箱数
+    items_per_box: Mapped[Optional[int]] = mapped_column(Integer)  # 每箱数量
     
     lead_time_days: Mapped[int] = mapped_column(Integer, default=0)  # 供货周期(天)
     warehouse_type: Mapped[WarehouseType] = mapped_column(String(20), default=WarehouseType.FINISHED)  # 所在仓库

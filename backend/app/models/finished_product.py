@@ -74,6 +74,7 @@ class FinishedProductReceipt(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales.id"), nullable=True)
     sale_v2_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales_v2.id"), nullable=True)
+    transaction_id: Mapped[Optional[int]] = mapped_column(ForeignKey("transaction_records.id"), nullable=True)
     receipt_date: Mapped[Date] = mapped_column(Date, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     payment_method: Mapped[str] = mapped_column(String(50))
@@ -83,6 +84,9 @@ class FinishedProductReceipt(Base, TimestampMixin):
 
     sale_v2: Mapped[Optional["FinishedProductSaleV2"]] = relationship(
         "FinishedProductSaleV2", foreign_keys=[sale_v2_id], lazy="raise"
+    )
+    transaction: Mapped[Optional["TransactionRecord"]] = relationship(
+        "TransactionRecord", foreign_keys=[transaction_id], lazy="raise"
     )
 
 
@@ -142,6 +146,12 @@ class FinishedProductSaleV2(Base, TimestampMixin):
         lazy="selectin",
         cascade="all, delete-orphan",
     )
+    return_orders: Mapped[List["ReturnOrder"]] = relationship(
+        "ReturnOrder",
+        foreign_keys="ReturnOrder.finished_product_sale_v2_id",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
 
 
 class FinishedSaleProductV2(Base, TimestampMixin):
@@ -150,6 +160,8 @@ class FinishedSaleProductV2(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sale_id: Mapped[int] = mapped_column(ForeignKey("finished_product_sales_v2.id"), nullable=False)
+    # 成品定义V2：关联SKU（系列→SPU→规格→SKU）
+    variant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("product_variants.id"), nullable=True)
     product_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     product_spec: Mapped[str] = mapped_column(String(100), nullable=False)
     factory: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -162,6 +174,7 @@ class FinishedSaleProductV2(Base, TimestampMixin):
     after_sales_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
 
     sale: Mapped["FinishedProductSaleV2"] = relationship("FinishedProductSaleV2", back_populates="products")
+    variant: Mapped[Optional["ProductVariant"]] = relationship("ProductVariant", lazy="raise")
 
 
 

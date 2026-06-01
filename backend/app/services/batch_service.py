@@ -72,7 +72,7 @@ class BatchService:
                 # 所有批次都已购汇，返回空
                 return [], 0
 
-        query = query.order_by(Batch.batch_code.desc())
+        query = query.order_by(Batch.batch_date.desc(), Batch.id.desc())
         query = query.offset(skip).limit(limit)
 
         result = await db.execute(query)

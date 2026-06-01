@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { SimplePagination } from "@/components/SimplePagination";
 import {
   Plus,
   Search,
@@ -101,7 +102,7 @@ const PAGE_SIZE = 10;
 export function BatchesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailBatch, setDetailBatch] = useState<Batch | null>(null);
@@ -113,14 +114,12 @@ export function BatchesPage() {
       const params = new URLSearchParams();
       if (search) params.append("search", search);
       if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
-      params.append("skip", String((page - 1) * PAGE_SIZE));
+      params.append("skip", String(page * PAGE_SIZE));
       params.append("limit", String(PAGE_SIZE));
       const res = await api.get(`/v1/batches/?${params.toString()}`);
       return res.data;
     },
   });
-
-  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0;
 
   const handleDelete = async (batch: Batch) => {
     if (batch.status === "locked") {
@@ -357,11 +356,11 @@ export function BatchesPage() {
           <Input
             placeholder="搜索批次名称..."
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
             className="pl-9"
           />
         </div>
-        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v ?? "all"); setPage(1); }}>
+        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v ?? "all"); setPage(0); }}>
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="状态筛选" />
           </SelectTrigger>
@@ -473,22 +472,12 @@ export function BatchesPage() {
       </div>
 
       {/* 分页 */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">
-            显示 {(page - 1) * PAGE_SIZE + 1} - {Math.min(page * PAGE_SIZE, data?.total ?? 0)} / 共 {data?.total ?? 0} 条
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setPage(page - 1)} disabled={page <= 1}>
-              上一页
-            </Button>
-            <span className="text-sm">{page} / {totalPages}</span>
-            <Button variant="outline" size="sm" onClick={() => setPage(page + 1)} disabled={page >= totalPages}>
-              下一页
-            </Button>
-          </div>
-        </div>
-      )}
+      <SimplePagination
+        current={page}
+        total={data?.total || 0}
+        pageSize={PAGE_SIZE}
+        onChange={setPage}
+      />
     </div>
   );
 }

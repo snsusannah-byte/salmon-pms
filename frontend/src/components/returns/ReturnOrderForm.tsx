@@ -74,7 +74,7 @@ export function ReturnOrderForm({ open, onClose, editData, prefillSale }: Return
   const { data: salesData } = useQuery({
     queryKey: ["sales-for-return", saleType],
     queryFn: async () => {
-      const endpoint = saleType === "whole_fish" ? "/v1/sales/whole-fish" : "/v1/finished-product-sales";
+      const endpoint = saleType === "whole_fish" ? "/v1/sales/whole-fish" : "/v4/finished-product-sales";
       const res = await api.get(`${endpoint}?limit=200&status=pending,partial_paid,fully_paid,after_sales`);
       return res.data;
     },
@@ -86,7 +86,7 @@ export function ReturnOrderForm({ open, onClose, editData, prefillSale }: Return
     if (open && isEdit && editData) {
       setReturnOrderId(editData.id);
       setSaleType(editData.sale_type || "whole_fish");
-      setSaleId(String(editData.whole_fish_sale_id || editData.finished_product_sale_id || ""));
+      setSaleId(String(editData.whole_fish_sale_id || editData.finished_product_sale_v2_id || editData.finished_product_sale_id || ""));
       setReturnDate(editData.return_date || new Date().toISOString().split("T")[0]);
       setCustomerId(String(editData.customer_id || ""));
       setProcessingPlantId(String(editData.processing_plant_id || ""));
@@ -182,7 +182,7 @@ export function ReturnOrderForm({ open, onClose, editData, prefillSale }: Return
   const handleSelectSale = async (id: string) => {
     setSaleId(id); setLoadingSale(true);
     try {
-      const endpoint = saleType === "whole_fish" ? `/v1/sales/whole-fish/${id}` : `/v1/finished-product-sales/${id}`;
+      const endpoint = saleType === "whole_fish" ? `/v1/sales/whole-fish/${id}` : `/v4/finished-product-sales/${id}`;
       const res = await api.get(endpoint);
       const sale = res.data;
       setSaleDetail(sale); setCustomerId(String(sale.customer_id));
@@ -224,7 +224,7 @@ export function ReturnOrderForm({ open, onClose, editData, prefillSale }: Return
     const payload: any = { return_date: returnDate, customer_id: parseInt(customerId), problem_description: problemDescription || null, processing_plant_id: processingPlantId ? parseInt(processingPlantId) : null, processing_plant_name: processingPlantName || null, refund_method: refundMethod, items: validItems };
     if (refundMethod === "direct_refund" && bankAccountId) payload.bank_account_id = parseInt(bankAccountId);
     if (isEdit && returnOrderId) { updateMutation.mutate({ id: returnOrderId, payload }); }
-    else { if (!saleId) { toast.error("请选择销售单"); return; } payload.sale_type = saleType; if (saleType === "whole_fish") payload.whole_fish_sale_id = parseInt(saleId); else payload.finished_product_sale_id = parseInt(saleId); createMutation.mutate(payload); }
+    else { if (!saleId) { toast.error("请选择销售单"); return; } payload.sale_type = saleType; if (saleType === "whole_fish") payload.whole_fish_sale_id = parseInt(saleId); else payload.finished_product_sale_v2_id = parseInt(saleId); createMutation.mutate(payload); }
   };
 
   const filteredSales = (salesData?.items || []).filter((sale: any) => {

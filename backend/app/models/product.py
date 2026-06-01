@@ -26,6 +26,16 @@ class ProductCategory(str, Enum):
     BOM_MATERIAL = "bom_material"      # BOM物料/包材（兼容旧数据）
 
 
+class MaterialCategory(Base, TimestampMixin):
+    """物料分类"""
+    __tablename__ = "material_categories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+    code: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
 
 class Product(Base, TimestampMixin):
     """产品档案（统一产品管理）"""
@@ -62,6 +72,26 @@ class Product(Base, TimestampMixin):
     # 成品库存管理（仅成品使用）
     stock_quantity: Mapped[Optional[int]] = mapped_column(Integer, default=0)  # 库存数量
     safety_stock: Mapped[Optional[int]] = mapped_column(Integer, default=0)  # 安全库存线
+
+    # 物料分类关联（仅 bom_material 使用）
+    material_category_id: Mapped[Optional[int]] = mapped_column(ForeignKey("material_categories.id", ondelete="SET NULL"))
+    material_category: Mapped[Optional["MaterialCategory"]] = relationship("MaterialCategory", foreign_keys=[material_category_id], lazy="raise")
+    
+    # 每箱数量（用于按箱采购入库时自动换算）
+    items_per_box: Mapped[Optional[int]] = mapped_column(Integer)
+    
+    # 物料层级（基础物料/规格变体/独立物料）
+    material_type: Mapped[Optional[str]] = mapped_column(String(20), default="standalone")
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("products.id"))
+    
+    # 自关联：基础物料的变体列表
+    variants: Mapped[List["Product"]] = relationship(
+        "Product",
+        foreign_keys=[parent_id],
+        remote_side=[id],
+        lazy="raise",
+        collection_class=list,
+    )
     
     # 成品特有的BOM关系
     boms: Mapped[List["ProductBOM"]] = relationship("ProductBOM", 
@@ -69,7 +99,6 @@ class Product(Base, TimestampMixin):
                                                        back_populates="finished_product",
                                                        lazy="raise",
                                                        cascade="all, delete-orphan")
-
 
 
 class Brand(Base, TimestampMixin):
@@ -85,7 +114,6 @@ class Brand(Base, TimestampMixin):
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
     company: Mapped[Optional["Company"]] = relationship("Company", foreign_keys=[company_id], lazy="raise")
-
 
 
 class ProductBOM(Base, TimestampMixin):
@@ -105,7 +133,6 @@ class ProductBOM(Base, TimestampMixin):
     material: Mapped["Product"] = relationship("Product", foreign_keys=[material_id], lazy="raise")
 
 
-
 class ProductPackaging(Base, TimestampMixin):
     """成品包装物清单（盒级/份级）"""
     __tablename__ = "product_packagings"
@@ -121,7 +148,6 @@ class ProductPackaging(Base, TimestampMixin):
 
     product: Mapped["Product"] = relationship("Product", foreign_keys=[product_id], lazy="raise")
     material: Mapped["Product"] = relationship("Product", foreign_keys=[material_id], lazy="raise")
-
 
 
 class ProductAccessory(Base, TimestampMixin):
@@ -140,7 +166,6 @@ class ProductAccessory(Base, TimestampMixin):
     accessory: Mapped["Product"] = relationship("Product", foreign_keys=[accessory_id], lazy="raise")
 
 
-
 class InvoiceProduct(Base, TimestampMixin):
     """发票产品明细"""
     __tablename__ = "invoice_products"
@@ -156,5 +181,3 @@ class InvoiceProduct(Base, TimestampMixin):
     notes: Mapped[Optional[str]] = mapped_column(Text)
     
     invoice: Mapped["ImportInvoice"] = relationship("ImportInvoice", back_populates="products", lazy="raise")
-
-

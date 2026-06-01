@@ -4,7 +4,8 @@ from sqlalchemy import select, func
 from typing import List, Optional
 
 from app.core.database import get_db
-from app.models import Salesperson, CommissionRecord
+from app.core.permissions import require_admin, log_operation
+from app.models import Salesperson, CommissionRecord, User
 from app.schemas.company import (
     SalespersonCreate,
     SalespersonUpdate,

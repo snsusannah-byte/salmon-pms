@@ -1,8 +1,11 @@
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { useRouteGuard } from "@/lib/routeGuard";
 
 export function MainLayout() {
+  useRouteGuard();
+
   return (
     <div className="flex h-screen bg-background">
       <div className="print:hidden">
@@ -12,7 +15,7 @@ export function MainLayout() {
         <div className="print:hidden">
           <Header />
         </div>
-        <main className="flex-1 overflow-auto p-6 print:p-0">
+        <main className="flex-1 overflow-y-auto p-6 print:p-0">
           <Outlet />
         </main>
       </div>

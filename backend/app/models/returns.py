@@ -63,10 +63,11 @@ class ReturnOrder(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     return_no: Mapped[str] = mapped_column(String(30), unique=True, nullable=False)
 
-    # 关联销售单（二选一）
+    # 关联销售单（三选一）
     sale_type: Mapped[str] = mapped_column(String(20), nullable=False)  # whole_fish / finished_product
     whole_fish_sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("whole_fish_sales.id"), nullable=True)
     finished_product_sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales.id"), nullable=True)
+    finished_product_sale_v2_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales_v2.id"), nullable=True)
 
     # 基本信息
     return_date: Mapped[date] = mapped_column(Date, nullable=False)

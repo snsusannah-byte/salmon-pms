@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Loader2, Printer, Search } from "lucide-react";
+import { Loader2, Printer, Search, ChevronLeft, ChevronRight } from "lucide-react";
 
 function fmt$(v: number | string | null | undefined) {
   const n = Number(v ?? 0);

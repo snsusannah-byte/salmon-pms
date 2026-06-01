@@ -22,11 +22,14 @@ from app.api.v1.endpoints import (
     loss_records,
     finished_product_sales_v2,
     materials,
+    material_categories,
     warehouse_v2,
     traceability,
     returns,
     purchase_orders,
+    material_purchases,
     finance_v4_migration,
+    audit,
 )
 
 api_router = APIRouter()
@@ -45,6 +48,7 @@ api_router.include_router(finance.router, prefix="/finance", tags=["财务管理
 api_router.include_router(reports.router, prefix="/reports", tags=["报表中心"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["数据看板"])
 api_router.include_router(settings.router, prefix="/settings", tags=["系统设置"])
+api_router.include_router(audit.router, prefix="/audit", tags=["审计日志"])
 api_router.include_router(salespersons.router, prefix="/salespersons", tags=["业务员管理"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["通知中心"])
 
@@ -55,6 +59,8 @@ api_router.include_router(warehouse_v2.router, prefix="/warehouse-v2", tags=["wa
 api_router.include_router(loss_records.router, prefix="/loss-records", tags=["loss-records"])
 api_router.include_router(finished_product_sales_v2.router, prefix="/finished-product-sales", tags=["finished-product-sales-v2"])
 api_router.include_router(materials.router, prefix="/materials", tags=["物料管理"])
+api_router.include_router(material_categories.router, prefix="/material-categories", tags=["物料分类"])
+api_router.include_router(material_purchases.router, prefix="/material-purchases", tags=["物料采购"])
 api_router.include_router(purchase_orders.router, prefix="/purchase-orders", tags=["采购入库"])
 api_router.include_router(traceability.router, prefix="/traceability", tags=["追溯系统"])
 api_router.include_router(returns.router, prefix="/returns", tags=["退货管理"])

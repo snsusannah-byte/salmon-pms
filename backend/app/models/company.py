@@ -48,7 +48,8 @@ class Company(Base, TimestampMixin):
     salesperson_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))  # 业务员
     customer_category: Mapped[Optional[CustomerCategory]] = mapped_column(Enum(CustomerCategory))  # 客户分类
     supplier_category: Mapped[Optional[str]] = mapped_column(String(50))  # 供应商分类: raw_material/material_supply/customs_broker/service_provider
-    # 客户类型细分（用于区分内部加工厂和普通客户）
+    # 客户等级（用于成品定义V2价格匹配）
+    customer_level: Mapped[Optional[str]] = mapped_column(String(20))  # normal / vip / wholesale / bulk
     customer_type: Mapped[Optional[str]] = mapped_column(String(20))  # normal(普通客户), internal_processor(内部加工厂), oem(代工方)
     is_internal: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否内部客户（加工厂/代工方）
     # 客户预付余额（仅 customer 类型有效）

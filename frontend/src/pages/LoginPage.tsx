@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { setCachedUser } from "@/lib/permissions";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -26,7 +27,14 @@ export function LoginPage() {
       const res = await api.post("/v1/auth/login", form, {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
       });
-      localStorage.setItem("token", res.data.access_token);
+      const token = res.data.access_token;
+      localStorage.setItem("token", token);
+
+      // 获取用户信息并缓存角色
+      api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      const meRes = await api.get("/v1/auth/me");
+      setCachedUser(meRes.data);
+
       toast.success("登录成功");
       navigate("/dashboard");
     } catch (error: any) {

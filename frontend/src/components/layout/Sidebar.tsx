@@ -1,5 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { getCachedUser, filterNavByRole, MENU_MODULE_MAP } from "@/lib/permissions";
+import type { UserRole } from "@/lib/permissions";
 import {
   LayoutDashboard,
   Building2,
@@ -32,13 +34,15 @@ import {
   TrendingUp,
   ArrowDownLeft,
   ArrowUpRight,
+  Shield,
 } from "lucide-react";
+import { useMemo } from "react";
 
 const navItems = [
   { icon: LayoutDashboard, label: "数据看板", path: "/dashboard" },
   { icon: FileCheck, label: "进口单证", path: "/invoices" },
   { icon: Container, label: "批次管理", path: "/batches" },
-  { icon: Fish, label: "整鱼销售", path: "/whole-fish-sales" },
+  { icon: Ship, label: "进口销售", path: "/whole-fish-sales" },
 ];
 
 const reportItems = [
@@ -46,6 +50,7 @@ const reportItems = [
   { icon: FileText, label: "单票财报", path: "/reports/invoices" },
   { icon: ArrowDownLeft, label: "应收对账", path: "/reports/receivable" },
   { icon: ArrowUpRight, label: "应付对账", path: "/reports/payable" },
+  { icon: ArrowLeftRight, label: "往来对账", path: "/reports/netting" },
   { icon: BarChart3, label: "三大报表", path: "/reports/financial" },
 ];
 
@@ -56,10 +61,12 @@ const financeItems = [
 ];
 
 const finishedProductItems = [
-  { icon: PackageCheck, label: "成品销售", path: "/finished-product-sales" },
+  { icon: TrendingUp, label: "以销定采", path: "/made-to-order" },
+  { icon: PackageCheck, label: "预包装销售", path: "/finished-product-sales" },
   { icon: Factory, label: "生产管理", path: "/production" },
   { icon: Warehouse, label: "仓库管理", path: "/warehouse-v2" },
   { icon: Package, label: "采购入库", path: "/purchase-orders" },
+  { icon: Archive, label: "辅料采购", path: "/material-purchases" },
   { icon: FileSpreadsheet, label: "成品报表", path: "/finished-product-reports" },
 ];
 
@@ -67,7 +74,11 @@ const afterSalesItems = [
   { icon: ArrowLeftRight, label: "退货管理", path: "/returns" },
 ];
 
-
+const productDefinitionItems = [
+  { icon: Layers, label: "系列管理", path: "/product-series" },
+  { icon: Boxes, label: "SPU与规格", path: "/product-templates" },
+  { icon: Tag, label: "SKU价格配置", path: "/sku-pricing" },
+];
 
 const bottomNavItems = [
   { icon: Boxes, label: "原料规格", path: "/products" },
@@ -81,19 +92,68 @@ const bottomNavItems = [
   { icon: UserCog, label: "业务员", path: "/salespersons" },
   { icon: Percent, label: "提成管理", path: "/commissions" },
   { icon: Banknote, label: "银行账户", path: "/bank-accounts" },
+  { icon: Shield, label: "审计日志", path: "/audit-logs" },
   { icon: Settings, label: "系统设置", path: "/settings" },
 ];
 
-export function Sidebar() {
+function useUserRole(): UserRole {
+  const user = getCachedUser();
+  return user?.role ?? "user";
+}
+
+interface SectionProps {
+  title: string;
+  items: { icon: React.ElementType; label: string; path: string }[];
+  role: UserRole;
+}
+
+function NavSection({ title, items, role }: SectionProps) {
   const location = useLocation();
+  const filtered = useMemo(() => filterNavByRole(items, role), [items, role]);
+  if (filtered.length === 0) return null;
 
   return (
-    <aside className="w-64 border-r bg-card flex flex-col">
-      <div className="p-6 border-b">
+    <div className="pt-4 mt-2 border-t">
+      <p className="px-3 text-xs text-muted-foreground mb-2">{title}</p>
+      {filtered.map((item) => {
+        const Icon = item.icon;
+        const isActive =
+          location.pathname === item.path ||
+          (item.path.includes("?") && location.pathname + location.search === item.path);
+        return (
+          <Link
+            key={item.path}
+            to={item.path}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+              isActive
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            {item.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+export function Sidebar() {
+  const role = useUserRole();
+
+  return (
+    <aside className="w-64 border-r bg-card flex flex-col h-screen">
+      <div className="p-6 border-b shrink-0">
         <h1 className="text-lg font-bold">三文鱼 PMS</h1>
         <p className="text-xs text-muted-foreground">V8.2</p>
+        {role !== "admin" && (
+          <p className="text-xs text-primary mt-1">角色: {role}</p>
+        )}
       </div>
-      <nav className="flex-1 p-4 space-y-1">
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+        {/* 主导航 — 默认全部可见 */}
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path;
@@ -114,126 +174,12 @@ export function Sidebar() {
           );
         })}
 
-        {/* 报表中心分组 */}
-        <div className="pt-4 mt-2 border-t">
-          <p className="px-3 text-xs text-muted-foreground mb-2">报表中心</p>
-          {reportItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* 财务管理分组 */}
-        <div className="pt-4 mt-2 border-t">
-          <p className="px-3 text-xs text-muted-foreground mb-2">财务管理</p>
-          {financeItems.map((item) => {
-            const Icon = item.icon;
-            const fullPath = location.pathname + location.search;
-            const isActive = fullPath === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* 成品管理分组 */}
-        <div className="pt-4 mt-2 border-t">
-          <p className="px-3 text-xs text-muted-foreground mb-2">成品管理</p>
-          {finishedProductItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* 售后管理分组 */}
-        <div className="pt-4 mt-2 border-t">
-          <p className="px-3 text-xs text-muted-foreground mb-2">售后管理</p>
-          {afterSalesItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* 其他分组 */}
-        <div className="pt-4 mt-2 border-t">
-          <p className="px-3 text-xs text-muted-foreground mb-2">其他</p>
-          {bottomNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = location.pathname === item.path;
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
+        <NavSection title="报表中心" items={reportItems} role={role} />
+        <NavSection title="财务管理" items={financeItems} role={role} />
+        <NavSection title="内销管理" items={finishedProductItems} role={role} />
+        <NavSection title="售后管理" items={afterSalesItems} role={role} />
+        <NavSection title="产品定义" items={productDefinitionItems} role={role} />
+        <NavSection title="其他" items={bottomNavItems} role={role} />
       </nav>
     </aside>
   );

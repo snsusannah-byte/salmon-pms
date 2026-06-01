@@ -57,3 +57,4 @@ backend/revert_*.py
 
 # 但是保留 backups 目录
 !backups/
+*.db

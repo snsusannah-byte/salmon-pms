@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { SimplePagination } from "@/components/SimplePagination";
 import { Loader2, Eye, Printer, Languages, Search } from "lucide-react";
 
 function fmt$(v: number | string | null | undefined) {
@@ -25,28 +26,6 @@ function fmtDate(d: string | null | undefined) {
 
 function clsProfit(v: number) {
   return v >= 0 ? "text-green-600" : "text-red-600";
-}
-
-function SimplePagination({ current, total, pageSize, onChange }: {
-  current: number; total: number; pageSize: number; onChange: (page: number) => void;
-}) {
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  if (totalPages <= 1) return null;
-  return (
-    <div className="flex items-center justify-between px-2 py-3">
-      <span className="text-xs text-muted-foreground">
-        第 {current + 1} / {totalPages} 页，共 {total} 条
-      </span>
-      <div className="flex gap-1">
-        <Button variant="outline" size="sm" disabled={current === 0} onClick={() => onChange(current - 1)}>
-          <ChevronLeft className="h-3 w-3" />
-        </Button>
-        <Button variant="outline" size="sm" disabled={current >= totalPages - 1} onClick={() => onChange(current + 1)}>
-          <ChevronRight className="h-3 w-3" />
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 function DateFilter({ startDate, endDate, onStartChange, onEndChange, onSearch }: {
@@ -83,8 +62,8 @@ export function InvoiceReportsTab() {
     queryKey: ["reports-invoices", page, startDate, endDate, searchKey],
     queryFn: async () => {
       const params = new URLSearchParams({
-        skip: String(page * 30),
-        limit: "30",
+        skip: String(page * 20),
+        limit: "20",
       });
       if (startDate) params.set("start_date", startDate);
       if (endDate) params.set("end_date", endDate);
@@ -195,7 +174,7 @@ export function InvoiceReportsTab() {
           <SimplePagination
             current={page}
             total={data?.total || 0}
-            pageSize={30}
+            pageSize={20}
             onChange={setPage}
           />
         </CardContent>

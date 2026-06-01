@@ -107,6 +107,9 @@ class WarehousePurchaseOrderBase(BaseModel):
     unit: str = "kg"
     unit_price: Decimal
     total_amount: Optional[Decimal] = None
+    actual_amount: Optional[Decimal] = None  # 实付金额
+    box_count: Optional[int] = None  # 箱数
+    items_per_box: Optional[int] = None  # 每箱数量
     lead_time_days: int = 0
     warehouse_location: Optional[str] = None
     notes: Optional[str] = None
@@ -125,6 +128,9 @@ class WarehousePurchaseOrderUpdate(BaseModel):
     unit: Optional[str] = None
     unit_price: Optional[Decimal] = None
     total_amount: Optional[Decimal] = None
+    actual_amount: Optional[Decimal] = None
+    box_count: Optional[int] = None
+    items_per_box: Optional[int] = None
     lead_time_days: Optional[int] = None
     warehouse_location: Optional[str] = None
     notes: Optional[str] = None

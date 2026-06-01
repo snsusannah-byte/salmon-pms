@@ -77,6 +77,7 @@ interface Sale {
   _aftersales_count?: number;
   processing_plant_eu_no?: string | null;
   items?: WholeFishSaleItem[];
+  batch_is_locked?: boolean;
 }
 
 interface Receipt {
@@ -328,6 +329,7 @@ export function SalesPage() {
 
   const [adjBankAccountId, setAdjBankAccountId] = useState("");
   const [adjReceiptDate, setAdjReceiptDate] = useState("");
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
 
   // 银行账户列表
   const { data: bankAccountsData } = useQuery({
@@ -461,7 +463,7 @@ export function SalesPage() {
   const allLocked = selectedSales.length > 0 && selectedSales.every((s) => s.is_locked || s.batch_is_locked);
 
   return (
-    <div className="space-y-6">
+    <div className="h-full flex flex-col gap-4">
       <SaleFormDialog open={formOpen} onOpenChange={setFormOpen} initialData={editingSale}
         onSuccess={() => { queryClient.invalidateQueries({ queryKey: ["sales"] }); setEditingSale(null); }} />
 
@@ -904,8 +906,10 @@ export function SalesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 标题栏 */}
-      <div className="flex items-center justify-between">
+      {/* ==================== 功能区 ==================== */}
+      <div className="flex-none space-y-3">
+        {/* 标题栏 */}
+        <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-bold">整鱼销售</h1><p className="text-sm text-muted-foreground">共 {data?.total ?? 0} 条销售记录</p></div>
       </div>
 
@@ -973,29 +977,34 @@ export function SalesPage() {
 ><Banknote className="h-4 w-4 mr-1" />合并收款</Button>
         )}
       </div>
+      </div>
 
-      {/* 数据表格 */}
-      <div className="border rounded-lg">
-        <Table>
+      {/* ==================== 列表区 + 详情区 ==================== */}
+      <div className="flex-1 flex flex-col min-h-0 gap-4">
+
+        {/* 列表区 — 占剩余空间，超出时内部滚动 */}
+        <div className="flex-1 flex flex-col min-h-0 border rounded-lg overflow-hidden">
+          <div className="overflow-auto">
+            <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[40px]"><Checkbox checked={data?.items ? selectedIds.size === data.items.length && data.items.length > 0 : false} onCheckedChange={toggleSelectAll} /></TableHead>
-              <TableHead>销售单号</TableHead>
-              <TableHead>日期</TableHead>
-              <TableHead>客户</TableHead>
-              <TableHead>业务员</TableHead>
-              <TableHead>批次</TableHead>
-              <TableHead>加工厂(EU)</TableHead>
-              <TableHead>规格（公斤/箱数）</TableHead>
-              <TableHead className="text-right">箱数</TableHead>
-              <TableHead className="text-right">重量(kg)</TableHead>
-              <TableHead className="text-right">销售金额</TableHead>
-              <TableHead className="text-right">净金额</TableHead>
-              <TableHead className="text-right">已收</TableHead>
-              <TableHead className="text-right">售后</TableHead>
-              <TableHead className="text-right">抹零</TableHead>
-              <TableHead className="text-right">折扣</TableHead>
-              <TableHead>付款状态</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[40px]"><Checkbox checked={data?.items ? selectedIds.size === data.items.length && data.items.length > 0 : false} onCheckedChange={toggleSelectAll} /></TableHead>
+              <TableHead className="sticky top-0 bg-background z-10">销售单号</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10">日期</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10">客户</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10">业务员</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10">批次</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10">加工厂(EU)</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10">规格（公斤/箱数）</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 text-right">箱数</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 text-right">重量(kg)</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 text-right">销售金额</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 text-right">净金额</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 text-right">已收</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 text-right">售后</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 text-right">抹零</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 text-right">折扣</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10">付款状态</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1006,8 +1015,12 @@ export function SalesPage() {
                   const statusInfo = statusMap[sale.status] ?? { label: sale.status, color: "" };
                   const unpaid = Number(sale.net_amount) - Number(sale.paid_amount);
                   return (
-                    <TableRow key={sale.id}>
-                      <TableCell><Checkbox checked={selectedIds.has(sale.id)} onCheckedChange={(checked) => toggleSelect(sale.id, checked)} /></TableCell>
+                    <TableRow
+                      key={sale.id}
+                      className={cn("cursor-pointer transition-colors", selectedSale?.id === sale.id && "bg-primary/10 hover:bg-primary/15")}
+                      onClick={() => setSelectedSale(sale)}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}><Checkbox checked={selectedIds.has(sale.id)} onCheckedChange={(checked) => toggleSelect(sale.id, checked)} /></TableCell>
                       <TableCell className="font-medium relative">
                         {sale.is_locked && <span className="text-orange-500 mr-1">🔒</span>}
                         {sale.batch_is_locked && <span className="text-red-500 mr-1" title="批次已锁定">🔒</span>}
@@ -1120,17 +1133,107 @@ export function SalesPage() {
           </TableBody>
         </Table>
       </div>
-
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-muted-foreground">显示 {(page - 1) * PAGE_SIZE + 1} - {Math.min(page * PAGE_SIZE, data?.total ?? 0)} / 共 {data?.total ?? 0} 条</div>
+      
+      {/* 分页 */}
+      <div className="flex-none border-t bg-muted/30 px-4 py-2">
+        <div className="flex items-center justify-between text-sm">
+          <div className="text-muted-foreground">显示 {(page - 1) * PAGE_SIZE + 1} - {Math.min(page * PAGE_SIZE, data?.total ?? 0)} / 共 {data?.total ?? 0} 条</div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => setPage(page - 1)} disabled={page <= 1}>上一页</Button>
             <span className="text-sm">{page} / {totalPages}</span>
             <Button variant="outline" size="sm" onClick={() => setPage(page + 1)} disabled={page >= totalPages}>下一页</Button>
           </div>
         </div>
-      )}
+      </div>
+    </div>
+
+    {/* ==================== 详情区 ==================== */}
+    {selectedSale && (
+      <div className="flex-none border rounded-lg overflow-auto bg-background">
+        <div className="p-3 space-y-2">
+          {/* 详情头部 */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h3 className="font-semibold text-base">销售详情</h3>
+              <Badge variant="secondary" className={statusMap[selectedSale.status]?.color || ""}>{statusMap[selectedSale.status]?.label || selectedSale.status}</Badge>
+              {selectedSale.is_locked && (
+                <Badge variant="outline" className="text-red-500 border-red-200">
+                  <Lock className="h-3 w-3 mr-1" />已锁定
+                </Badge>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => { setDetailSale(selectedSale); setDetailOpen(true); }}>
+                <Eye className="h-4 w-4 mr-1" />完整详情
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedSale(null)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          {/* 规格明细 — 唯一内容 */}
+          <div>
+            <div className="text-muted-foreground text-xs mb-1">规格明细</div>
+            <div className="border rounded-md overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-muted/30">
+                    <TableHead className="text-xs h-7">规格</TableHead>
+                    <TableHead className="text-xs h-7">箱数</TableHead>
+                    <TableHead className="text-xs h-7">重量(kg)</TableHead>
+                    <TableHead className="text-xs h-7">单价</TableHead>
+                    <TableHead className="text-xs h-7">金额</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(selectedSale.items && selectedSale.items.length > 0)
+                    ? selectedSale.items.map((it) => (
+                      <TableRow key={it.id} className="h-7">
+                        <TableCell className="text-sm py-0.5">{it.spec || "-"}</TableCell>
+                        <TableCell className="text-sm py-0.5">{it.box_count ?? "-"}</TableCell>
+                        <TableCell className="text-sm py-0.5">{Number(it.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-sm py-0.5">${Number(it.unit_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-sm py-0.5">${Number(it.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      </TableRow>
+                    ))
+                    : (
+                      <TableRow className="h-7">
+                        <TableCell className="text-sm py-0.5">{selectedSale.spec ?? "-"}</TableCell>
+                        <TableCell className="text-sm py-0.5">{selectedSale.box_count ?? "-"}</TableCell>
+                        <TableCell className="text-sm py-0.5">{Number(selectedSale.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-sm py-0.5">${Number(selectedSale.unit_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                        <TableCell className="text-sm py-0.5">${(Number(selectedSale.weight_kg) * Number(selectedSale.unit_price)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      </TableRow>
+                    )
+                  }
+                  <TableRow className="bg-muted/20 font-medium h-7">
+                    <TableCell className="text-sm py-0.5">合计</TableCell>
+                    <TableCell className="text-sm py-0.5">
+                      {(selectedSale.items && selectedSale.items.length > 0)
+                        ? selectedSale.items.reduce((s, it) => s + (it.box_count || 0), 0)
+                        : (selectedSale.box_count || 0)}
+                    </TableCell>
+                    <TableCell className="text-sm py-0.5">
+                      {(selectedSale.items && selectedSale.items.length > 0)
+                        ? selectedSale.items.reduce((s, it) => s + Number(it.weight_kg), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        : Number(selectedSale.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </TableCell>
+                    <TableCell className="text-sm py-0.5">-</TableCell>
+                    <TableCell className="text-sm py-0.5">
+                      {(selectedSale.items && selectedSale.items.length > 0)
+                        ? selectedSale.items.reduce((s, it) => s + Number(it.amount), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                        : (Number(selectedSale.weight_kg) * Number(selectedSale.unit_price)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+      </div>
       {/* 合并收款弹窗 */}
       <BatchCollectDialog
         open={batchCollectDialogOpen}

@@ -3,6 +3,7 @@ import { BatchReportsTab } from "./BatchReportsTab";
 import { InvoiceReportsTab } from "./InvoiceReportsTab";
 import { ReceivableStatementsTab } from "./ReceivableStatementsTab";
 import { PayableStatementsTab } from "./PayableStatementsTab";
+import { NettingStatementsTab } from "./NettingStatementsTab";
 import { FinancialStatementsTab } from "./FinancialStatementsTab";
 
 export function ReportsPage() {
@@ -22,6 +23,8 @@ export function ReportsPage() {
           <ReceivableStatementsTab />
         ) : pathname === "/reports/payable" ? (
           <PayableStatementsTab />
+        ) : pathname === "/reports/netting" ? (
+          <NettingStatementsTab />
         ) : pathname === "/reports/financial" ? (
           <FinancialStatementsTab />
         ) : (

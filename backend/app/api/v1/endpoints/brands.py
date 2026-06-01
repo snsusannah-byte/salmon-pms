@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.core.database import get_db
-from app.models import Brand, Company
+from app.core.permissions import require_warehouse, log_operation
+from app.models import Brand, Company, User
 
 router = APIRouter()
 

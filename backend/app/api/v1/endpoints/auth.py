@@ -10,6 +10,8 @@ from app.core.security import verify_password, get_password_hash, create_access_
 from app.models import User
 from app.schemas.auth import Token, RegisterRequest, UserInfo
 
+from app.core.permissions import require_admin, UserRole
+
 router = APIRouter()
 
 
@@ -43,8 +45,9 @@ async def login(
 async def register(
     data: RegisterRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
 ):
-    """用户注册"""
+    """创建新用户 — 仅限管理员"""
     # 检查用户名是否已存在
     result = await db.execute(select(User).where(User.username == data.username))
     if result.scalar_one_or_none():
@@ -66,7 +69,7 @@ async def register(
         email=data.email,
         hashed_password=get_password_hash(data.password),
         full_name=data.full_name,
-        role="user",
+        role=UserRole.USER.value,
         is_active=True,
     )
     db.add(user)

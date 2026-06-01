@@ -1786,8 +1786,14 @@ function TransactionsTab() {
     queryFn: async () => {
       const ids = transactions?.flatMap((t) => t.related_sale_ids || []).filter((id, i, arr) => arr.indexOf(id) === i) || [];
       if (ids.length === 0) return [];
-      const res = await api.get(`/v1/sales/whole-fish?ids=${ids.join(",")}&limit=500`);
-      return res.data?.items || [];
+      // 同时查询整鱼销售和成品销售（以销定采）
+      const [wholeFishRes, finishedRes] = await Promise.all([
+        api.get(`/v1/sales/whole-fish?ids=${ids.join(",")}&limit=500`).catch(() => ({ data: { items: [] } })),
+        api.get(`/v4/finished-product-sales?ids=${ids.join(",")}&limit=500`).catch(() => ({ data: { data: [] } })),
+      ]);
+      const wholeFishItems = wholeFishRes.data?.items || [];
+      const finishedItems = finishedRes.data?.data || finishedRes.data || [];
+      return [...wholeFishItems, ...finishedItems];
     },
     enabled: !!(transactions && transactions.length > 0),
   });
@@ -2567,7 +2573,7 @@ function TransactionsTab() {
               <TableHead>银行账户</TableHead>
               <TableHead>对方</TableHead>
               <TableHead>描述</TableHead>
-              <TableHead>关联销售单</TableHead>
+              <TableHead>关联单据</TableHead>
               <TableHead className="w-[60px]"></TableHead>
             </TableRow>
           </TableHeader>
@@ -2627,7 +2633,9 @@ function TransactionsTab() {
                     {r.description ?? "-"}
                   </TableCell>
                   <TableCell className="text-xs">
-                    {r.related_sale_ids?.length > 0
+                    {r.reference_no
+                      ? r.reference_no
+                      : r.related_sale_ids?.length > 0
                       ? [...new Set(r.related_sale_ids)].map(id => allSalesMap[id]).filter(Boolean).join(", ")
                       : "-"}
                   </TableCell>
