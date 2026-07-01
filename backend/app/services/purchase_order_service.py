@@ -3,19 +3,16 @@
 """
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
-from sqlalchemy import delete, func, select, desc
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Batch,
     Company,
     Product,
     PurchaseOrder,
     PurchaseOrderItem,
     PurchaseOrderStatus,
-    StockInbound,
     Warehouse,
 )
 from app.services.warehouse_v2_service import WarehouseV2Service
@@ -82,19 +79,19 @@ class PurchaseOrderService:
         return order
 
     @staticmethod
-    async def get_order(db: AsyncSession, order_id: int) -> Optional[PurchaseOrder]:
+    async def get_order(db: AsyncSession, order_id: int) -> PurchaseOrder | None:
         result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == order_id))
         return result.scalar_one_or_none()
 
     @staticmethod
     async def list_orders(
         db: AsyncSession,
-        status: Optional[str] = None,
-        supplier_id: Optional[int] = None,
-        main_product_type: Optional[str] = None,
+        status: str | None = None,
+        supplier_id: int | None = None,
+        main_product_type: str | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         query = select(PurchaseOrder, Company, Warehouse).join(
             Company, PurchaseOrder.supplier_id == Company.id
         ).join(Warehouse, PurchaseOrder.main_warehouse_id == Warehouse.id)
@@ -202,7 +199,7 @@ class PurchaseOrderService:
     # ==================== 入库确认 ====================
 
     @staticmethod
-    async def confirm_inbound(db: AsyncSession, order_id: int, inbound_items: List[dict]) -> dict:
+    async def confirm_inbound(db: AsyncSession, order_id: int, inbound_items: list[dict]) -> dict:
         """采购单入库确认"""
         order = await PurchaseOrderService.get_order(db, order_id)
         if not order:

@@ -1,17 +1,15 @@
 # ruff: noqa: F821
 from datetime import datetime
-from app.models.enums import PurchaseOrderStatus
 from decimal import Decimal
-from typing import List, Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
     Enum,
     ForeignKey,
     Integer,
-    JSON,
     Numeric,
     String,
     Text,
@@ -19,6 +17,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+from app.models.enums import PurchaseOrderStatus
+
 
 class TransactionRecord(Base, TimestampMixin):
     """统一交易流水（合并日常收支+扫码手续费+付款）"""
@@ -31,23 +31,23 @@ class TransactionRecord(Base, TimestampMixin):
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(10), default="CNY")
     
-    from_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bank_accounts.id"))
-    to_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bank_accounts.id"))
+    from_account_id: Mapped[int | None] = mapped_column(ForeignKey("bank_accounts.id"))
+    to_account_id: Mapped[int | None] = mapped_column(ForeignKey("bank_accounts.id"))
     
-    counterparty_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"))
-    counterparty_name: Mapped[Optional[str]] = mapped_column(String(200))
+    counterparty_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"))
+    counterparty_name: Mapped[str | None] = mapped_column(String(200))
     
-    reference_no: Mapped[Optional[str]] = mapped_column(String(100))
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    related_invoice_id: Mapped[Optional[int]] = mapped_column(ForeignKey("import_invoices.id"))
-    related_batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
-    related_sale_ids: Mapped[Optional[list]] = mapped_column(JSON)  # JSON array of sale IDs
+    reference_no: Mapped[str | None] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(Text)
+    related_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("import_invoices.id"))
+    related_batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+    related_sale_ids: Mapped[list | None] = mapped_column(JSON)  # JSON array of sale IDs
     
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    confirmed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    confirmed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    confirmed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 # ==================== 采购入库模块 ====================
@@ -72,7 +72,7 @@ class PurchaseOrder(Base, TimestampMixin):
     
     status: Mapped[PurchaseOrderStatus] = mapped_column(Enum(PurchaseOrderStatus), default=PurchaseOrderStatus.PENDING)
     
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 
@@ -83,7 +83,7 @@ class PurchaseOrderItem(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
-    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
     
     item_type: Mapped[str] = mapped_column(String(20), default="main")  # main / accessory / material
     
@@ -93,9 +93,9 @@ class PurchaseOrderItem(Base, TimestampMixin):
     total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     
     received_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
-    warehouse_id: Mapped[Optional[int]] = mapped_column(ForeignKey("warehouses.id"))
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id"))
     
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 # ==================== 仓库模块V2 ====================
@@ -107,10 +107,10 @@ class DomesticSupplier(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    contact_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
-    address: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
-    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    contact_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active")
 
 
@@ -121,20 +121,21 @@ class PurchaseOrderV2(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     purchase_no: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
-    purchase_date: Mapped[Optional[Date]] = mapped_column(Date, nullable=True)
-    supplier_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    supplier_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    purchase_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
+    supplier_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    supplier_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     total_weight: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     total_boxes: Mapped[int] = mapped_column(Integer, default=0)
-    order_type: Mapped[Optional[str]] = mapped_column(String(20), default="raw_material")  # raw_material=整鱼, accessories=辅料
-    slaughter_date: Mapped[Optional[Date]] = mapped_column(Date, nullable=True)  # 宰杀日期
-    remark: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    after_sales_adjustment: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    order_type: Mapped[str | None] = mapped_column(String(20), default="raw_material")  # raw_material=整鱼, accessories=辅料
+    slaughter_date: Mapped[Date | None] = mapped_column(Date, nullable=True)  # 宰杀日期
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="completed")
-    # 以销定采：采购单反向关联销售单（一个销售单可分多个采购单）
-    sale_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # 以销定采：一个销售单对应一次采购（一对一）
+    sale_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    products: Mapped[List["PurchaseOrderProductV2"]] = relationship(
+    products: Mapped[list["PurchaseOrderProductV2"]] = relationship(
         "PurchaseOrderProductV2",
         back_populates="order",
         lazy="selectin",
@@ -149,13 +150,14 @@ class PurchaseOrderProductV2(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     purchase_order_id: Mapped[int] = mapped_column(ForeignKey("purchase_orders_v2.id"), nullable=False)
-    material_id: Mapped[Optional[int]] = mapped_column(ForeignKey("products.id"), nullable=True)  # 关联物料库
-    product_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    material_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"), nullable=True)  # 关联物料库
+    product_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     product_spec: Mapped[str] = mapped_column(String(100), nullable=False)
-    factory: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    factory: Mapped[str | None] = mapped_column(String(100), nullable=True)
     box_count: Mapped[int] = mapped_column(Integer, default=0)
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
-    unit: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    batch: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
 

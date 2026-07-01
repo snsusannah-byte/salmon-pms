@@ -1,7 +1,6 @@
 # ruff: noqa: F821
 from decimal import Decimal
-from app.models.enums import SalesStatus
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -16,6 +15,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+from app.models.enums import SalesStatus
+
 
 class WholeFishSale(Base, TimestampMixin):
     """整鱼销售"""
@@ -26,8 +27,8 @@ class WholeFishSale(Base, TimestampMixin):
     batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"), nullable=False)
     sale_date: Mapped[Date] = mapped_column(Date, nullable=False)
     customer_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
-    spec: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    box_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    spec: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    box_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     gross_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
@@ -39,15 +40,15 @@ class WholeFishSale(Base, TimestampMixin):
     net_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     status: Mapped[SalesStatus] = mapped_column(Enum(SalesStatus), default=SalesStatus.PENDING)
-    salesperson_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
+    salesperson_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     is_internal_sale: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # 是否内部销售（加工厂流转）
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
-    receipts: Mapped[List["SalesReceipt"]] = relationship("SalesReceipt", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
-    aftersales: Mapped[List["AftersalesRecord"]] = relationship("AftersalesRecord", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
-    items: Mapped[List["WholeFishSaleItem"]] = relationship("WholeFishSaleItem", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
-    return_orders: Mapped[List["ReturnOrder"]] = relationship(
+    receipts: Mapped[list["SalesReceipt"]] = relationship("SalesReceipt", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
+    aftersales: Mapped[list["AftersalesRecord"]] = relationship("AftersalesRecord", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
+    items: Mapped[list["WholeFishSaleItem"]] = relationship("WholeFishSaleItem", back_populates="sale", lazy="selectin", cascade="all, delete-orphan")
+    return_orders: Mapped[list["ReturnOrder"]] = relationship(
         "ReturnOrder",
         foreign_keys="ReturnOrder.whole_fish_sale_id",
         lazy="selectin",
@@ -68,7 +69,7 @@ class WholeFishSaleItem(Base, TimestampMixin):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)  # 单价
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 金额 = weight_kg * unit_price
     sort_order: Mapped[int] = mapped_column(Integer, default=0)  # 排序
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     sale: Mapped["WholeFishSale"] = relationship("WholeFishSale", back_populates="items", lazy="raise")
 
@@ -83,10 +84,10 @@ class SalesReceipt(Base, TimestampMixin):
     receipt_date: Mapped[Date] = mapped_column(Date, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     payment_method: Mapped[str] = mapped_column(String(50))  # cash, transfer, check, scan
-    bank_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bank_accounts.id"))
-    reference_no: Mapped[Optional[str]] = mapped_column(String(100))
-    notes: Mapped[Optional[str]] = mapped_column(Text)
-    transaction_id: Mapped[Optional[int]] = mapped_column(ForeignKey("transaction_records.id"), nullable=True)
+    bank_account_id: Mapped[int | None] = mapped_column(ForeignKey("bank_accounts.id"))
+    reference_no: Mapped[str | None] = mapped_column(String(100))
+    notes: Mapped[str | None] = mapped_column(Text)
+    transaction_id: Mapped[int | None] = mapped_column(ForeignKey("transaction_records.id"), nullable=True)
 
     sale: Mapped["WholeFishSale"] = relationship("WholeFishSale", back_populates="receipts")
     transaction: Mapped[Optional["TransactionRecord"]] = relationship("TransactionRecord", foreign_keys=[transaction_id])
@@ -102,9 +103,9 @@ class AftersalesRecord(Base, TimestampMixin):
     record_date: Mapped[Date] = mapped_column(Date, nullable=False)
     type: Mapped[str] = mapped_column(String(50))  # return, refund, discount, compensation
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    reason: Mapped[Optional[str]] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), default="pending")
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     sale: Mapped["WholeFishSale"] = relationship("WholeFishSale", back_populates="aftersales")
 

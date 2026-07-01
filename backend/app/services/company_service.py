@@ -1,8 +1,9 @@
-from fastapi import HTTPException
-from typing import List, Optional
 from decimal import Decimal
-from sqlalchemy import select, func
+
+from fastapi import HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models import Company, CompanyType
 from app.schemas.company import CompanyCreate, CompanyUpdate
 
@@ -11,13 +12,13 @@ class CompanyService:
     """主体管理服务"""
     
     @staticmethod
-    async def get_by_id(db: AsyncSession, company_id: int) -> Optional[Company]:
+    async def get_by_id(db: AsyncSession, company_id: int) -> Company | None:
         """根据ID获取主体"""
         result = await db.execute(select(Company).where(Company.id == company_id))
         return result.scalar_one_or_none()
     
     @staticmethod
-    async def get_by_code(db: AsyncSession, code: str, include_inactive: bool = False) -> Optional[Company]:
+    async def get_by_code(db: AsyncSession, code: str, include_inactive: bool = False) -> Company | None:
         """根据编码获取主体
         
         Args:
@@ -33,10 +34,10 @@ class CompanyService:
     async def get_or_create_customer(
         db: AsyncSession,
         name: str,
-        contact_person: Optional[str] = None,
-        phone: Optional[str] = None,
-        address: Optional[str] = None,
-        customer_category: Optional[str] = None,
+        contact_person: str | None = None,
+        phone: str | None = None,
+        address: str | None = None,
+        customer_category: str | None = None,
     ) -> Company:
         """根据名称查找或创建客户（去重逻辑）
         
@@ -108,16 +109,16 @@ class CompanyService:
     @staticmethod
     async def list_companies(
         db: AsyncSession,
-        type: Optional[CompanyType] = None,
-        exclude_type: Optional[List[CompanyType]] = None,
-        business_role: Optional[str] = None,
-        supplier_category: Optional[str] = None,
-        customer_category: Optional[str] = None,
-        search: Optional[str] = None,
-        is_active: Optional[bool] = None,
+        type: CompanyType | None = None,
+        exclude_type: list[CompanyType] | None = None,
+        business_role: str | None = None,
+        supplier_category: str | None = None,
+        customer_category: str | None = None,
+        search: str | None = None,
+        is_active: bool | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> tuple[List[Company], int]:
+    ) -> tuple[list[Company], int]:
         """获取主体列表
         
         Returns:
@@ -149,7 +150,7 @@ class CompanyService:
         
         # 业务角色筛选（上游溯源 vs 业务往来）
         if business_role:
-            from app.schemas.company import UPSTREAM_TYPES, BUSINESS_PARTNER_TYPES
+            from app.schemas.company import BUSINESS_PARTNER_TYPES, UPSTREAM_TYPES
             if business_role == "upstream":
                 query = query.where(Company.type.in_(list(UPSTREAM_TYPES)))
                 count_query = count_query.where(Company.type.in_(list(UPSTREAM_TYPES)))
@@ -264,14 +265,15 @@ class CompanyService:
         await db.commit()
     
     @staticmethod
-    async def get_supplier_payables(db: AsyncSession, supplier_ids: List[int]) -> dict[int, dict]:
+    async def get_supplier_payables(db: AsyncSession, supplier_ids: list[int]) -> dict[int, dict]:
         """批量获取供应商应付款（包含进口发票 + 辅料采购 + 清关费用）
         
         Returns:
             {supplier_id: {payable_usd, payable_cny}}
         """
         from sqlalchemy import func
-        from app.models import ImportInvoice, MaterialPurchaseOrder, ClearanceCost
+
+        from app.models import ClearanceCost, ImportInvoice, MaterialPurchaseOrder
         
         if not supplier_ids:
             return {}

@@ -2,9 +2,8 @@
 追溯系统 Service
 """
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
-from sqlalchemy import func, select, desc
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -104,7 +103,7 @@ class TraceabilityService:
     # ==================== 追溯查询 ====================
 
     @staticmethod
-    async def trace_by_invoice(db: AsyncSession, invoice_id: int) -> List[dict]:
+    async def trace_by_invoice(db: AsyncSession, invoice_id: int) -> list[dict]:
         """按进口发票追溯：这批鱼最终卖给了谁"""
         result = await db.execute(
             select(MaterialTraceability)
@@ -115,7 +114,7 @@ class TraceabilityService:
         return [await TraceabilityService._build_trace_detail(db, t) for t in traces]
 
     @staticmethod
-    async def trace_by_batch(db: AsyncSession, batch_id: int) -> List[dict]:
+    async def trace_by_batch(db: AsyncSession, batch_id: int) -> list[dict]:
         """按批次追溯"""
         result = await db.execute(
             select(MaterialTraceability)
@@ -126,7 +125,7 @@ class TraceabilityService:
         return [await TraceabilityService._build_trace_detail(db, t) for t in traces]
 
     @staticmethod
-    async def trace_by_finished_sale(db: AsyncSession, sale_id: int) -> Optional[dict]:
+    async def trace_by_finished_sale(db: AsyncSession, sale_id: int) -> dict | None:
         """按成品销售单追溯：这批成品来自哪条进口鱼"""
         result = await db.execute(
             select(MaterialTraceability)
@@ -140,11 +139,11 @@ class TraceabilityService:
     @staticmethod
     async def list_traces(
         db: AsyncSession,
-        status: Optional[str] = None,
-        source_type: Optional[str] = None,
+        status: str | None = None,
+        source_type: str | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         query = select(MaterialTraceability)
         if status:
             query = query.where(MaterialTraceability.trace_status == status)

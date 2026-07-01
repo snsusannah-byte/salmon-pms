@@ -1,16 +1,15 @@
 # ruff: noqa: F821
 from decimal import Decimal
-from app.models.enums import WarehouseType, WarehouseBusinessScope, StockStatus, StockMovementType, InventoryStatus, MovementType
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     DateTime,
     Enum,
     ForeignKey,
     Integer,
-    JSON,
     Numeric,
     String,
     Text,
@@ -20,6 +19,15 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+from app.models.enums import (
+    InventoryStatus,
+    MovementType,
+    StockMovementType,
+    StockStatus,
+    WarehouseBusinessScope,
+    WarehouseType,
+)
+
 
 class Warehouse(Base, TimestampMixin):
     """仓库定义"""
@@ -33,10 +41,10 @@ class Warehouse(Base, TimestampMixin):
         Enum(WarehouseBusinessScope), default=WarehouseBusinessScope.ALL, nullable=False
     )  # 业务范围
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
-    stocks: Mapped[List["Stock"]] = relationship("Stock", back_populates="warehouse")
-    movements: Mapped[List["StockMovement"]] = relationship("StockMovement", back_populates="warehouse")
+    stocks: Mapped[list["Stock"]] = relationship("Stock", back_populates="warehouse")
+    movements: Mapped[list["StockMovement"]] = relationship("StockMovement", back_populates="warehouse")
 
 
 
@@ -47,23 +55,23 @@ class Stock(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
-    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"), nullable=True)
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"), nullable=True)
 
     current_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False, default=Decimal("0"))
     reserved_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
     available_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False, default=Decimal("0"))
 
-    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
-    total_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    total_cost: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     unit: Mapped[str] = mapped_column(String(20), nullable=False, default="kg")
 
     warning_threshold: Mapped[int] = mapped_column(Integer, default=0)
     is_below_warning: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    last_in_date: Mapped[Optional[Date]] = mapped_column(Date)
-    last_out_date: Mapped[Optional[Date]] = mapped_column(Date)
-    location: Mapped[Optional[str]] = mapped_column(String(100))
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    last_in_date: Mapped[Date | None] = mapped_column(Date)
+    last_out_date: Mapped[Date | None] = mapped_column(Date)
+    location: Mapped[str | None] = mapped_column(String(100))
+    notes: Mapped[str | None] = mapped_column(Text)
 
     warehouse: Mapped[Warehouse] = relationship("Warehouse", back_populates="stocks")
     product: Mapped["Product"] = relationship("Product")
@@ -83,12 +91,12 @@ class StockInbound(Base, TimestampMixin):
     inbound_no: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
 
     source_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    source_id: Mapped[Optional[int]] = mapped_column(Integer)
-    source_no: Mapped[Optional[str]] = mapped_column(String(100))
+    source_id: Mapped[int | None] = mapped_column(Integer)
+    source_no: Mapped[str | None] = mapped_column(String(100))
 
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
-    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
 
     qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -96,24 +104,24 @@ class StockInbound(Base, TimestampMixin):
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     total_cost: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
 
-    supplier_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"))
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"))
 
-    detail: Mapped[Optional[dict]] = mapped_column(JSON)
+    detail: Mapped[dict | None] = mapped_column(JSON)
 
     status: Mapped[StockStatus] = mapped_column(Enum(StockStatus), default=StockStatus.PENDING)
     inbound_date: Mapped[Date] = mapped_column(Date, nullable=False)
-    confirmed_at: Mapped[Optional[DateTime]] = mapped_column(DateTime)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    confirmed_at: Mapped[DateTime | None] = mapped_column(DateTime)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     # 国内整包仓专用字段
-    slaughter_date: Mapped[Optional[Date]] = mapped_column(Date, nullable=True)
-    factory: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    original_box_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    original_weight: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3), nullable=True)
+    slaughter_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
+    factory: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    original_box_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    original_weight: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
 
     # 批次级剩余量（用于先进先出扣减）
-    remaining_qty: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3), nullable=True)
-    remaining_box_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    remaining_qty: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    remaining_box_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class StockOutbound(Base, TimestampMixin):
@@ -124,23 +132,23 @@ class StockOutbound(Base, TimestampMixin):
     outbound_no: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
 
     dest_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    dest_id: Mapped[Optional[int]] = mapped_column(Integer)
-    dest_no: Mapped[Optional[str]] = mapped_column(String(100))
+    dest_id: Mapped[int | None] = mapped_column(Integer)
+    dest_no: Mapped[str | None] = mapped_column(String(100))
 
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
-    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
 
     qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
 
-    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
-    total_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    total_cost: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
 
     outbound_date: Mapped[Date] = mapped_column(Date, nullable=False)
     status: Mapped[StockStatus] = mapped_column(Enum(StockStatus), default=StockStatus.PENDING)
-    confirmed_at: Mapped[Optional[DateTime]] = mapped_column(DateTime)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    confirmed_at: Mapped[DateTime | None] = mapped_column(DateTime)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 
@@ -154,7 +162,7 @@ class StockTransfer(Base, TimestampMixin):
     from_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     to_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
-    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
 
     from_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     from_unit: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -163,12 +171,12 @@ class StockTransfer(Base, TimestampMixin):
 
     conversion_ratio: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
 
-    detail: Mapped[Optional[dict]] = mapped_column(JSON)
+    detail: Mapped[dict | None] = mapped_column(JSON)
 
     status: Mapped[StockStatus] = mapped_column(Enum(StockStatus), default=StockStatus.PENDING)
     transfer_date: Mapped[Date] = mapped_column(Date, nullable=False)
-    confirmed_at: Mapped[Optional[DateTime]] = mapped_column(DateTime)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    confirmed_at: Mapped[DateTime | None] = mapped_column(DateTime)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     from_warehouse: Mapped[Warehouse] = relationship("Warehouse", foreign_keys=[from_warehouse_id])
     to_warehouse: Mapped[Warehouse] = relationship("Warehouse", foreign_keys=[to_warehouse_id])
@@ -183,7 +191,7 @@ class StockMovement(Base, TimestampMixin):
 
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
-    batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
 
     movement_type: Mapped[StockMovementType] = mapped_column(Enum(StockMovementType), nullable=False)
     movement_date: Mapped[Date] = mapped_column(Date, nullable=False)
@@ -193,14 +201,14 @@ class StockMovement(Base, TimestampMixin):
     qty_after: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
 
-    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
-    total_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    total_cost: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
 
     ref_type: Mapped[str] = mapped_column(String(50), nullable=False)
     ref_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    ref_no: Mapped[Optional[str]] = mapped_column(String(100))
+    ref_no: Mapped[str | None] = mapped_column(String(100))
 
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     warehouse: Mapped[Warehouse] = relationship("Warehouse", back_populates="movements")
 
@@ -218,7 +226,7 @@ class ProductUnitConversion(Base, TimestampMixin):
     ratio: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
 
     is_default: Mapped[bool] = mapped_column(Boolean, default=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     product: Mapped["Product"] = relationship("Product")
 
@@ -240,11 +248,11 @@ class Inventory(Base, TimestampMixin):
     current_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     reserved_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
     available_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
-    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     status: Mapped[InventoryStatus] = mapped_column(Enum(InventoryStatus), default=InventoryStatus.IN_STOCK)
-    warehouse_location: Mapped[Optional[str]] = mapped_column(String(100))
-    last_movement_date: Mapped[Optional[Date]] = mapped_column(Date)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    warehouse_location: Mapped[str | None] = mapped_column(String(100))
+    last_movement_date: Mapped[Date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 
@@ -257,10 +265,10 @@ class InventoryMovement(Base, TimestampMixin):
     movement_date: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
     type: Mapped[MovementType] = mapped_column(Enum(MovementType), nullable=False)
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
-    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
-    reference_type: Mapped[Optional[str]] = mapped_column(String(50))  # sale, processing, adjustment
-    reference_id: Mapped[Optional[int]] = mapped_column(Integer)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    reference_type: Mapped[str | None] = mapped_column(String(50))  # sale, processing, adjustment
+    reference_id: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 # ==================== 审计日志 ====================

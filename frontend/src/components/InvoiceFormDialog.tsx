@@ -37,6 +37,7 @@ const formSchema = z.object({
   fish_farm_id: z.coerce.number().min(0, "渔场ID不能为负数").optional().nullable(),
   exporter_id: z.coerce.number().min(1, "请选择出口商"),
   supplier_id: z.coerce.number().min(1, "请选择供应商"),
+  importer_id: z.coerce.number().min(1, "请选择进口商"),
   total_amount_usd: z.coerce.number().min(0, "金额不能为负数"),
   total_boxes: z.coerce.number().min(0, "箱数不能为负数"),
   total_weight_kg: z.coerce.number().min(0, "重量不能为负数"),
@@ -161,6 +162,9 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
   const fishFarms = companiesData?.items.filter(c => c.type === "fish_farm") || [];
   const exporters = companiesData?.items.filter(c => c.type === "exporter") || [];
   const suppliers = companiesData?.items.filter(c => c.type === "supplier") || [];
+  const importers = companiesData?.items.filter(c => c.type === "supplier" && (c.name.includes("中挪") || c.name.includes("进出口"))) || [];
+  // 如果没有匹配到，展示所有 supplier 作为进口商选项
+  const importerOptions = importers.length > 0 ? importers : suppliers;
 
   // 从真实产品数据构建选项
   const productNameOptions = [...new Set(productsData?.map(p => p.name).filter(Boolean) || [])] as string[];
@@ -171,6 +175,16 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
   productsData?.forEach(p => {
     if (p.spec && p.name) {
       specToProductMap[p.spec] = p.name;
+    }
+  });
+  // 产品名称→规格列表映射
+  const productNameToSpecsMap: Record<string, string[]> = {};
+  productsData?.forEach(p => {
+    if (p.name && p.spec) {
+      if (!productNameToSpecsMap[p.name]) productNameToSpecsMap[p.name] = [];
+      if (!productNameToSpecsMap[p.name].includes(p.spec)) {
+        productNameToSpecsMap[p.name].push(p.spec);
+      }
     }
   });
 
@@ -208,6 +222,7 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         fish_farm_id: initialData.fish_farm_id,
         exporter_id: initialData.exporter_id,
         supplier_id: initialData.supplier_id || 61,
+        importer_id: initialData.importer_id || 80,
         total_amount_usd: Number(initialData.total_amount_usd),
         total_boxes: initialData.total_boxes,
         total_weight_kg: Number(initialData.total_weight_kg),
@@ -243,11 +258,12 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
         fish_farm_id: null,
         exporter_id: 0,
         supplier_id: 61,
+        importer_id: 80,
         total_amount_usd: 0,
         total_boxes: 0,
         total_weight_kg: 0,
         awb_no: "",
-        gross_weight_kg: 0,
+        gross_weight_kg: "" as any,
         eta: "",
         departure_date: "",
         flight_info: "",
@@ -334,10 +350,10 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
     append({
       product_name: "三文鱼",
       product_spec: "",
-      box_count: 1,
-      net_weight_kg: 0,
-      unit_price: 0,
-      total_amount: 0,
+      box_count: "" as any,
+      net_weight_kg: "" as any,
+      unit_price: "" as any,
+      total_amount: "" as any,
       notes: "",
     });
   };
@@ -470,6 +486,27 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
                 </Select>
                 {form.formState.errors.supplier_id && <p className="text-xs text-red-500">{form.formState.errors.supplier_id.message}</p>}
               </div>
+              <div>
+                <Label htmlFor="importer_id" className="text-xs">进口商 *</Label>
+                <Select
+                  value={form.watch("importer_id") ? String(form.watch("importer_id")) : ""}
+                  onValueChange={(v) => form.setValue("importer_id", parseInt(v || "0"))}
+                >
+                  <SelectTrigger id="importer_id">
+                    <SelectValue placeholder="选择进口商">
+                      {importerOptions.find(c => c.id === form.watch("importer_id"))?.name || "选择进口商"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {importerOptions.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.formState.errors.importer_id && <p className="text-xs text-red-500">{form.formState.errors.importer_id.message}</p>}
+              </div>
             </div>
           </div>
 
@@ -594,32 +631,53 @@ export function InvoiceFormDialog({ open, onOpenChange, initialData }: InvoiceFo
               const unitPrice = Number(form.watch(`products.${index}.unit_price`) || 0);
               const lineAmount = Math.round(netWeight * unitPrice * 100) / 100;
               const productName = form.watch(`products.${index}.product_name`);
+              const productSpec = form.watch(`products.${index}.product_spec`);
+              
+              // 自动推断：从规格推断产品名称
+              const handleSpecBlur = () => {
+                const spec = form.watch(`products.${index}.product_spec`) || "";
+                if (spec && specToProductMap[spec]) {
+                  form.setValue(`products.${index}.product_name`, specToProductMap[spec]);
+                }
+              };
+
+              // 自动推断：从产品名称推断规格（可选）
+              const handleNameBlur = () => {
+                const name = form.watch(`products.${index}.product_name`) || "";
+                const specs = productNameToSpecsMap[name];
+                if (specs && specs.length === 1) {
+                  form.setValue(`products.${index}.product_spec`, specs[0]);
+                }
+              };
               
               return (
-                <div key={field.id} className="grid grid-cols-[minmax(100px,1fr)_110px_70px_90px_90px_80px_32px] gap-2 items-center">
-                  <div className="text-sm font-medium truncate min-w-0" title={productName || ""}>
-                    {productName || <span className="text-muted-foreground text-xs">产品名称</span>}
-                  </div>
-                  <Select
-                    value={form.watch(`products.${index}.product_spec`) || ""}
-                    onValueChange={(v) => {
-                      const spec = v || "";
-                      form.setValue(`products.${index}.product_spec`, spec);
-                      const productName = specToProductMap[spec];
-                      if (productName) {
-                        form.setValue(`products.${index}.product_name`, productName);
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="text-xs w-full h-9 px-2">
-                      <SelectValue placeholder="规格" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {specOptions.map((spec) => (
-                        <SelectItem key={spec} value={spec}>{spec}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div key={field.id} className="grid grid-cols-[minmax(80px,1fr)_minmax(80px,1fr)_70px_90px_90px_80px_32px] gap-2 items-center">
+                  <Input
+                    className="text-xs h-9 px-2"
+                    placeholder="产品名称"
+                    value={productName || ""}
+                    onChange={(e) => form.setValue(`products.${index}.product_name`, e.target.value)}
+                    onBlur={handleNameBlur}
+                    list={`product-name-list-${index}`}
+                  />
+                  <datalist id={`product-name-list-${index}`}>
+                    {productNameOptions.map((name) => (
+                      <option key={name} value={name} />
+                    ))}
+                  </datalist>
+                  <Input
+                    className="text-xs h-9 px-2"
+                    placeholder="规格"
+                    value={productSpec || ""}
+                    onChange={(e) => form.setValue(`products.${index}.product_spec`, e.target.value)}
+                    onBlur={handleSpecBlur}
+                    list={`spec-list-${index}`}
+                  />
+                  <datalist id={`spec-list-${index}`}>
+                    {specOptions.map((spec) => (
+                      <option key={spec} value={spec} />
+                    ))}
+                  </datalist>
                   <Input 
                     type="number" 
                     inputMode="numeric" 

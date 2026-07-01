@@ -5,15 +5,15 @@
 # ruff: noqa: F821
 from datetime import date
 from decimal import Decimal
-from enum import Enum as PyEnum
-from typing import List, Optional
+from enum import StrEnum
+from typing import Optional
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Date,
     ForeignKey,
     Integer,
-    JSON,
     Numeric,
     String,
     Text,
@@ -22,16 +22,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
-
 # ==================== 新增枚举 ====================
 
-class SlaughterType(str, PyEnum):
+class SlaughterType(StrEnum):
     """宰杀类型"""
     WHOLE_FISH = "whole_fish"   # 整鱼宰杀
     FILLET = "fillet"           # 鱼柳（外购已切分）
 
 
-class LossType(str, PyEnum):
+class LossType(StrEnum):
     """损耗类型"""
     SPOILAGE = "spoilage"           # 变质报废
     INVENTORY_DIFF = "inventory_diff"  # 盘点差异
@@ -39,20 +38,20 @@ class LossType(str, PyEnum):
     OTHER = "other"                 # 其他
 
 
-class SaleItemType(str, PyEnum):
+class SaleItemType(StrEnum):
     """销售子项类型"""
     MAIN = "main"           # 正品（三文鱼部位，按重量）
     GIFT = "gift"           # 赠品（按件数）
     ACCESSORY = "accessory" # 配套产品（按件数）
 
 
-class WarehouseType(str, PyEnum):
+class WarehouseType(StrEnum):
     """仓库类型"""
     WHOLE_FISH = "whole_fish"   # 整鱼仓库
     FINISHED = "finished"       # 成品仓库
 
 
-class InboundType(str, PyEnum):
+class InboundType(StrEnum):
     """入库类型"""
     PURCHASE = "purchase"   # 外部采购
     TRANSFER = "transfer"   # 内部调拨
@@ -84,7 +83,7 @@ class DailySlaughterRecord(Base, TimestampMixin):
     slaughter_type: Mapped[SlaughterType] = mapped_column(String(20), nullable=False, default=SlaughterType.WHOLE_FISH)  # 宰杀类型
     
     # 投入
-    fish_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)  # 宰杀条数（整鱼必填，鱼柳为0）
+    fish_count: Mapped[int | None] = mapped_column(Integer, default=0)  # 宰杀条数（整鱼必填，鱼柳为0）
     total_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)  # 鱼总重(kg)
     
     # 产出
@@ -111,21 +110,21 @@ class DailySlaughterRecord(Base, TimestampMixin):
     sold_meat_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))  # 已售出肉重(kg)
     
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False)  # 锁定后不可修改
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
     
     # ===== 原料来源关联（新增） =====
-    source_sale_id: Mapped[Optional[int]] = mapped_column(
+    source_sale_id: Mapped[int | None] = mapped_column(
         ForeignKey("whole_fish_sales.id"), nullable=True
     )  # 关联整鱼销售单（加工厂）
-    source_batch_id: Mapped[Optional[int]] = mapped_column(
+    source_batch_id: Mapped[int | None] = mapped_column(
         ForeignKey("batches.id"), nullable=True
     )  # 关联进口批次
-    source_invoice_id: Mapped[Optional[int]] = mapped_column(
+    source_invoice_id: Mapped[int | None] = mapped_column(
         ForeignKey("import_invoices.id"), nullable=True
     )  # 关联进口发票
     
     # 原料详情（JSONB）
-    source_detail: Mapped[Optional[dict]] = mapped_column(JSON)  # { invoice_no, batch_no, sale_no, customer_name, total_boxes, total_pieces, avg_weight_kg, unit_cost_per_kg }
+    source_detail: Mapped[dict | None] = mapped_column(JSON)  # { invoice_no, batch_no, sale_no, customer_name, total_boxes, total_pieces, avg_weight_kg, unit_cost_per_kg }
     
     # 成本计算方式（固定加权平均）
     cost_calculation_method: Mapped[str] = mapped_column(
@@ -136,7 +135,7 @@ class DailySlaughterRecord(Base, TimestampMixin):
     auto_byproduct: Mapped[bool] = mapped_column(Boolean, default=True)  # 是否自动按 fish_count 生成副产品数量
     
     # 关联成品产出
-    finished_products: Mapped[List["SlaughterFinishedProduct"]] = relationship(
+    finished_products: Mapped[list["SlaughterFinishedProduct"]] = relationship(
         "SlaughterFinishedProduct", back_populates="slaughter_record",
         lazy="selectin", cascade="all, delete-orphan"
     )
@@ -161,20 +160,20 @@ class SlaughterFinishedProduct(Base, TimestampMixin):
     
     # 成品信息
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
-    product_name: Mapped[Optional[str]] = mapped_column(String(100))  # 成品名称（冗余）
+    product_name: Mapped[str | None] = mapped_column(String(100))  # 成品名称（冗余）
     
     # 产出数量
-    produced_weight_kg: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3))  # 产出重量(kg)
-    produced_quantity: Mapped[Optional[int]] = mapped_column(Integer)  # 产出数量（盘/盒/份）
+    produced_weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))  # 产出重量(kg)
+    produced_quantity: Mapped[int | None] = mapped_column(Integer)  # 产出数量（盘/盒/份）
     unit: Mapped[str] = mapped_column(String(20), default="kg")  # kg / plate / box / portion
     
     # 成本
-    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))  # 单位成本
-    total_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 总成本
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))  # 单位成本
+    total_cost: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))  # 总成本
     
     # 入库状态
     is_stocked: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否已入库
-    stock_inbound_id: Mapped[Optional[int]] = mapped_column(Integer)  # 关联入库单ID
+    stock_inbound_id: Mapped[int | None] = mapped_column(Integer)  # 关联入库单ID
     
     # 销售状态
     is_sold: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否已销售
@@ -202,25 +201,25 @@ class WarehousePurchaseOrder(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     order_date: Mapped[date] = mapped_column(Date, nullable=False)  # 入库日期
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)  # 采购的产品
-    supplier_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"))  # 供应商
+    supplier_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"))  # 供应商
     
-    batch_no: Mapped[Optional[str]] = mapped_column(String(100))  # 采购批次号
+    batch_no: Mapped[str | None] = mapped_column(String(100))  # 采购批次号
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)  # 数量（总个数/重量）
     unit: Mapped[str] = mapped_column(String(20), default="kg")  # 单位 kg/件/个/张
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)  # 成本单价
     total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 应付总金额（数量×单价）
-    actual_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))  # 实付金额（可能与应付不同）
+    actual_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))  # 实付金额（可能与应付不同）
     
     # 包装信息（按箱入库时填写）
-    box_count: Mapped[Optional[int]] = mapped_column(Integer)  # 箱数
-    items_per_box: Mapped[Optional[int]] = mapped_column(Integer)  # 每箱数量
+    box_count: Mapped[int | None] = mapped_column(Integer)  # 箱数
+    items_per_box: Mapped[int | None] = mapped_column(Integer)  # 每箱数量
     
     lead_time_days: Mapped[int] = mapped_column(Integer, default=0)  # 供货周期(天)
     warehouse_type: Mapped[WarehouseType] = mapped_column(String(20), default=WarehouseType.FINISHED)  # 所在仓库
     inbound_type: Mapped[InboundType] = mapped_column(String(20), default=InboundType.PURCHASE)  # 入库类型
-    warehouse_location: Mapped[Optional[str]] = mapped_column(String(100))  # 存放位置
+    warehouse_location: Mapped[str | None] = mapped_column(String(100))  # 存放位置
     
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
     
     product: Mapped["Product"] = relationship("Product", foreign_keys=[product_id], lazy="raise")
     supplier: Mapped[Optional["Company"]] = relationship("Company", foreign_keys=[supplier_id], lazy="raise")
@@ -245,17 +244,17 @@ class WarehouseStock(Base, TimestampMixin):
     reserved_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))  # 预留数量（已销售未出库）
     available_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))  # 可用数量 = 当前 - 预留
     
-    unit_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))  # 成本单价（加权平均）
-    warehouse_location: Mapped[Optional[str]] = mapped_column(String(100))  # 存放位置
+    unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))  # 成本单价（加权平均）
+    warehouse_location: Mapped[str | None] = mapped_column(String(100))  # 存放位置
     
-    last_in_date: Mapped[Optional[date]] = mapped_column(Date)  # 最后入库日期
-    last_out_date: Mapped[Optional[date]] = mapped_column(Date)  # 最后出库日期
+    last_in_date: Mapped[date | None] = mapped_column(Date)  # 最后入库日期
+    last_out_date: Mapped[date | None] = mapped_column(Date)  # 最后出库日期
     
     # 预警状态（动态计算，非持久化）
-    warning_threshold: Mapped[Optional[int]] = mapped_column(Integer, default=0)  # 预警线（件/kg）
+    warning_threshold: Mapped[int | None] = mapped_column(Integer, default=0)  # 预警线（件/kg）
     is_below_warning: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否低于预警线
     
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
     
     product: Mapped["Product"] = relationship("Product", foreign_keys=[product_id], lazy="raise")
 
@@ -280,13 +279,13 @@ class FinishedProductSaleItem(Base, TimestampMixin):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)  # 关联的产品
     
     # 正品用重量，配套/赠品用件数
-    weight_kg: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3))  # 重量(kg) - 正品用
-    quantity: Mapped[Optional[int]] = mapped_column(Integer)  # 件数 - 配套/赠品用
+    weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))  # 重量(kg) - 正品用
+    quantity: Mapped[int | None] = mapped_column(Integer)  # 件数 - 配套/赠品用
     
-    unit_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))  # 单价
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))  # 单价
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))  # 金额
     
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
     
     sale: Mapped["FinishedProductSale"] = relationship("FinishedProductSale", foreign_keys=[sale_id], lazy="raise")
     product: Mapped["Product"] = relationship("Product", foreign_keys=[product_id], lazy="raise")
@@ -308,16 +307,16 @@ class LossRecord(Base, TimestampMixin):
     loss_type: Mapped[LossType] = mapped_column(String(20), nullable=False)  # 损耗类型
     
     # 关联宰杀日期（扣减当日可用肉）
-    slaughter_date: Mapped[Optional[date]] = mapped_column(Date)  # 关联的宰杀日期
+    slaughter_date: Mapped[date | None] = mapped_column(Date)  # 关联的宰杀日期
     
     # 关联产品（扣减仓库库存）
-    product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("products.id"))
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
     
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))  # 损耗重量(kg)
     quantity: Mapped[int] = mapped_column(Integer, default=0)  # 损耗数量（件/个）
     
-    reason: Mapped[Optional[str]] = mapped_column(Text)  # 损耗原因
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)  # 损耗原因
+    notes: Mapped[str | None] = mapped_column(Text)
     
     product: Mapped[Optional["Product"]] = relationship("Product", foreign_keys=[product_id], lazy="raise")
 
@@ -343,8 +342,8 @@ class FinishedProductCommission(Base, TimestampMixin):
     commission_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
     commission_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending")
-    paid_date: Mapped[Optional[Date]] = mapped_column(Date)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    paid_date: Mapped[Date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     salesperson: Mapped["Salesperson"] = relationship("Salesperson", lazy="raise")
 
@@ -364,17 +363,17 @@ class MaterialTraceability(Base, TimestampMixin):
     
     # 原料端（进口）
     source_type: Mapped[str] = mapped_column(String(20), default="import")  # import(进口), domestic(国内采购)
-    source_invoice_id: Mapped[Optional[int]] = mapped_column(ForeignKey("import_invoices.id"))
-    source_batch_id: Mapped[Optional[int]] = mapped_column(ForeignKey("batches.id"))
+    source_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("import_invoices.id"))
+    source_batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
     source_product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))  # 原料产品ID（整鱼）
     
     # 中间环节（内部流转）
-    internal_sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("whole_fish_sales.id"))  # 内部销售单（亘昌贸易/绍兴优逸）
-    slaughter_record_id: Mapped[Optional[int]] = mapped_column(ForeignKey("daily_slaughter_records.id"))
+    internal_sale_id: Mapped[int | None] = mapped_column(ForeignKey("whole_fish_sales.id"))  # 内部销售单（亘昌贸易/绍兴优逸）
+    slaughter_record_id: Mapped[int | None] = mapped_column(ForeignKey("daily_slaughter_records.id"))
     
     # 成品端
-    finished_product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("slaughter_finished_products.id"))
-    finished_product_sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales.id"))  # 成品销售单
+    finished_product_id: Mapped[int | None] = mapped_column(ForeignKey("slaughter_finished_products.id"))
+    finished_product_sale_id: Mapped[int | None] = mapped_column(ForeignKey("finished_product_sales.id"))  # 成品销售单
     
     # 追溯状态
     trace_status: Mapped[str] = mapped_column(String(20), default="in_progress")  # in_progress(进行中), completed(已完成)

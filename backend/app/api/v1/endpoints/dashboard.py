@@ -1,11 +1,16 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy import select, func, and_, case
-from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date, datetime, timedelta
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import and_, case, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import (
-    Batch, BatchStatus, ImportInvoice, Company, CompanyType,
+    Batch,
+    BatchStatus,
+    Company,
+    CompanyType,
+    ImportInvoice,
     Inventory,
 )
 

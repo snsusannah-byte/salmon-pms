@@ -1,14 +1,18 @@
-from typing import List, Optional
-from datetime import datetime, date
-from decimal import Decimal, ROUND_UP
+from datetime import date, datetime
+from decimal import ROUND_UP, Decimal
 
-from sqlalchemy import select, func, and_, delete
-from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
+from sqlalchemy import and_, delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.models import ImportInvoice, InvoiceProduct, InvoiceStatus, ExchangeStatus
-from app.schemas.invoice import InvoiceCreate, InvoiceUpdate, InvoiceProductCreate, InvoiceProductUpdate
+from app.models import ExchangeStatus, ImportInvoice, InvoiceProduct, InvoiceStatus
+from app.schemas.invoice import (
+    InvoiceCreate,
+    InvoiceProductCreate,
+    InvoiceProductUpdate,
+    InvoiceUpdate,
+)
 
 
 def _quantize(value: Decimal) -> Decimal:
@@ -20,7 +24,7 @@ class InvoiceService:
     """进口单证服务"""
     
     @staticmethod
-    async def get_by_id(db: AsyncSession, invoice_id: int) -> Optional[ImportInvoice]:
+    async def get_by_id(db: AsyncSession, invoice_id: int) -> ImportInvoice | None:
         """根据ID获取发票（包含产品明细和关联主体）"""
         result = await db.execute(
             select(ImportInvoice)
@@ -30,13 +34,14 @@ class InvoiceService:
                 selectinload(ImportInvoice.fish_farm),
                 selectinload(ImportInvoice.exporter),
                 selectinload(ImportInvoice.supplier),
+                selectinload(ImportInvoice.importer),
             )
             .where(ImportInvoice.id == invoice_id)
         )
         return result.scalar_one_or_none()
     
     @staticmethod
-    async def get_by_invoice_no(db: AsyncSession, invoice_no: str) -> Optional[ImportInvoice]:
+    async def get_by_invoice_no(db: AsyncSession, invoice_no: str) -> ImportInvoice | None:
         """根据发票编号获取"""
         result = await db.execute(
             select(ImportInvoice).where(ImportInvoice.invoice_no == invoice_no)
@@ -46,17 +51,17 @@ class InvoiceService:
     @staticmethod
     async def list_invoices(
         db: AsyncSession,
-        customs_status: Optional[InvoiceStatus] = None,
-        exchange_status: Optional[str] = None,
-        processing_plant_id: Optional[int] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        search: Optional[str] = None,
+        customs_status: InvoiceStatus | None = None,
+        exchange_status: str | None = None,
+        processing_plant_id: int | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        search: str | None = None,
         exclude_assigned: bool = False,
         exclude_with_fees: bool = False,
         skip: int = 0,
         limit: int = 100,
-    ) -> tuple[List[ImportInvoice], int]:
+    ) -> tuple[list[ImportInvoice], int]:
         """获取发票列表"""
         query = select(ImportInvoice)
         count_query = select(func.count(ImportInvoice.id))
@@ -93,7 +98,7 @@ class InvoiceService:
             # 规则：
             # 1. 自身有税费或清关费用的发票排除
             # 2. 从票的主票有费用记录的也排除
-            from app.models import ImportTax, ClearanceCost
+            from app.models import ClearanceCost, ImportTax
 
             # 找到所有有费用记录的发票ID
             tax_ids = select(ImportTax.invoice_id)
@@ -205,7 +210,7 @@ class InvoiceService:
             # 从票继承主票的物流/证书信息
             inherit_fields = ["awb_no", "gross_weight_kg", "eta", "departure_date", 
                             "flight_info", "origin_certificate", "inspection_certificate",
-                            "processing_plant_id", "fish_farm_id", "exporter_id"]
+                            "processing_plant_id", "fish_farm_id", "exporter_id", "importer_id"]
             for field in inherit_fields:
                 if not invoice_data.get(field) and getattr(parent, field, None):
                     invoice_data[field] = getattr(parent, field)
@@ -213,7 +218,7 @@ class InvoiceService:
             invoice_data["is_master"] = False
         
         # PostgreSQL 外键约束：把 0 转为 None
-        for fk_field in ["processing_plant_id", "fish_farm_id", "exporter_id"]:
+        for fk_field in ["processing_plant_id", "fish_farm_id", "exporter_id", "importer_id"]:
             if fk_field in invoice_data and invoice_data[fk_field] == 0:
                 invoice_data[fk_field] = None
         
@@ -259,8 +264,8 @@ class InvoiceService:
         try:
             from app.services.notification_service import InvoiceNotificationService
             await InvoiceNotificationService.create_notifications(db, invoice.id)
-        except Exception as e:
-            print(f"通知生成失败: {e}")
+        except Exception:
+            pass
         
         return invoice
     
@@ -340,6 +345,7 @@ class InvoiceService:
         # 1. 主票检查：如果有从票，禁止删除（需先删除从票）
         if invoice.is_master:
             from sqlalchemy import select as sa_select
+
             from app.models import ImportInvoice as ImportInvoiceModel
             sub_result = await db.execute(
                 sa_select(ImportInvoiceModel).where(ImportInvoiceModel.parent_invoice_id == invoice.id)

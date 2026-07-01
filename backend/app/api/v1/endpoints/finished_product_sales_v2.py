@@ -1,5 +1,4 @@
 from decimal import Decimal
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,8 +7,8 @@ from app.core.database import get_db
 from app.models.finished_product_v2 import SaleItemType
 from app.schemas.finished_product_v2 import (
     FinishedProductSaleItemResponse,
-    SlaughterDateOption,
     FinishedProductSaleWithItemsCreate,
+    SlaughterDateOption,
 )
 from app.services.daily_slaughter_service import DailySlaughterService
 from app.services.finished_product_sale_v2 import FinishedProductSaleServiceV2
@@ -63,9 +62,9 @@ async def create_sale_with_items(
     }
 
 
-@router.get("/options/slaughter-dates", response_model=List[SlaughterDateOption])
+@router.get("/options/slaughter-dates", response_model=list[SlaughterDateOption])
 async def get_available_slaughter_dates(
-    min_available_kg: Optional[Decimal] = Query(Decimal("0")),
+    min_available_kg: Decimal | None = Query(Decimal("0")),
     db: AsyncSession = Depends(get_db),
 ):
     """获取可供销售的宰杀日期列表"""
@@ -73,7 +72,7 @@ async def get_available_slaughter_dates(
     return [SlaughterDateOption(**d) for d in dates]
 
 
-@router.get("/{sale_id}/items", response_model=List[FinishedProductSaleItemResponse])
+@router.get("/{sale_id}/items", response_model=list[FinishedProductSaleItemResponse])
 async def get_sale_items(
     sale_id: int,
     db: AsyncSession = Depends(get_db),

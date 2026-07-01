@@ -4,12 +4,10 @@
 """
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import BatchStatus
-
 
 # ==================== 批次财报 ====================
 
@@ -39,9 +37,10 @@ class BatchReportSummaryItem(BaseModel):
     total_clearance_cost: Decimal = Decimal("0")
 
     # 购汇
-    exchange_rate: Optional[Decimal] = None
+    exchange_rate: Decimal | None = None
     total_exchange_payment: Decimal = Decimal("0")
     total_exchange_fee: Decimal = Decimal("0")
+    is_exchange_estimated: bool = False
 
     # 销售
     total_sales_amount: Decimal = Decimal("0")
@@ -52,9 +51,10 @@ class BatchReportSummaryItem(BaseModel):
 
     # 利润
     total_expenses: Decimal = Decimal("0")
+    total_other_expenses: Decimal = Decimal("0")
     shrinkage: Decimal = Decimal("0")
     net_profit: Decimal = Decimal("0")
-    profit_margin: Optional[Decimal] = None
+    profit_margin: Decimal | None = None
     cumulative_profit: Decimal = Decimal("0")
 
     # 锁定状态
@@ -64,7 +64,7 @@ class BatchReportSummaryItem(BaseModel):
 class BatchReportListResponse(BaseModel):
     """批次财报列表响应"""
     total: int
-    items: List[BatchReportSummaryItem]
+    items: list[BatchReportSummaryItem]
     skip: int
     limit: int
 
@@ -86,15 +86,15 @@ class BatchReportInvoiceDetail(BaseModel):
     invoice_id: int
     invoice_no: str
     invoice_date: date
-    processing_plant_name: Optional[str] = None
-    processing_plant_eu_code: Optional[str] = None
-    processing_plant_customs_code: Optional[str] = None
-    processing_plant_coc_no: Optional[str] = None
-    fish_farm_name: Optional[str] = None
-    fish_farm_ggn: Optional[str] = None
-    fish_farm_coc_no: Optional[str] = None
-    fish_farm_area: Optional[str] = None
-    exporter_name: Optional[str] = None
+    processing_plant_name: str | None = None
+    processing_plant_eu_code: str | None = None
+    processing_plant_customs_code: str | None = None
+    processing_plant_coc_no: str | None = None
+    fish_farm_name: str | None = None
+    fish_farm_ggn: str | None = None
+    fish_farm_coc_no: str | None = None
+    fish_farm_area: str | None = None
+    exporter_name: str | None = None
     total_amount_usd: Decimal = Decimal("0")
     total_boxes: int = 0
     total_weight_kg: Decimal = Decimal("0")
@@ -108,7 +108,7 @@ class BatchReportInvoiceDetail(BaseModel):
     sales_weight: Decimal = Decimal("0")
     shrinkage: Decimal = Decimal("0")
     net_profit: Decimal = Decimal("0")
-    products: List[InvoiceProductItem] = []
+    products: list[InvoiceProductItem] = []
 
 
 class BatchReportDetail(BaseModel):
@@ -136,11 +136,13 @@ class BatchReportDetail(BaseModel):
     # 清关明细
     total_clearance_cost: Decimal = Decimal("0")
     clearance_breakdown: dict = Field(default_factory=dict)
+    clearance_extra_items: list[dict] = Field(default_factory=list)
 
     # 购汇总明
-    exchange_rate: Optional[Decimal] = None
+    exchange_rate: Decimal | None = None
     total_exchange_payment: Decimal = Decimal("0")
     total_exchange_fee: Decimal = Decimal("0")
+    is_exchange_estimated: bool = False
 
     # 销售汇总
     total_sales_amount: Decimal = Decimal("0")
@@ -155,9 +157,10 @@ class BatchReportDetail(BaseModel):
 
     # 利润
     total_expenses: Decimal = Decimal("0")
+    total_other_expenses: Decimal = Decimal("0")
     shrinkage: Decimal = Decimal("0")
     net_profit: Decimal = Decimal("0")
-    profit_margin: Optional[Decimal] = None
+    profit_margin: Decimal | None = None
 
     # 累计利润（需要后端计算）
     cumulative_profit: Decimal = Decimal("0")
@@ -166,8 +169,9 @@ class BatchReportDetail(BaseModel):
     is_locked: bool = False
 
     # 明细
-    invoices: List[BatchReportInvoiceDetail] = []
-    sales: List[dict] = []
+    invoices: list[BatchReportInvoiceDetail] = []
+    sales: list[dict] = []
+    other_expenses: list[dict] = []
 
 
 # ==================== 单票财报 ====================
@@ -178,11 +182,11 @@ class InvoiceReportSummaryItem(BaseModel):
     invoice_id: int
     invoice_no: str
     invoice_date: date
-    processing_plant_name: Optional[str] = None
-    exporter_name: Optional[str] = None
-    supplier_name: Optional[str] = None  # 供应商（真正的付款对象）
-    batch_name: Optional[str] = None
-    batch_code: Optional[str] = None
+    processing_plant_name: str | None = None
+    exporter_name: str | None = None
+    supplier_name: str | None = None  # 供应商（真正的付款对象）
+    batch_name: str | None = None
+    batch_code: str | None = None
 
     # 采购
     total_amount_usd: Decimal = Decimal("0")
@@ -199,7 +203,7 @@ class InvoiceReportSummaryItem(BaseModel):
     clearance_cost: Decimal = Decimal("0")
 
     # 购汇
-    exchange_rate: Optional[Decimal] = None
+    exchange_rate: Decimal | None = None
     exchange_payment: Decimal = Decimal("0")
     exchange_fee: Decimal = Decimal("0")
 
@@ -212,13 +216,13 @@ class InvoiceReportSummaryItem(BaseModel):
     total_expenses: Decimal = Decimal("0")
     shrinkage: Decimal = Decimal("0")
     net_profit: Decimal = Decimal("0")
-    profit_margin: Optional[Decimal] = None
+    profit_margin: Decimal | None = None
 
 
 class InvoiceReportListResponse(BaseModel):
     """单票财报列表响应"""
     total: int
-    items: List[InvoiceReportSummaryItem]
+    items: list[InvoiceReportSummaryItem]
     skip: int
     limit: int
 
@@ -238,9 +242,9 @@ class InvoiceSaleDetail(BaseModel):
     """发票销售明细"""
     model_config = ConfigDict(from_attributes=True)
     sale_date: date
-    customer_name: Optional[str] = None
-    spec: Optional[str] = None
-    box_count: Optional[int] = None
+    customer_name: str | None = None
+    spec: str | None = None
+    box_count: int | None = None
     weight_kg: Decimal = Decimal("0")
     unit_price: Decimal = Decimal("0")
     gross_amount: Decimal = Decimal("0")
@@ -258,22 +262,22 @@ class InvoiceReportDetail(BaseModel):
     invoice_id: int
     invoice_no: str
     invoice_date: date
-    kill_date: Optional[date] = None
-    arrival_date: Optional[date] = None
-    processing_plant_name: Optional[str] = None
-    processing_plant_eu_code: Optional[str] = None
-    processing_plant_customs_code: Optional[str] = None
-    processing_plant_coc_no: Optional[str] = None
-    fish_farm_name: Optional[str] = None
-    fish_farm_ggn: Optional[str] = None
-    fish_farm_coc_no: Optional[str] = None
-    fish_farm_area: Optional[str] = None
-    exporter_name: Optional[str] = None
-    supplier_name: Optional[str] = None
-    awb_no: Optional[str] = None
-    gross_weight_kg: Optional[Decimal] = None
-    batch_name: Optional[str] = None
-    batch_code: Optional[str] = None
+    kill_date: date | None = None
+    arrival_date: date | None = None
+    processing_plant_name: str | None = None
+    processing_plant_eu_code: str | None = None
+    processing_plant_customs_code: str | None = None
+    processing_plant_coc_no: str | None = None
+    fish_farm_name: str | None = None
+    fish_farm_ggn: str | None = None
+    fish_farm_coc_no: str | None = None
+    fish_farm_area: str | None = None
+    exporter_name: str | None = None
+    supplier_name: str | None = None
+    awb_no: str | None = None
+    gross_weight_kg: Decimal | None = None
+    batch_name: str | None = None
+    batch_code: str | None = None
 
     # 采购
     total_amount_usd: Decimal = Decimal("0")
@@ -282,7 +286,7 @@ class InvoiceReportDetail(BaseModel):
     total_boxes: int = 0
 
     # 产品明细
-    products: List[InvoiceProductDetail] = []
+    products: list[InvoiceProductDetail] = []
 
     # 税费
     import_duty: Decimal = Decimal("0")
@@ -294,7 +298,7 @@ class InvoiceReportDetail(BaseModel):
     clearance_breakdown: dict = Field(default_factory=dict)
 
     # 购汇
-    exchange_rate: Optional[Decimal] = None
+    exchange_rate: Decimal | None = None
     exchange_payment: Decimal = Decimal("0")
     exchange_fee: Decimal = Decimal("0")
 
@@ -308,14 +312,17 @@ class InvoiceReportDetail(BaseModel):
     total_after_sales: Decimal = Decimal("0")
     total_discount: Decimal = Decimal("0")
     sales_count: int = 0
-    sales: List[InvoiceSaleDetail] = []
+    sales: list[InvoiceSaleDetail] = []
 
     # 利润
     total_expenses: Decimal = Decimal("0")
     shrinkage: Decimal = Decimal("0")
     net_profit: Decimal = Decimal("0")
     cumulative_profit: Decimal = Decimal("0")
-    profit_margin: Optional[Decimal] = None
+    profit_margin: Decimal | None = None
+
+    # 合并批次销售分摊比例 (0~1, 单票批次为 1)
+    sales_proportion: Decimal | None = None
 
 
 # ==================== 应收款对账单 ====================
@@ -325,10 +332,10 @@ class ReceivableSaleItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     date: date
     sale_no: str
-    spec: Optional[str] = None
-    quantity: Optional[int] = None
-    weight_kg: Optional[Decimal] = None
-    unit_price: Optional[Decimal] = None
+    spec: str | None = None
+    quantity: int | None = None
+    weight_kg: Decimal | None = None
+    unit_price: Decimal | None = None
     gross_amount: Decimal = Decimal("0")
     net_amount: Decimal = Decimal("0")
 
@@ -339,20 +346,20 @@ class ReceivableDiscountItem(BaseModel):
     date: date
     sale_no: str
     discount_amount: Decimal = Decimal("0")
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class ReceivableAftersalesItem(BaseModel):
     """应收对账 - 售后明细"""
     model_config = ConfigDict(from_attributes=True)
     date: date
-    return_no: Optional[str] = None  # 退货单号
-    sale_no: Optional[str] = None  # 关联销售单号
-    quantity: Optional[float] = None  # 退货数量（重量kg）
-    unit_price: Optional[Decimal] = None  # 单价
+    return_no: str | None = None  # 退货单号
+    sale_no: str | None = None  # 关联销售单号
+    quantity: float | None = None  # 退货数量（重量kg）
+    unit_price: Decimal | None = None  # 单价
     amount: Decimal = Decimal("0")  # 退款金额
-    reason: Optional[str] = None  # 退货原因/备注
-    refund_method: Optional[str] = None  # 退款方式
+    reason: str | None = None  # 退货原因/备注
+    refund_method: str | None = None  # 退款方式
 
 
 class ReceivableReceiptItem(BaseModel):
@@ -360,8 +367,8 @@ class ReceivableReceiptItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     date: date
     amount: Decimal = Decimal("0")
-    payment_method: Optional[str] = None
-    reference_no: Optional[str] = None
+    payment_method: str | None = None
+    reference_no: str | None = None
 
 
 class ReceivableCustomerItem(BaseModel):
@@ -369,21 +376,21 @@ class ReceivableCustomerItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     date: date
     type: str  # "sale_wf" / "sale_fp" / "receipt_wf" / "receipt_fp" / "opening" / "aftersales" / "discount"
-    sale_no: Optional[str] = None
-    description: Optional[str] = None
+    sale_no: str | None = None
+    description: str | None = None
     debit: Decimal = Decimal("0")  # 应收增加（销售）
     credit: Decimal = Decimal("0")  # 应收减少（收款/售后/折扣）
     balance: Decimal = Decimal("0")  # 累计余额
     # 销售明细
-    spec: Optional[str] = None
-    quantity: Optional[int] = None  # 箱数/份数
-    weight_kg: Optional[Decimal] = None
-    unit_price: Optional[Decimal] = None
-    gross_amount: Optional[Decimal] = None  # 销售金额（折扣前）
+    spec: str | None = None
+    quantity: int | None = None  # 箱数/份数
+    weight_kg: Decimal | None = None
+    unit_price: Decimal | None = None
+    gross_amount: Decimal | None = None  # 销售金额（折扣前）
     # 售后明细
-    aftersales_reason: Optional[str] = None
+    aftersales_reason: str | None = None
     # 折扣
-    discount_amount: Optional[Decimal] = None
+    discount_amount: Decimal | None = None
 
 
 class ReceivableStatementItem(BaseModel):
@@ -391,7 +398,7 @@ class ReceivableStatementItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     customer_id: int
     customer_name: str
-    customer_code: Optional[str] = None
+    customer_code: str | None = None
 
     # 汇总
     opening_balance: Decimal = Decimal("0")  # 期初欠款
@@ -403,23 +410,23 @@ class ReceivableStatementItem(BaseModel):
     closing_balance: Decimal = Decimal("0")  # 期末欠款
 
     # 明细（兼容旧版前端）
-    details: List[ReceivableCustomerItem] = []
+    details: list[ReceivableCustomerItem] = []
 
     # 分组明细（新版）
-    sale_details: List[ReceivableSaleItem] = []
-    discount_details: List[ReceivableDiscountItem] = []
-    aftersales_details: List[ReceivableAftersalesItem] = []
-    receipt_details: List[ReceivableReceiptItem] = []
+    sale_details: list[ReceivableSaleItem] = []
+    discount_details: list[ReceivableDiscountItem] = []
+    aftersales_details: list[ReceivableAftersalesItem] = []
+    receipt_details: list[ReceivableReceiptItem] = []
 
 
 class ReceivableStatementResponse(BaseModel):
     """应收款对账单响应"""
     total: int
-    items: List[ReceivableStatementItem]
+    items: list[ReceivableStatementItem]
     skip: int
     limit: int
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: str | None = None
+    end_date: str | None = None
     total_receivable: Decimal = Decimal("0")  # 总应收
 
 
@@ -430,39 +437,60 @@ class PayableSupplierItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     date: date
     type: str  # "invoice" / "payment" / "exchange" / "opening"
-    invoice_no: Optional[str] = None
-    description: Optional[str] = None
+    invoice_no: str | None = None
+    description: str | None = None
     debit: Decimal = Decimal("0")  # 应付增加（采购/费用）
     credit: Decimal = Decimal("0")  # 应付减少（付款）
     balance: Decimal = Decimal("0")  # 累计余额
 
 
 class PayablePurchaseItem(BaseModel):
-    """应付对账 - 采购明细"""
+    """应付对账 - 采购明细（进口采购用）"""
     model_config = ConfigDict(from_attributes=True)
     date: date
     invoice_no: str
     amount_usd: Decimal = Decimal("0")
-    exchange_rate: Optional[Decimal] = None
+    exchange_rate: Decimal | None = None
     amount_cny: Decimal = Decimal("0")
+    # 进口商信息（仅进口采购用）
+    importer_name: str | None = None  # 进口商名称
+    # 购汇关联信息
+    exchange_status: str | None = None  # not_exchanged / exchanged / partial
+    exchange_no: str | None = None  # 购汇单号
+    exchange_date: date | None = None  # 购汇日期
+    exchange_rate_actual: Decimal | None = None  # 实际购汇汇率
+    amount_usd_exchanged: Decimal | None = None  # 已购汇 USD 金额
+
+
+class PayableExchangeItem(BaseModel):
+    """应付对账 - 购汇明细（进口采购付款用）"""
+    model_config = ConfigDict(from_attributes=True)
+    exchange_no: str | None = None  # 购汇单号
+    exchange_date: date | None = None  # 购汇日期
+    exchange_rate: Decimal | None = None  # 汇率
+    amount_usd: Decimal = Decimal("0")  # 购汇金额(USD)
+    fee_cny: Decimal = Decimal("0")  # 手续费(CNY)
+    amount_cny: Decimal = Decimal("0")  # 购汇金额(CNY)
+    total_cny: Decimal = Decimal("0")  # 合计 CNY = amount_cny + fee_cny
+    invoice_nos: str | None = None  # 关联发票号列表
 
 
 class PayableExpenseItem(BaseModel):
     """应付对账 - 费用明细"""
     model_config = ConfigDict(from_attributes=True)
     date: date
-    invoice_no: Optional[str] = None
+    invoice_no: str | None = None
     expense_type: str  # "import_duty" / "import_vat" / "clearance_fee" / "freight_fee" / "inspection_fee" / "quarantine_fee" / "other"
-    description: Optional[str] = None
+    description: str | None = None
     amount: Decimal = Decimal("0")
     # 报关行费用细项
-    gross_weight_kg: Optional[Decimal] = None  # 出关毛重(kg)
-    freight_fee: Optional[Decimal] = None    # 运费
-    inspection_fee: Optional[Decimal] = None  # 目的地查验费
-    quarantine_fee: Optional[Decimal] = None   # 冷藏费
-    other_costs: Optional[Decimal] = None      # 其他费用(报关服务费+提货费等)
-    clearance_fee: Optional[Decimal] = None    # 清关费(提货费)
-    total_cost: Optional[Decimal] = None       # 清关费合计
+    gross_weight_kg: Decimal | None = None  # 出关毛重(kg)
+    freight_fee: Decimal | None = None    # 运费
+    inspection_fee: Decimal | None = None  # 目的地查验费
+    quarantine_fee: Decimal | None = None   # 冷藏费
+    other_costs: Decimal | None = None      # 其他费用(报关服务费+提货费等)
+    clearance_fee: Decimal | None = None    # 清关费(提货费)
+    total_cost: Decimal | None = None       # 清关费合计
 
 
 class PayablePaymentItem(BaseModel):
@@ -471,8 +499,8 @@ class PayablePaymentItem(BaseModel):
     date: date
     payment_type: str  # "exchange" / "clearance_payment" / "other"
     amount: Decimal = Decimal("0")
-    reference_no: Optional[str] = None
-    description: Optional[str] = None
+    reference_no: str | None = None
+    description: str | None = None
 
 
 class PayableStatementItem(BaseModel):
@@ -481,7 +509,7 @@ class PayableStatementItem(BaseModel):
     supplier_id: int
     supplier_name: str
     supplier_type: str  # "processing_plant" / "exporter" / "customs_broker" / "logistics"
-    supplier_code: Optional[str] = None
+    supplier_code: str | None = None
 
     # 汇总
     opening_balance: Decimal = Decimal("0")  # 期初欠款
@@ -490,24 +518,32 @@ class PayableStatementItem(BaseModel):
     current_payments: Decimal = Decimal("0")  # 本期付款（购汇+其他）
     closing_balance: Decimal = Decimal("0")  # 期末欠款
 
+    # 进口采购汇总（仅进口采购用）
+    total_import_usd: Decimal = Decimal("0")  # 进口总金额 USD
+    total_exchanged_usd: Decimal = Decimal("0")  # 已购汇金额 USD
+    total_unexchanged_usd: Decimal = Decimal("0")  # 未购汇金额 USD
+    total_exchanged_cny: Decimal = Decimal("0")  # 已购汇合计 CNY
+
     # 明细（兼容旧版前端）
-    details: List[PayableSupplierItem] = []
+    details: list[PayableSupplierItem] = []
 
     # 分组明细（新版）
-    purchase_details: List[PayablePurchaseItem] = []
-    expense_details: List[PayableExpenseItem] = []
-    payment_details: List[PayablePaymentItem] = []
+    purchase_details: list[PayablePurchaseItem] = []
+    expense_details: list[PayableExpenseItem] = []
+    payment_details: list[PayablePaymentItem] = []
+    exchange_details: list[PayableExchangeItem] = []  # 购汇明细（进口采购用）
 
 
 class PayableStatementResponse(BaseModel):
     """应付款对账单响应"""
     total: int
-    items: List[PayableStatementItem]
+    items: list[PayableStatementItem]
     skip: int
     limit: int
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: str | None = None
+    end_date: str | None = None
     total_payable: Decimal = Decimal("0")  # 总应付
+    purchase_type: str | None = None  # import / domestic / all
 
 
 class PayableMonthlyItem(BaseModel):
@@ -520,7 +556,7 @@ class PayableMonthlyItem(BaseModel):
     current_expenses: Decimal = Decimal("0")
     current_payments: Decimal = Decimal("0")
     closing_balance: Decimal = Decimal("0")
-    details: List[PayableSupplierItem] = []
+    details: list[PayableSupplierItem] = []
 
 
 class PayableMonthlyResponse(BaseModel):
@@ -528,19 +564,19 @@ class PayableMonthlyResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     supplier_id: int
     supplier_name: str
-    supplier_code: Optional[str] = None
+    supplier_code: str | None = None
     currency: str = "CNY"
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: str | None = None
+    end_date: str | None = None
     total_payable: Decimal = Decimal("0")
-    months: List[PayableMonthlyItem] = []
+    months: list[PayableMonthlyItem] = []
 
 
 class FinancialStatementItem(BaseModel):
     """财务报表行项目"""
     model_config = ConfigDict(from_attributes=True)
     label: str
-    amount: Optional[Decimal] = None
+    amount: Decimal | None = None
     is_header: bool = False
     is_section: bool = False
     is_subtotal: bool = False
@@ -549,7 +585,7 @@ class FinancialStatementItem(BaseModel):
     is_deduction: bool = False
     is_spacer: bool = False
     indent: int = 0
-    note: Optional[str] = None
+    note: str | None = None
 
 
 class IncomeStatement(BaseModel):
@@ -557,7 +593,7 @@ class IncomeStatement(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     title: str = "利润表"
     subtitle: str = "（未经审计）"
-    items: List[FinancialStatementItem] = []
+    items: list[FinancialStatementItem] = []
     summary: dict = Field(default_factory=dict)
 
 
@@ -566,9 +602,9 @@ class BalanceSheet(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     title: str = "资产负债表"
     subtitle: str = "（未经审计）"
-    items: List[FinancialStatementItem] = []
+    items: list[FinancialStatementItem] = []
     summary: dict = Field(default_factory=dict)
-    customer_debts: List[dict] = Field(default_factory=dict)  # TOP5欠款客户
+    customer_debts: list[dict] = Field(default_factory=dict)  # TOP5欠款客户
 
 
 class CashFlowStatement(BaseModel):
@@ -576,17 +612,17 @@ class CashFlowStatement(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     title: str = "现金流量表"
     subtitle: str = "（未经审计）"
-    items: List[FinancialStatementItem] = []
+    items: list[FinancialStatementItem] = []
     summary: dict = Field(default_factory=dict)
 
 
 class FinancialCharts(BaseModel):
     """图表数据"""
     model_config = ConfigDict(from_attributes=True)
-    monthly_trend: List[dict] = Field(default_factory=list)
+    monthly_trend: list[dict] = Field(default_factory=list)
     expense_breakdown: dict = Field(default_factory=dict)
-    customer_revenue: List[dict] = Field(default_factory=list)
-    profit_trend: List[dict] = Field(default_factory=list)
+    customer_revenue: list[dict] = Field(default_factory=list)
+    profit_trend: list[dict] = Field(default_factory=list)
 
 
 class NettingStatementItem(BaseModel):
@@ -594,8 +630,8 @@ class NettingStatementItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     company_id: int
     company_name: str
-    company_code: Optional[str] = None
-    company_type: Optional[str] = None  # customer / supplier / both
+    company_code: str | None = None
+    company_type: str | None = None  # customer / supplier / both
 
     # 应收端
     receivable_opening: Decimal = Decimal("0")
@@ -616,23 +652,23 @@ class NettingStatementItem(BaseModel):
     netting_direction: str = "平"             # "应收" / "应付" / "平"
 
     # 分组明细
-    sale_details: List[ReceivableSaleItem] = []
-    discount_details: List[ReceivableDiscountItem] = []
-    aftersales_details: List[ReceivableAftersalesItem] = []
-    receipt_details: List[ReceivableReceiptItem] = []
-    purchase_details: List[PayablePurchaseItem] = []
-    expense_details: List[PayableExpenseItem] = []
-    payment_details: List[PayablePaymentItem] = []
+    sale_details: list[ReceivableSaleItem] = []
+    discount_details: list[ReceivableDiscountItem] = []
+    aftersales_details: list[ReceivableAftersalesItem] = []
+    receipt_details: list[ReceivableReceiptItem] = []
+    purchase_details: list[PayablePurchaseItem] = []
+    expense_details: list[PayableExpenseItem] = []
+    payment_details: list[PayablePaymentItem] = []
 
 
 class NettingStatementResponse(BaseModel):
     """往来对账单响应"""
     total: int
-    items: List[NettingStatementItem]
+    items: list[NettingStatementItem]
     skip: int
     limit: int
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: str | None = None
+    end_date: str | None = None
     total_net_receivable: Decimal = Decimal("0")  # 总净应收
     total_net_payable: Decimal = Decimal("0")     # 总净应付
 
@@ -649,8 +685,8 @@ class FinancialStatements(BaseModel):
 class FinancialStatementsRequest(BaseModel):
     """三大报表请求参数"""
     period_type: str = "current_quarter"  # current_quarter / last_quarter / first_half / second_half / current_year / last_year / custom
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
+    start_date: str | None = None
+    end_date: str | None = None
     retail_revenue: Decimal = Decimal("0")
     retail_cost: Decimal = Decimal("0")
 
@@ -661,6 +697,6 @@ class ReportListRequest(BaseModel):
     """报表列表通用请求"""
     skip: int = 0
     limit: int = 30
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    search: Optional[str] = None
+    start_date: str | None = None
+    end_date: str | None = None
+    search: str | None = None

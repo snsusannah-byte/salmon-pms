@@ -170,7 +170,7 @@ export function WarehousePage() {
 
   // 表单
   const [poForm, setPoForm] = useState({
-    order_date: new Date().toISOString().split("T")[0],
+    order_date: new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-'),
     product_id: "",
     supplier_id: "",
     batch_no: "",
@@ -317,7 +317,7 @@ export function WarehousePage() {
 
   function resetPoForm() {
     setPoForm({
-      order_date: new Date().toISOString().split("T")[0],
+      order_date: new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-'),
       product_id: "",
       supplier_id: "",
       batch_no: "",
@@ -341,6 +341,13 @@ export function WarehousePage() {
   }
 
   function handleStockInOut() {
+    if (inOutType === "out") {
+      const stock = stocks.find((s) => String(s.product_id) === inOutForm.product_id);
+      if (!stock || stock.current_quantity < inOutForm.quantity) {
+        toast.error("库存不足，无法出库");
+        return;
+      }
+    }
     stockInOutMutation.mutate({
       type: inOutType,
       body: {
@@ -352,7 +359,9 @@ export function WarehousePage() {
   }
 
   const filteredStocks = stocks.filter((s) => {
-    if (search) return s.product_name.toLowerCase().includes(search.toLowerCase());
+    if (search && !s.product_name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (categoryFilter !== "all" && s.category !== categoryFilter) return false;
+    if (warehouseFilter !== "all" && s.warehouse_type !== warehouseFilter) return false;
     return true;
   });
 
@@ -613,7 +622,7 @@ export function WarehousePage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {poLoading ? <TableRow><TableCell colSpan={9} className="text-center py-8">加载中...</TableCell></TableRow> :
+                {poLoading ? <TableRow><TableCell colSpan={11} className="text-center py-8">加载中...</TableCell></TableRow> :
                  purchaseOrders.length === 0 ? <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground">暂无记录</TableCell></TableRow> :
                  purchaseOrders.map((po) => (
                   <TableRow key={po.id}>

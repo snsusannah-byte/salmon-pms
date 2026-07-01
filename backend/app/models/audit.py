@@ -2,15 +2,14 @@
 操作审计日志模型
 """
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
-    Integer,
-    String,
-    Text,
     DateTime,
     ForeignKey,
     Index,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,12 +23,12 @@ class AuditLog(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # 操作人
-    user_id: Mapped[Optional[int]] = mapped_column(
+    user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    username: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    username: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # 操作信息
     action: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
@@ -38,27 +37,27 @@ class AuditLog(Base):
     module: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     """所属模块: companies | finance | warehouse | sales | batches | system | auth"""
 
-    resource_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    resource_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     """资源类型: Company | BankAccount | Transaction | Batch | ..."""
 
-    resource_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    resource_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     """资源主键"""
 
     # 详情
-    details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
     """JSON 或文本形式的变更详情"""
 
-    old_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    old_values: Mapped[str | None] = mapped_column(Text, nullable=True)
     """变更前的值（JSON）"""
 
-    new_values: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_values: Mapped[str | None] = mapped_column(Text, nullable=True)
     """变更后的值（JSON）"""
 
     # 网络信息
-    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     """IPv4 或 IPv6"""
 
-    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     """浏览器 User-Agent"""
 
     # 时间戳

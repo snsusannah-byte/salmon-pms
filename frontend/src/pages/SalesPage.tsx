@@ -138,13 +138,12 @@ export function SalesPage() {
   const [receiptRounding, setReceiptRounding] = useState("0");
   const [receiptBankAccountId, setReceiptBankAccountId] = useState("");
   const [receiptMethod, setReceiptMethod] = useState("bank_transfer");
-  const [receiptDate, setReceiptDate] = useState(new Date().toISOString().split("T")[0]);
+  const [receiptDate, setReceiptDate] = useState(new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-'));
   const [receiptDescription, setReceiptDescription] = useState("");
   const [adjRounding, setAdjRounding] = useState("0");
   const [adjDiscount, setAdjDiscount] = useState("0");
   const [adjCommission, setAdjCommission] = useState("0");
   const [adjCommissionType, setAdjCommissionType] = useState<"fixed" | "per_kg">("fixed");
-  const [adjPaidAmount, setAdjPaidAmount] = useState("0");
   const [exportLoading, setExportLoading] = useState(false);
   const queryClient = useQueryClient();
 
@@ -239,7 +238,7 @@ export function SalesPage() {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `whole_fish_sales_${new Date().toISOString().split("T")[0].replace(/-/g, "")}.csv`;
+      link.download = `whole_fish_sales_${new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '').replace(/-/g, "")}.csv`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -360,7 +359,7 @@ export function SalesPage() {
     setAdjRounding(String(sale.rounding_adjustment ?? 0));
     setAdjCommission(String(sale.commission ?? 0));
     setAdjBankAccountId("");
-    setAdjReceiptDate(new Date().toISOString().split("T")[0]);
+    setAdjReceiptDate(new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-'));
     setAdjustDialogOpen(true);
   };
 
@@ -372,7 +371,7 @@ export function SalesPage() {
     setReceiptRounding("0");
     setReceiptBankAccountId("");
     setReceiptMethod("bank_transfer");
-    setReceiptDate(new Date().toISOString().split("T")[0]);
+    setReceiptDate(new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-'));
     setReceiptDescription("");
     setReceiptDialogOpen(true);
   };
@@ -397,8 +396,8 @@ export function SalesPage() {
     // 收款金额允许略大于应收（实际业务中客户可能凑整多转）
     const receivable = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
     if (amount > receivable) {
-      // 多收场景：仅做提示，不拦截
-      console.log(`本次实收 ¥${amount.toFixed(2)} 超过应收余额 ¥${receivable.toFixed(2)}，多收 ¥${(amount - receivable).toFixed(2)}`);
+      // 多收场景：提示用户但不拦截
+      toast.info(`本次实收 ¥${amount.toFixed(2)} 超过应收余额 ¥${receivable.toFixed(2)}，多收 ¥${(amount - receivable).toFixed(2)}`);
     }
     try {
       // 收款时传 rounding_adjustment（用户手动控制抹零）
@@ -414,6 +413,7 @@ export function SalesPage() {
       queryClient.invalidateQueries({ queryKey: ["sales"] });
       setReceiptDialogOpen(false);
       setReceiptSale(null);
+      setSelectedIds(new Set());
     } catch (err: any) {
       toast.error(err.response?.data?.detail || "收款失败");
     }
@@ -834,33 +834,75 @@ export function SalesPage() {
 
             {/* 本次收款后未付 */}
             <div className="border-t pt-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium">本次收款后未付</span>
-                <span className={`text-lg font-bold tabular-nums ${(() => {
-                  if (!receiptSale) return "text-gray-400";
-                  const remaining = Math.max(0, Number(receiptSale.net_amount) - Number(receiptSale.paid_amount));
-                  if (!receiptAmount) {
-                    return remaining <= 0 ? "text-green-600" : "text-orange-600";
-                  }
-                  const actual = Number(receiptAmount) || 0;
-                  const rounding = Number(receiptRounding) || 0;
-                  const afterPay = Math.max(0, remaining - actual - rounding);
-                  return afterPay <= 0 ? "text-green-600" : "text-orange-600";
-                })()}`}>
-                  ¥{(() => {
-                    if (!receiptSale) return "0.00";
-                    const remaining = Math.max(0, Number(receiptSale.net_amount) - Number(receiptSale.paid_amount));
-                    if (!receiptAmount) {
-                      return remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    }
-                    const actual = Number(receiptAmount) || 0;
-                    const rounding = Number(receiptRounding) || 0;
-                    const afterPay = Math.max(0, remaining - actual - rounding);
-                    return afterPay.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                  })()}
-                </span>
-              </div>
-              {receiptAmount && Number(receiptAmount) > 0 && (() => {
+              {receiptMethod === "balance" && receiptSale && (() => {
+                const c = (customersData?.items || []).find((c: any) => c.id === receiptSale.customer_id);
+                const balance = Number(c?.prepaid_balance || 0);
+                const receivable = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
+                const entered = Number(receiptAmount) || 0;
+                const effective = Math.min(entered, balance);
+                const rounding = Number(receiptRounding) || 0;
+                const afterPay = Math.max(0, receivable - effective - rounding);
+                const isCapped = entered > balance && balance > 0;
+                return (
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">本次收款后未付</span>
+                      <span className={`text-lg font-bold tabular-nums ${afterPay <= 0 ? "text-green-600" : "text-orange-600"}`}>
+                        ¥{afterPay.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    {isCapped && (
+                      <div className="flex justify-end">
+                        <span className="text-xs text-amber-600">
+                          余额不足，实际抵扣 ¥{effective.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}（余额 ¥{balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})，未付 ¥{afterPay.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+                    {!isCapped && afterPay > 0 && (
+                      <div className="flex justify-end">
+                        <span className="text-xs text-muted-foreground">
+                          应收 ¥{receivable.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 实收 ¥{effective.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 抹零 ¥{rounding.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} = 未付 ¥{afterPay.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+                    {!isCapped && afterPay <= 0 && (
+                      <div className="flex justify-end">
+                        <span className="text-xs text-muted-foreground">
+                          应收 ¥{receivable.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - 实收 ¥{effective.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {rounding > 0 ? `- 抹零 ¥${rounding.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""} = 已结清
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {receiptMethod !== "balance" && receiptAmount && Number(receiptAmount) > 0 && (() => {
+                const receivable = Math.max(0, Number(receiptSale?.net_amount || 0) - Number(receiptSale?.paid_amount || 0));
+                const actual = Number(receiptAmount) || 0;
+                const rounding = Number(receiptRounding) || 0;
+                const afterPay = receivable - actual - rounding;
+                if (afterPay > 0) {
+                  return (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">本次收款后未付</span>
+                      <span className="text-lg font-bold tabular-nums text-orange-600">
+                        ¥{afterPay.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  );
+                }
+                if (afterPay <= 0) {
+                  return (
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">本次收款后未付</span>
+                      <span className="text-lg font-bold tabular-nums text-green-600">
+                        ¥0.00
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+              {receiptMethod !== "balance" && receiptAmount && Number(receiptAmount) > 0 && (() => {
                 const receivable = Math.max(0, Number(receiptSale?.net_amount || 0) - Number(receiptSale?.paid_amount || 0));
                 const actual = Number(receiptAmount) || 0;
                 const rounding = Number(receiptRounding) || 0;
@@ -941,7 +983,6 @@ export function SalesPage() {
           <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总箱数</p><p className="text-xl font-bold">{summary.totalBoxes.toLocaleString()}</p></CardContent></Card>
           <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总重量</p><p className="text-xl font-bold">{summary.totalWeight.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p></CardContent></Card>
           <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总销售金额</p><p className="text-xl font-bold">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
-          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">净金额</p><p className="text-xl font-bold text-blue-600">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
           <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">售后金额</p><p className="text-xl font-bold text-red-500">¥{summary.totalAfterSales.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
           <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">应收金额</p><p className="text-xl font-bold text-orange-600">¥{summary.totalReceivable.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
           <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">已收金额</p><p className="text-xl font-bold text-green-600">¥{summary.totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
@@ -1092,7 +1133,7 @@ export function SalesPage() {
                 {/* 页汇总行 */}
                 {data?.items && data.items.length > 0 && (
                   <TableRow className="bg-muted/50 font-medium border-t-2">
-                    <TableCell colSpan={6} className="text-right">本页合计:</TableCell>
+                    <TableCell colSpan={8} className="text-right">本页合计:</TableCell>
                     <TableCell className="text-right">
                       {data.items.reduce((s, it) => s + (Number(it.box_count) || 0), 0)}
                     </TableCell>
@@ -1238,7 +1279,8 @@ export function SalesPage() {
       <BatchCollectDialog
         open={batchCollectDialogOpen}
         onOpenChange={setBatchCollectDialogOpen}
-        sales={data?.items?.filter((s) => selectedIds.has(s.id)).map(s => ({ id: s.id, sale_no: s.sale_no ?? `#${s.id}`, customer_name: s.customer_name, net_amount: Number(s.net_amount), paid_amount: Number(s.paid_amount) })) || []}
+        sales={data?.items?.filter((s) => selectedIds.has(s.id)).map(s => ({ id: s.id, sale_no: s.sale_no ?? `#${s.id}`, customer_id: s.customer_id, customer_name: s.customer_name, net_amount: Number(s.net_amount), paid_amount: Number(s.paid_amount) })) || []}
+        onSuccess={() => setSelectedIds(new Set())}
       />
     </div>
   );
@@ -1294,15 +1336,15 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
         setSpecItems(initialData.items.map(it => ({
           spec: it.spec ?? "",
           box_count: it.box_count ? String(it.box_count) : "",
-          weight_kg: String(it.weight_kg),
-          unit_price: String(it.unit_price),
+          weight_kg: String(Number(it.weight_kg).toFixed(2)),
+          unit_price: String(Number(it.unit_price).toFixed(2)),
         })));
       } else {
-        setSpecItems([{ spec: initialData.spec ?? "", box_count: initialData.box_count ? String(initialData.box_count) : "", weight_kg: String(initialData.weight_kg), unit_price: String(initialData.unit_price) }]);
+        setSpecItems([{ spec: initialData.spec ?? "", box_count: initialData.box_count ? String(initialData.box_count) : "", weight_kg: String(Number(initialData.weight_kg).toFixed(2)), unit_price: String(Number(initialData.unit_price).toFixed(2)) }]);
       }
       setNotes(initialData.notes ?? "");
     } else {
-      setSaleDate(new Date().toISOString().split("T")[0]);
+      setSaleDate(new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-'));
       setBatchId(""); setCustomerId(""); setSalespersonId("");
       setSpecItems([{ spec: "", box_count: "", weight_kg: "", unit_price: "" }]);
       setNotes("");

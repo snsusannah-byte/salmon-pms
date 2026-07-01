@@ -3,16 +3,15 @@
 """
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models import Product
 from app.models.finished_product_v2 import (
     DailySlaughterRecord,
     SlaughterType,
 )
-from app.models import Product
 
 
 class DailySlaughterService:
@@ -21,12 +20,12 @@ class DailySlaughterService:
     @staticmethod
     async def list_records(
         db: AsyncSession,
-        slaughter_type: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        slaughter_type: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[DailySlaughterRecord], int]:
+    ) -> tuple[list[DailySlaughterRecord], int]:
         """列表查询"""
         query = select(DailySlaughterRecord)
         
@@ -49,7 +48,7 @@ class DailySlaughterService:
         return list(items), total
 
     @staticmethod
-    async def get_by_id(db: AsyncSession, record_id: int) -> Optional[DailySlaughterRecord]:
+    async def get_by_id(db: AsyncSession, record_id: int) -> DailySlaughterRecord | None:
         """按ID获取"""
         result = await db.execute(
             select(DailySlaughterRecord).where(DailySlaughterRecord.id == record_id)
@@ -57,7 +56,7 @@ class DailySlaughterService:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_by_date(db: AsyncSession, slaughter_date: date) -> Optional[DailySlaughterRecord]:
+    async def get_by_date(db: AsyncSession, slaughter_date: date) -> DailySlaughterRecord | None:
         """按日期获取（每天只能有一条记录）"""
         result = await db.execute(
             select(DailySlaughterRecord)
@@ -70,7 +69,7 @@ class DailySlaughterService:
     async def get_available_slaughter_dates(
         db: AsyncSession,
         min_available_kg: Decimal = Decimal("0"),
-    ) -> List[dict]:
+    ) -> list[dict]:
         """获取可供销售的宰杀日期列表（关联销售用）"""
         result = await db.execute(
             select(DailySlaughterRecord)
@@ -199,8 +198,8 @@ class DailySlaughterService:
         1. 根据原料来源确定仓库（进口整包仓 / 国内整包仓）
         2. 从对应仓库出库原料（整鱼/鱼柳）
         """
-        from app.services.warehouse_v2_service import WarehouseV2Service
         from app.models import Warehouse
+        from app.services.warehouse_v2_service import WarehouseV2Service
 
         # 1. 确定原料仓库
         # 有 source_batch_id → 进口批次 → 进口整包仓
@@ -399,8 +398,8 @@ class DailySlaughterService:
     @staticmethod
     async def get_summary(
         db: AsyncSession,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> dict:
         """宰杀记录汇总"""
         query = select(DailySlaughterRecord)

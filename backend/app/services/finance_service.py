@@ -1,15 +1,21 @@
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
-from sqlalchemy import cast, select, func, and_, text, or_
+from sqlalchemy import and_, cast, func, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    ExchangeRecord, ImportTax, ClearanceCost,
-    TransactionRecord, TransactionType, TransactionCategory,
-    ImportInvoice, BatchInvoice, Batch,
+    Batch,
+    BatchInvoice,
+    ClearanceCost,
+    ExchangeRecord,
+    ImportInvoice,
+    ImportTax,
+    SalesStatus,
+    TransactionCategory,
+    TransactionRecord,
+    TransactionType,
 )
 
 
@@ -21,11 +27,11 @@ class FinanceService:
     @staticmethod
     async def list_exchange_records(
         db: AsyncSession,
-        invoice_id: Optional[int] = None,
-        batch_id: Optional[int] = None,
+        invoice_id: int | None = None,
+        batch_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[ExchangeRecord], int]:
+    ) -> tuple[list[ExchangeRecord], int]:
         query = select(ExchangeRecord)
         count_query = select(func.count(ExchangeRecord.id))
         if invoice_id:
@@ -97,9 +103,11 @@ class FinanceService:
     @staticmethod
     async def _update_multi_invoice_exchange_status(db: AsyncSession, invoice_ids: list) -> None:
         """合并购汇状态更新：按发票金额比例分摊购汇金额，更新所有关联发票状态"""
-        from app.models import ImportInvoice, ExchangeStatus
-        from sqlalchemy import func
         from decimal import Decimal
+
+        from sqlalchemy import func
+
+        from app.models import ExchangeStatus, ImportInvoice
 
         # 查询所有关联发票
         result = await db.execute(
@@ -159,11 +167,13 @@ class FinanceService:
         await db.commit()
 
     @staticmethod
-    async def _update_invoice_exchange_status(db: AsyncSession, invoice_id: Optional[int], batch_id: Optional[int] = None) -> None:
+    async def _update_invoice_exchange_status(db: AsyncSession, invoice_id: int | None, batch_id: int | None = None) -> None:
         """更新发票购汇状态：按实际购汇金额判断，支持发票级和批次级购汇"""
-        from app.models import ImportInvoice, ExchangeStatus, BatchInvoice
-        from sqlalchemy import func
         from decimal import Decimal
+
+        from sqlalchemy import func
+
+        from app.models import BatchInvoice, ExchangeStatus, ImportInvoice
 
         invoice_ids = []
         if invoice_id:
@@ -254,10 +264,10 @@ class FinanceService:
     @staticmethod
     async def list_import_taxes(
         db: AsyncSession,
-        invoice_id: Optional[int] = None,
+        invoice_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[ImportTax], int]:
+    ) -> tuple[list[ImportTax], int]:
         query = select(ImportTax)
         count_query = select(func.count(ImportTax.id))
         if invoice_id:
@@ -295,10 +305,10 @@ class FinanceService:
     @staticmethod
     async def list_clearance_costs(
         db: AsyncSession,
-        invoice_id: Optional[int] = None,
+        invoice_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[ClearanceCost], int]:
+    ) -> tuple[list[ClearanceCost], int]:
         query = select(ClearanceCost)
         count_query = select(func.count(ClearanceCost.id))
         if invoice_id:
@@ -336,10 +346,10 @@ class FinanceService:
     @staticmethod
     async def list_import_fees(
         db: AsyncSession,
-        invoice_id: Optional[int] = None,
+        invoice_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         """合并 import_taxes + clearance_costs 视图"""
         sql = """
         SELECT
@@ -351,17 +361,21 @@ class FinanceService:
             co.name AS customs_broker_name,
             COALESCE(t.import_duty, 0) AS import_duty,
             COALESCE(t.import_vat, 0) AS import_vat,
+            t.bank_account_id,
+            ba.account_name AS bank_account_name,
             COALESCE(t.total_tax, 0) AS tax_total,
             COALESCE(c.clearance_fee, 0) AS clearance_fee,
             COALESCE(c.freight_fee, 0) AS freight_fee,
             COALESCE(c.inspection_fee, 0) AS inspection_fee,
             COALESCE(c.quarantine_fee, 0) AS quarantine_fee,
             COALESCE(c.other_costs, 0) AS other_costs,
-            COALESCE(c.total_cost, 0) AS clearance_total
+            COALESCE(c.total_cost, 0) AS clearance_total,
+            COALESCE(c.payment_type, 'monthly') AS payment_type
         FROM import_invoices i
         LEFT JOIN import_taxes t ON t.invoice_id = i.id
         LEFT JOIN clearance_costs c ON c.invoice_id = i.id
         LEFT JOIN companies co ON co.id = c.customs_broker_id
+        LEFT JOIN bank_accounts ba ON ba.id = t.bank_account_id
         WHERE (t.id IS NOT NULL OR c.id IS NOT NULL)
         """
         count_sql = """
@@ -402,12 +416,15 @@ class FinanceService:
                 "customs_broker_name": row["customs_broker_name"],
                 "import_duty": row["import_duty"],
                 "import_vat": row["import_vat"],
+                "bank_account_id": row["bank_account_id"],
+                "bank_account_name": row["bank_account_name"],
                 "tax_total": row["tax_total"],
                 "pickup_fee": row["clearance_fee"],  # 映射到前端字段
                 "freight": row["freight_fee"],
                 "yard_fee": row["inspection_fee"],
                 "cold_storage_fee": row["quarantine_fee"],
                 "clearance_service_fee": row["other_costs"],
+                "payment_type": row["payment_type"],
                 "clearance_total": row["clearance_total"],
                 "grand_total": row["tax_total"] + row["clearance_total"],
             })
@@ -427,6 +444,7 @@ class FinanceService:
             "import_duty": Decimal(str(data.get("import_duty", 0))),
             "import_vat": Decimal(str(data.get("import_vat", 0))),
             "total_tax": Decimal(str(data.get("import_duty", 0))) + Decimal(str(data.get("import_vat", 0))),
+            "bank_account_id": data.get("bank_account_id"),
         }
         
         # 检查是否已存在税费记录
@@ -460,12 +478,14 @@ class FinanceService:
                 Decimal(str(data.get("cold_storage_fee", 0))) +
                 Decimal(str(data.get("clearance_service_fee", 0)))
             ),
+            "payment_type": data.get("payment_type", "monthly"),
         }
         
-        # 海关出关毛重（如果传了）
+        # 海关出关毛重（必填，用于计算提货费）
         gross_weight = data.get("gross_weight_kg")
-        if gross_weight is not None:
-            clearance_data["gross_weight_kg"] = Decimal(str(gross_weight))
+        if gross_weight is None or gross_weight == "":
+            raise ValueError("出关毛重不能为空，请先填写出关毛重")
+        clearance_data["gross_weight_kg"] = Decimal(str(gross_weight))
         
         existing_clearance = await db.execute(
             select(ClearanceCost).where(ClearanceCost.invoice_id == invoice_id)
@@ -518,7 +538,55 @@ class FinanceService:
             if inv and inv.customs_status == InvoiceStatus.PENDING_CUSTOMS:
                 inv.customs_status = InvoiceStatus.CUSTOMS_PROCESSING
         
-        await db.commit()
+        # 4. 如果有指定扣款银行，自动创建交易流水（进口关税 + 进口增值税各一条）
+        bank_account_id = data.get("bank_account_id")
+        if bank_account_id:
+            import_duty = Decimal(str(data.get("import_duty", 0)))
+            import_vat = Decimal(str(data.get("import_vat", 0)))
+            
+            # 删除旧的交易流水
+            old_tx_result = await db.execute(
+                select(TransactionRecord).where(
+                    TransactionRecord.related_invoice_id == invoice_id,
+                    TransactionRecord.category == "import_tax"
+                )
+            )
+            for tx in old_tx_result.scalars().all():
+                await db.delete(tx)
+            
+            # 进口关税交易流水
+            if import_duty > 0:
+                tx_duty = TransactionRecord(
+                    transaction_date=expense_date,
+                    type="expense",
+                    category="import_tax",
+                    amount=import_duty,
+                    currency="CNY",
+                    from_account_id=bank_account_id,
+                    counterparty_name="上海海关",
+                    description="进口关税",
+                    related_invoice_id=invoice_id,
+                    is_confirmed=True,
+                )
+                db.add(tx_duty)
+            
+            # 进口增值税交易流水
+            if import_vat > 0:
+                tx_vat = TransactionRecord(
+                    transaction_date=expense_date,
+                    type="expense",
+                    category="import_tax",
+                    amount=import_vat,
+                    currency="CNY",
+                    from_account_id=bank_account_id,
+                    counterparty_name="上海海关",
+                    description="进口增值税",
+                    related_invoice_id=invoice_id,
+                    is_confirmed=True,
+                )
+                db.add(tx_vat)
+            
+            await db.commit()
         
         return {
             "invoice_id": invoice_id,
@@ -627,18 +695,18 @@ class FinanceService:
     @staticmethod
     async def list_transactions(
         db: AsyncSession,
-        type: Optional[str] = None,
-        category: Optional[str] = None,
-        related_sale_id: Optional[int] = None,
-        sale_no: Optional[str] = None,
-        is_locked: Optional[bool] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        search: Optional[str] = None,
-        bank_account_id: Optional[int] = None,
+        type: str | None = None,
+        category: str | None = None,
+        related_sale_id: int | None = None,
+        sale_no: str | None = None,
+        is_locked: bool | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        search: str | None = None,
+        bank_account_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[TransactionRecord], int]:
+    ) -> tuple[list[TransactionRecord], int]:
         query = select(TransactionRecord)
         count_query = select(func.count(TransactionRecord.id))
         filters = []
@@ -744,8 +812,9 @@ class FinanceService:
 
     @staticmethod
     async def create_transaction(db: AsyncSession, data: dict) -> TransactionRecord:
-        from app.models import WholeFishSale  # 提前导入
         from datetime import date
+
+        from app.models import WholeFishSale  # 提前导入
         
         # 日期字符串转 date 对象
         if isinstance(data.get("transaction_date"), str):
@@ -768,6 +837,17 @@ class FinanceService:
                     seen.add(sale_id)
                     unique_ids.append(sale_id)
             data["related_sale_ids"] = unique_ids
+        
+        # 处理关联发票号（related_invoice_no → related_invoice_id）
+        related_invoice_no = data.pop("related_invoice_no", None)
+        if related_invoice_no:
+            from app.models import ImportInvoice
+            inv_result = await db.execute(
+                select(ImportInvoice).where(ImportInvoice.invoice_no == str(related_invoice_no))
+            )
+            inv = inv_result.scalar_one_or_none()
+            if inv:
+                data["related_invoice_id"] = inv.id
         
         # 如果关联了销售单，检查是否全部已收款
         if related_sale_ids:
@@ -891,10 +971,12 @@ class FinanceService:
         
         # 如果交易金额变更，同步更新关联的销售收款并重新计算销售单状态
         if "amount" in data and record.id:
-            from app.models import SalesReceipt, WholeFishSale
-            from sqlalchemy import select
-            from app.services.sales_service import SalesService
             from decimal import Decimal
+
+            from sqlalchemy import select
+
+            from app.models import SalesReceipt, WholeFishSale
+            from app.services.sales_service import SalesService
             
             result = await db.execute(
                 select(SalesReceipt).where(SalesReceipt.transaction_id == record.id)
@@ -924,9 +1006,9 @@ class FinanceService:
     async def delete_transaction(db: AsyncSession, record: TransactionRecord) -> None:
         # 如果关联了辅料采购付款，同步更新采购单状态
         if record.id and record.reference_no and record.reference_no.startswith("CG"):
-            from app.models import MaterialPurchaseOrder
             from sqlalchemy import select
-            from sqlalchemy.ext.asyncio import AsyncSession
+
+            from app.models import MaterialPurchaseOrder
             
             # 查找关联的辅料采购单
             po_result = await db.execute(
@@ -948,8 +1030,9 @@ class FinanceService:
 
         # 如果关联了整鱼销售收款，同步删除并重新计算销售单状态
         if record.id:
-            from app.models import SalesReceipt, WholeFishSale
             from sqlalchemy import select
+
+            from app.models import SalesReceipt, WholeFishSale
             from app.services.sales_service import SalesService
 
             result = await db.execute(
@@ -974,13 +1057,16 @@ class FinanceService:
                     # 如果已全额清零，同步清零因收款产生的抹零
                     if Decimal(str(sale.paid_amount or 0)) == 0:
                         sale.rounding_adjustment = Decimal("0")
-                        await db.commit()
 
         # 如果关联了成品销售/以销定采收款，同步删除并重新计算
         if record.id:
-            from app.models.finished_product import FinishedProductReceipt, FinishedProductSaleV2
             from sqlalchemy import func
+
             from app.models.enums import TransactionCategory
+            from app.models.finished_product import (
+                FinishedProductReceipt,
+                FinishedProductSaleV2,
+            )
 
             result = await db.execute(
                 select(FinishedProductReceipt).where(FinishedProductReceipt.transaction_id == record.id)
@@ -1025,9 +1111,13 @@ class FinanceService:
                         sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
                     await db.flush()
 
-        # 客户预付款删除：恢复客户余额
+        # 客户预付款删除：恢复客户余额，并撤销该客户的所有余额抵扣收款
         if record.category == TransactionCategory.CUSTOMER_DEPOSIT and record.counterparty_id:
-            from app.models import Company
+            from sqlalchemy import func
+
+            from app.models import Company, SalesReceipt, WholeFishSale
+            
+            # 1. 扣减客户余额（预付款金额）
             company_result = await db.execute(
                 select(Company).where(Company.id == record.counterparty_id)
             )
@@ -1038,15 +1128,63 @@ class FinanceService:
                     Decimal("0"),
                     Decimal(str(company.prepaid_balance or 0)) - deposit
                 )
+            
+            # 2. 撤销该客户的所有余额抵扣收款（balance 类型的 SalesReceipt）
+            receipt_result = await db.execute(
+                select(SalesReceipt, WholeFishSale)
+                .join(WholeFishSale, SalesReceipt.sale_id == WholeFishSale.id)
+                .where(
+                    WholeFishSale.customer_id == record.counterparty_id,
+                    SalesReceipt.payment_method == 'balance'
+                )
+            )
+            balance_receipts = receipt_result.all()
+            affected_sale_ids = set()
+            total_deduction = Decimal("0")
+            for receipt, sale in balance_receipts:
+                affected_sale_ids.add(sale.id)
+                total_deduction += Decimal(str(receipt.amount or 0))
+                await db.delete(receipt)
+            
+            await db.flush()
+            
+            # 3. 重新计算受影响销售单的收款状态
+            for sale_id in affected_sale_ids:
+                sale_result = await db.execute(
+                    select(WholeFishSale).where(WholeFishSale.id == sale_id)
+                )
+                sale = sale_result.scalar_one_or_none()
+                if sale:
+                    # 重新计算已收金额
+                    paid_result = await db.execute(
+                        select(func.sum(SalesReceipt.amount)).where(SalesReceipt.sale_id == sale_id)
+                    )
+                    total_paid = paid_result.scalar() or Decimal("0")
+                    sale.paid_amount = total_paid
+                    
+                    # 更新状态
+                    if sale.paid_amount >= sale.net_amount:
+                        sale.status = SalesStatus.FULLY_PAID
+                    elif sale.paid_amount > 0:
+                        sale.status = SalesStatus.PARTIAL_PAID
+                    else:
+                        sale.status = SalesStatus.PENDING
+                        # 如果已全额清零，同步清零因收款产生的抹零
+                        sale.rounding_adjustment = Decimal("0")
+            
+            # 4. 恢复客户余额（余额抵扣总金额，因为撤销了抵扣）
+            if company and total_deduction > 0:
+                company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + total_deduction
 
         await db.delete(record)
         await db.commit()
 
     @staticmethod
-    async def delete_transactions_batch(db: AsyncSession, ids: List[int]) -> dict:
+    async def delete_transactions_batch(db: AsyncSession, ids: list[int]) -> dict:
         """批量删除交易记录，返回统计信息"""
-        from app.models import SalesReceipt, WholeFishSale
         from sqlalchemy import select
+
+        from app.models import SalesReceipt, WholeFishSale
         from app.services.sales_service import SalesService
 
         # 查询所有要删除的记录

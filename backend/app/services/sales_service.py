@@ -1,23 +1,27 @@
-from typing import List, Optional, Tuple
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import select, func, and_, update
-from sqlalchemy.orm import selectinload
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import (
-    WholeFishSale, WholeFishSaleItem, SalesReceipt, AftersalesRecord,
-    SalesStatus, Company, Batch, ReturnOrder, ImportInvoice, BatchInvoice
+    AftersalesRecord,
+    Batch,
+    Company,
+    ReturnOrder,
+    SalesReceipt,
+    SalesStatus,
+    WholeFishSale,
+    WholeFishSaleItem,
 )
-from app.models import Company as CompanyModel
 
 
 class SalesService:
     """销售管理服务"""
 
     @staticmethod
-    async def get_sale_by_id(db: AsyncSession, sale_id: int) -> Optional[WholeFishSale]:
+    async def get_sale_by_id(db: AsyncSession, sale_id: int) -> WholeFishSale | None:
         result = await db.execute(
             select(WholeFishSale)
             .options(
@@ -33,14 +37,14 @@ class SalesService:
     @staticmethod
     async def list_sales(
         db: AsyncSession,
-        batch_id: Optional[int] = None,
-        customer_id: Optional[int] = None,
-        ids: Optional[List[int]] = None,
-        status: Optional[str] = None,
-        search: Optional[str] = None,
+        batch_id: int | None = None,
+        customer_id: int | None = None,
+        ids: list[int] | None = None,
+        status: str | None = None,
+        search: str | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[WholeFishSale], int]:
+    ) -> tuple[list[WholeFishSale], int]:
         from sqlalchemy import or_
         
         query = select(WholeFishSale).options(
@@ -272,8 +276,27 @@ class SalesService:
         else:
             sale.status = SalesStatus.PENDING
         
-        # 同步提成记录
+        # 同步提成记录（同时更新 sale.commission）
         await SalesService._sync_commission_record(db, sale)
+        
+        # 再次重新计算净金额（确保 commission 变化后同步）
+        sale.net_amount = max(
+            Decimal("0"),
+            _dec(sale.gross_amount)
+            - _dec(sale.scan_fee)
+            - _dec(sale.rounding_adjustment)
+            - _dec(sale.after_sales_adjustment)
+            - _dec(sale.discount)
+            - _dec(sale.commission)
+        )
+        
+        # 同步更新收款状态
+        if Decimal(str(sale.paid_amount or 0)) >= sale.net_amount:
+            sale.status = SalesStatus.FULLY_PAID
+        elif Decimal(str(sale.paid_amount or 0)) > 0:
+            sale.status = SalesStatus.PARTIAL_PAID
+        else:
+            sale.status = SalesStatus.PENDING
         
         await db.commit()
         await db.refresh(sale)
@@ -291,6 +314,7 @@ class SalesService:
     async def _sync_commission_record(db: AsyncSession, sale: WholeFishSale):
         """同步/更新销售对应的提成记录（按元/kg计算）"""
         from sqlalchemy import delete
+
         from app.models import CommissionRecord, Salesperson
         
         # 删除旧的提成记录
@@ -298,19 +322,24 @@ class SalesService:
             delete(CommissionRecord).where(CommissionRecord.sale_id == sale.id)
         )
         
-        # 如果没有业务员，不生成提成记录
+        # 如果没有业务员，不生成提成记录，同时清零 sale.commission
         if not sale.salesperson_id:
+            sale.commission = Decimal("0")
             return
         
         # 获取业务员提成单价
         result = await db.execute(select(Salesperson).where(Salesperson.id == sale.salesperson_id))
         sp = result.scalar_one_or_none()
         if not sp or not sp.is_active:
+            sale.commission = Decimal("0")
             return
         
         rate = Decimal(str(sp.commission_rate or 0))
         weight = Decimal(str(sale.weight_kg or 0))
         commission_amount = (weight * rate).quantize(Decimal("0.01"))
+        
+        # 同步更新 sale.commission 字段（确保 net_amount 计算一致）
+        sale.commission = commission_amount
         
         record = CommissionRecord(
             salesperson_id=sale.salesperson_id,
@@ -329,8 +358,9 @@ class SalesService:
 
     @staticmethod
     async def add_receipt(db: AsyncSession, sale_id: int, data: dict) -> SalesReceipt:
-        from app.models import TransactionRecord, TransactionType, TransactionCategory
         from fastapi import HTTPException
+
+        from app.models import TransactionCategory, TransactionRecord, TransactionType
         sale = await SalesService.get_sale_by_id(db, sale_id)
         if not sale:
             raise HTTPException(status_code=404, detail="销售记录不存在")
@@ -354,11 +384,12 @@ class SalesService:
             if not company:
                 raise HTTPException(status_code=404, detail="客户不存在")
             available_balance = Decimal(str(company.prepaid_balance or 0))
+            if available_balance <= 0:
+                raise HTTPException(status_code=400, detail="客户预付款余额为0，无法使用余额抵扣")
+            # 余额不足时按实际可用余额抵扣（部分收款）
             if available_balance < received_amount:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"客户预付款余额不足（当前余额 ¥{available_balance}，需扣款 ¥{received_amount}）"
-                )
+                received_amount = available_balance
+                data["amount"] = float(received_amount)
             # 余额抵扣不关联银行账户
             data["bank_account_id"] = None
 
@@ -654,7 +685,6 @@ class SalesService:
             )
         )
 
-        print(f"[SYNC] sale_id={sale_id} aftersales={new_aftersales} net={new_net} paid={paid} status={new_status}")
 
     # ============== 汇总 ==============
 

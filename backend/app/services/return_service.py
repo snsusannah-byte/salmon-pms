@@ -3,21 +3,32 @@
 """
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
-from sqlalchemy import select, func, and_, or_, desc
-from sqlalchemy.orm import selectinload
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import (
-    ReturnOrder, ReturnItem, ReturnAttachment,
-    ReturnReason, ReturnStatus, RefundMethod, ReturnAttachmentType,
-    WholeFishSale, WholeFishSaleItem, FinishedProductSale, FinishedProductSaleItem, FinishedProductSaleV2,
-    Company, BankAccount, TransactionRecord, TransactionType, TransactionCategory,
-    ImportInvoice, BatchInvoice, MaterialTraceability, DailySlaughterRecord,
-    SalesStatus, User,
+    BatchInvoice,
+    Company,
+    DailySlaughterRecord,
+    FinishedProductSale,
+    FinishedProductSaleV2,
+    ImportInvoice,
+    MaterialTraceability,
+    RefundMethod,
+    ReturnAttachment,
+    ReturnItem,
+    ReturnOrder,
+    ReturnReason,
+    ReturnStatus,
+    SalesStatus,
+    TransactionCategory,
+    TransactionRecord,
+    TransactionType,
+    WholeFishSale,
 )
-from app.schemas.returns import ReturnOrderCreate, ReturnOrderUpdate, ReturnOrderRefund
+from app.schemas.returns import ReturnOrderRefund
 
 
 class ReturnService:
@@ -26,7 +37,7 @@ class ReturnService:
     # ==================== 查询 ====================
 
     @staticmethod
-    async def get_return_order(db: AsyncSession, return_order_id: int) -> Optional[ReturnOrder]:
+    async def get_return_order(db: AsyncSession, return_order_id: int) -> ReturnOrder | None:
         result = await db.execute(
             select(ReturnOrder)
             .options(
@@ -40,18 +51,18 @@ class ReturnService:
     @staticmethod
     async def list_return_orders(
         db: AsyncSession,
-        sale_type: Optional[str] = None,
-        customer_id: Optional[int] = None,
-        processing_plant_id: Optional[int] = None,
-        status: Optional[ReturnStatus] = None,
-        return_reason: Optional[ReturnReason] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        search: Optional[str] = None,
-        finished_product_sale_v2_id: Optional[int] = None,
+        sale_type: str | None = None,
+        customer_id: int | None = None,
+        processing_plant_id: int | None = None,
+        status: ReturnStatus | None = None,
+        return_reason: ReturnReason | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        search: str | None = None,
+        finished_product_sale_v2_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[ReturnOrder], int]:
+    ) -> tuple[list[ReturnOrder], int]:
         query = select(ReturnOrder).options(
             selectinload(ReturnOrder.items),
             selectinload(ReturnOrder.attachments),
@@ -126,7 +137,7 @@ class ReturnService:
     # ==================== 加工厂自动识别 ====================
 
     @staticmethod
-    async def _detect_processing_plant(db: AsyncSession, sale_type: str, sale_id: int, is_v2: bool = False) -> Tuple[Optional[int], Optional[str], Optional[str]]:
+    async def _detect_processing_plant(db: AsyncSession, sale_type: str, sale_id: int, is_v2: bool = False) -> tuple[int | None, str | None, str | None]:
         """自动识别加工厂，返回 (plant_id, plant_name, eu_no)"""
         if sale_type == "whole_fish":
             result = await db.execute(
@@ -153,53 +164,28 @@ class ReturnService:
                         return inv.processing_plant_id, None, None
 
         elif sale_type == "finished_product" and is_v2:
-            # V2 成品销售
-            # 追溯链
-            trace_result = await db.execute(
-                select(MaterialTraceability)
-                .where(MaterialTraceability.finished_product_sale_v2_id == sale_id)
-                .limit(1)
-            )
-            trace = trace_result.scalar_one_or_none()
-            if trace and trace.source_invoice_id:
-                inv_result = await db.execute(
-                    select(ImportInvoice).where(ImportInvoice.id == trace.source_invoice_id)
-                )
-                inv = inv_result.scalar_one_or_none()
-                if inv and inv.processing_plant_id:
-                    comp_result = await db.execute(
-                        select(Company.name, Company.registration_code).where(Company.id == inv.processing_plant_id)
-                    )
-                    row = comp_result.one_or_none()
-                    if row:
-                        return inv.processing_plant_id, row[0], row[1]
-                    return inv.processing_plant_id, None, None
-
-            # 追溯链找不到，尝试宰杀记录
+            # V2 成品销售（以销定采）没有直接的原料追溯链，
+            # MaterialTraceability 和 DailySlaughterRecord 都没有 v2 关联字段
+            # 尝试通过 sale.factory 匹配加工厂
             fp_result = await db.execute(
                 select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id)
             )
             fp_sale = fp_result.scalar_one_or_none()
-            if fp_sale:
-                ds_result = await db.execute(
-                    select(DailySlaughterRecord)
-                    .where(DailySlaughterRecord.source_sale_v2_id == sale_id)
+            if fp_sale and fp_sale.factory:
+                comp_result = await db.execute(
+                    select(Company.id, Company.name, Company.code)
+                    .where(Company.type == "processing_plant")
+                    .where(
+                        (Company.name == fp_sale.factory) |
+                        (Company.name.ilike(f"%{fp_sale.factory}%")) |
+                        (Company.code == fp_sale.factory)
+                    )
                     .limit(1)
                 )
-                ds = ds_result.scalar_one_or_none()
-                if ds and ds.source_invoice_id:
-                    inv_result = await db.execute(
-                        select(ImportInvoice).where(ImportInvoice.id == ds.source_invoice_id)
-                    )
-                    inv = inv_result.scalar_one_or_none()
-                    if inv and inv.processing_plant_id:
-                        comp_result = await db.execute(
-                            select(Company.name, Company.registration_code).where(Company.id == inv.processing_plant_id)
-                        )
-                        row = comp_result.one_or_none()
-                        if row:
-                            return inv.processing_plant_id, row[0], row[1]
-                        return inv.processing_plant_id, None, None
+                row = comp_result.one_or_none()
+                if row:
+                    return row[0], row[1], row[2]
+            return None, None, None
 
         elif sale_type == "finished_product":
             # V1 成品销售
@@ -255,7 +241,7 @@ class ReturnService:
     # ==================== 创建退货单 ====================
 
     @staticmethod
-    async def create_return_order(db: AsyncSession, data: dict, created_by_id: Optional[int] = None) -> ReturnOrder:
+    async def create_return_order(db: AsyncSession, data: dict, created_by_id: int | None = None) -> ReturnOrder:
         items_data = data.pop("items", [])
 
         # 校验：退货金额不能超过销售金额
@@ -324,7 +310,7 @@ class ReturnService:
         return order
 
     @staticmethod
-    async def _validate_return_amount(db: AsyncSession, sale_type: str, sale_id: int, items_data: List[dict], is_v2: bool = False):
+    async def _validate_return_amount(db: AsyncSession, sale_type: str, sale_id: int, items_data: list[dict], is_v2: bool = False):
         """校验退货总额不超过销售金额"""
         from fastapi import HTTPException
 
@@ -453,7 +439,7 @@ class ReturnService:
         return order
 
     @staticmethod
-    async def _validate_return_amount_for_update(db: AsyncSession, sale_type: str, sale_id: int, exclude_order_id: int, items_data: List[dict], is_v2: bool = False):
+    async def _validate_return_amount_for_update(db: AsyncSession, sale_type: str, sale_id: int, exclude_order_id: int, items_data: list[dict], is_v2: bool = False):
         total_return = Decimal("0")
         for item in items_data:
             w = Decimal(str(item.get("weight_kg", 0) or 0))
@@ -534,7 +520,7 @@ class ReturnService:
         return order
 
     @staticmethod
-    async def approve(db: AsyncSession, order: ReturnOrder, approved_by_id: int, notes: Optional[str] = None) -> ReturnOrder:
+    async def approve(db: AsyncSession, order: ReturnOrder, approved_by_id: int, notes: str | None = None) -> ReturnOrder:
         from fastapi import HTTPException
         if order.status != ReturnStatus.PENDING_APPROVAL:
             raise HTTPException(status_code=400, detail="只有待审批状态的退货单可以审批")
@@ -548,7 +534,7 @@ class ReturnService:
         return order
 
     @staticmethod
-    async def reject(db: AsyncSession, order: ReturnOrder, approved_by_id: int, notes: Optional[str] = None) -> ReturnOrder:
+    async def reject(db: AsyncSession, order: ReturnOrder, approved_by_id: int, notes: str | None = None) -> ReturnOrder:
         from fastapi import HTTPException
         if order.status != ReturnStatus.PENDING_APPROVAL:
             raise HTTPException(status_code=400, detail="只有待审批状态的退货单可以审批")
@@ -649,7 +635,7 @@ class ReturnService:
         return order
 
     @staticmethod
-    async def revert_completed(db: AsyncSession, order: ReturnOrder, notes: Optional[str] = None) -> ReturnOrder:
+    async def revert_completed(db: AsyncSession, order: ReturnOrder, notes: str | None = None) -> ReturnOrder:
         """撤销已完成的退货单，打回草稿状态"""
         from fastapi import HTTPException
         if order.status != ReturnStatus.COMPLETED:
@@ -737,31 +723,9 @@ class ReturnService:
                 - (sale.discount or Decimal("0"))
                 - (sale.commission or Decimal("0"))
             )
-            # V2 status 是字符串
-            paid = sale.paid_amount or Decimal("0")
-            net = sale.net_amount or Decimal("0")
-            if paid >= net:
-                sale.status = "paid"
-            elif paid > 0:
-                # V2 没有 partial_paid 状态，保持 ordered 或 pending
-                if sale.status in ("ordered", "purchased", "arrived", "shipped"):
-                    pass  # 保持原有状态
-                else:
-                    sale.status = "pending"
-            else:
-                if sale.status in ("ordered", "purchased", "arrived", "shipped"):
-                    pass
-                else:
-                    sale.status = "pending"
-
-            # 如果有进行中的退货，标记为售后中（V2 没有 AFTER_SALES 枚举，用字符串）
-            has_active_return = any(
-                r.status in [ReturnStatus.DRAFT, ReturnStatus.PENDING_APPROVAL, ReturnStatus.APPROVED]
-                for r in sale.return_orders
-            )
-            if has_active_return:
-                # 保持原有状态或标记为售后处理中，这里我们用特殊标记或者保持现有状态
-                pass  # V2 状态机不支持 after_sales，保持原状态
+            # V2 状态流转独立于收款，不在这里更新 status
+            # 只更新 actual_amount（V2 的应收金额）
+            sale.actual_amount = sale.net_amount
         else:
             # V1 / 整鱼销售
             sale.net_amount = max(
@@ -820,9 +784,9 @@ class ReturnService:
     @staticmethod
     async def get_stats(
         db: AsyncSession,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        sale_type: Optional[str] = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        sale_type: str | None = None,
     ) -> dict:
         """退货综合统计"""
         base_filter = []

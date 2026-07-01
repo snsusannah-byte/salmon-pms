@@ -2,26 +2,26 @@
 成品仓库管理 API
 """
 from datetime import date
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.deps import get_current_user
 from app.schemas.finished_product_v2 import (
-    WarehousePurchaseOrderCreate,
-    WarehousePurchaseOrderResponse,
-    WarehousePurchaseOrderListResponse,
-    WarehouseStockResponse,
-    WarehouseStockListResponse,
-    WarehouseStockWarningResponse,
-    WarehouseStockWarningListResponse,
     StockInRequest,
     StockOutRequest,
+    WarehousePurchaseOrderCreate,
+    WarehousePurchaseOrderListResponse,
+    WarehousePurchaseOrderResponse,
+    WarehouseStockListResponse,
+    WarehouseStockResponse,
+    WarehouseStockWarningListResponse,
+    WarehouseStockWarningResponse,
 )
 from app.services.warehouse_service import WarehouseService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 # ==================== 采购入库 ====================
@@ -42,10 +42,10 @@ async def create_purchase_order(
 
 @router.get("/purchase-orders", response_model=WarehousePurchaseOrderListResponse)
 async def list_purchase_orders(
-    product_id: Optional[int] = Query(None),
-    supplier_id: Optional[int] = Query(None),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
+    product_id: int | None = Query(None),
+    supplier_id: int | None = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -86,8 +86,9 @@ async def delete_purchase_order(
     db: AsyncSession = Depends(get_db),
 ):
     """删除采购入库单（同时回滚库存）"""
-    from app.models.finished_product_v2 import WarehousePurchaseOrder
     from sqlalchemy import select
+
+    from app.models.finished_product_v2 import WarehousePurchaseOrder
     
     result = await db.execute(select(WarehousePurchaseOrder).where(WarehousePurchaseOrder.id == order_id))
     order = result.scalar_one_or_none()
@@ -102,8 +103,8 @@ async def delete_purchase_order(
 
 @router.get("/stocks", response_model=WarehouseStockListResponse)
 async def list_stocks(
-    category: Optional[str] = Query(None, description="产品分类: whole_fish/finished_product/byproduct/bom_material"),
-    is_below_warning: Optional[bool] = Query(None),
+    category: str | None = Query(None, description="产品分类: whole_fish/finished_product/byproduct/bom_material"),
+    is_below_warning: bool | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),

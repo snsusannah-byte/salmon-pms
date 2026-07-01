@@ -5,7 +5,7 @@
 import json
 import os
 from datetime import datetime
-from typing import Optional
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -18,12 +18,12 @@ ERROR_LOG = os.path.join(LOG_DIR, "client_errors.jsonl")
 
 class ClientError(BaseModel):
     type: str
-    message: Optional[str] = None
-    stack: Optional[str] = None
-    url: Optional[str] = None
-    status: Optional[int] = None
-    user_agent: Optional[str] = None
-    api_path: Optional[str] = None
+    message: str | None = None
+    stack: str | None = None
+    url: str | None = None
+    status: int | None = None
+    user_agent: str | None = None
+    api_path: str | None = None
     timestamp: str
 
 
@@ -48,7 +48,7 @@ async def list_client_errors(limit: int = 50, since_minutes: int = 30):
     cutoff = datetime.utcnow().timestamp() - since_minutes * 60
     errors = []
     try:
-        with open(ERROR_LOG, "r", encoding="utf-8") as f:
+        with open(ERROR_LOG, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:

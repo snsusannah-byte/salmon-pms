@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -19,6 +19,9 @@ const fmtUSD = (v?: number | string | null) =>
 const fmt = (v?: number | string | null) =>
   v != null ? `¥${Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-";
 
+// 进口商列表
+const IMPORTER_NAMES = ["绍兴中挪食品有限责任公司", "浙江中挪进出口有限公司"];
+
 interface Invoice {
   id: number;
   invoice_no: string;
@@ -27,6 +30,7 @@ interface Invoice {
   batch_code?: string;
   batch_name?: string;
   exchange_status?: string;
+  importer_id?: number;
 }
 
 interface BatchExchangeDialogProps {
@@ -42,6 +46,33 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
   const [exchangeRate, setExchangeRate] = useState("");
   const [amountCny, setAmountCny] = useState("");
   const [feeCny, setFeeCny] = useState("");
+  const [importerId, setImporterId] = useState<string>("");
+
+  // 获取公司列表（用于进口商选择）
+  const { data: companies } = useQuery({
+    queryKey: ["companies-for-exchange"],
+    queryFn: async () => {
+      const res = await api.get("/v1/companies/?limit=500");
+      return (res.data?.items || []) as { id: number; name: string }[];
+    },
+    enabled: open,
+  });
+
+  // 进口商选项
+  const importers = useMemo(() => {
+    if (!companies) return [];
+    return companies.filter(c => IMPORTER_NAMES.includes(c.name));
+  }, [companies]);
+
+  // 默认选中绍兴中挪食品有限责任公司
+  useMemo(() => {
+    if (importers.length > 0 && !importerId) {
+      const defaultImporter = importers.find(c => c.name === "绍兴中挪食品有限责任公司") || importers[0];
+      if (defaultImporter) {
+        setImporterId(String(defaultImporter.id));
+      }
+    }
+  }, [importers, importerId]);
 
   // 只获取未购汇的发票（业务上不存在部分购汇）
   const { data: invoicesData, isLoading } = useQuery<Invoice[]>({
@@ -105,6 +136,10 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
       toast.error("请选择购汇日期");
       return;
     }
+    if (!importerId) {
+      toast.error("请选择进口商");
+      return;
+    }
     if (!amountUsd || Number(amountUsd) <= 0) {
       toast.error("请输入购汇金额");
       return;
@@ -117,6 +152,7 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
         exchange_rate: Number(exchangeRate),
         amount_cny: Number(amountCny),
         fee_cny: Number(feeCny) || 0,
+        importer_id: Number(importerId),
         bank_account_id: null,
       });
       toast.success(`合并购汇成功，共 ${selectedIds.size} 张发票`);
@@ -131,6 +167,11 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
       setExchangeRate("");
       setAmountCny("");
       setFeeCny("");
+      // 恢复默认进口商
+      const defaultImporter = importers.find(c => c.name === "绍兴中挪食品有限责任公司") || importers[0];
+      if (defaultImporter) {
+        setImporterId(String(defaultImporter.id));
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.detail ?? "创建失败");
     }
@@ -216,8 +257,24 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
             )}
           </div>
 
+          {/* 进口商 — 单独一行 */}
+          <div className="grid gap-2">
+            <Label className="text-sm">
+              进口商 <span className="text-red-500">*</span>
+            </Label>
+            <select
+              value={importerId}
+              onChange={(e) => setImporterId(e.target.value)}
+              className="w-full h-9 px-3 text-sm border rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {importers.map(c => (
+                <option key={c.id} value={String(c.id)}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
           {/* 金额与汇率 */}
-          <div className="grid grid-cols-[1fr_1fr_140px] gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="grid gap-2">
               <Label className="text-sm">USD金额</Label>
               <Input
@@ -266,10 +323,16 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
             <div className="grid gap-2">
               <Label className="text-sm">手续费 (¥)</Label>
               <Input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 value={feeCny}
-                onChange={(e) => setFeeCny(e.target.value)}
-                step="0.01"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  // 只允许数字和最多一个小数点
+                  if (/^\d*\.?\d*$/.test(val)) {
+                    setFeeCny(val);
+                  }
+                }}
                 placeholder="0"
               />
             </div>

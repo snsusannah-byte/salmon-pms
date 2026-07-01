@@ -3,18 +3,16 @@
 """
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.permissions import require_warehouse, require_admin, log_operation
 from app.schemas.finished_product_v2 import (
-    DailySlaughterRecordCreate,
-    DailySlaughterRecordUpdate,
-    DailySlaughterRecordResponse,
     DailySlaughterListResponse,
+    DailySlaughterRecordCreate,
+    DailySlaughterRecordResponse,
+    DailySlaughterRecordUpdate,
     DailySlaughterSummary,
     SlaughterDateOption,
 )
@@ -25,9 +23,9 @@ router = APIRouter()
 
 @router.get("/", response_model=DailySlaughterListResponse)
 async def list_slaughter_records(
-    slaughter_type: Optional[str] = Query(None, description="宰杀类型: whole_fish/fillet"),
-    start_date: Optional[date] = Query(None, description="开始日期"),
-    end_date: Optional[date] = Query(None, description="结束日期"),
+    slaughter_type: str | None = Query(None, description="宰杀类型: whole_fish/fillet"),
+    start_date: date | None = Query(None, description="开始日期"),
+    end_date: date | None = Query(None, description="结束日期"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -138,8 +136,8 @@ async def lock_slaughter_record(
 
 @router.get("/summary/stats", response_model=DailySlaughterSummary)
 async def get_slaughter_summary(
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """宰杀记录汇总统计"""
@@ -147,9 +145,9 @@ async def get_slaughter_summary(
     return DailySlaughterSummary(**summary)
 
 
-@router.get("/options/slaughter-dates", response_model=List[SlaughterDateOption])
+@router.get("/options/slaughter-dates", response_model=list[SlaughterDateOption])
 async def get_available_slaughter_dates(
-    min_available_kg: Optional[Decimal] = Query(Decimal("0"), description="最小可用肉量(kg)"),
+    min_available_kg: Decimal | None = Query(Decimal("0"), description="最小可用肉量(kg)"),
     db: AsyncSession = Depends(get_db),
 ):
     """获取可供销售的宰杀日期列表（销售时关联用）"""

@@ -1,5 +1,5 @@
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from typing import Optional
 
 
 class Token(BaseModel):
@@ -8,7 +8,7 @@ class Token(BaseModel):
 
 
 class TokenPayload(BaseModel):
-    sub: Optional[int] = None
+    sub: int | None = None
 
 
 class LoginRequest(BaseModel):
@@ -20,7 +20,7 @@ class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
     password: str = Field(..., min_length=6, max_length=100)
-    full_name: Optional[str] = Field(None, max_length=100)
+    full_name: str | None = Field(None, max_length=100)
 
 
 class UserInfo(BaseModel):
@@ -28,6 +28,6 @@ class UserInfo(BaseModel):
     id: int
     username: str
     email: str
-    full_name: Optional[str]
+    full_name: str | None
     role: str
     is_active: bool

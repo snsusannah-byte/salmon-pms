@@ -8,18 +8,16 @@
 - warehouse: 仓库 — 入库出库、库存、物料
 - user: 普通用户 — 只读查看（默认）
 """
-from enum import Enum as PyEnum
-from typing import Optional
+from enum import StrEnum
 
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
-from app.core.database import get_db
 from app.models import User
 
 
-class UserRole(str, PyEnum):
+class UserRole(StrEnum):
     """用户角色枚举"""
     ADMIN = "admin"           # 管理员
     FINANCE = "finance"       # 财务
@@ -116,13 +114,13 @@ async def log_operation(
     user_id: int,
     action: str,
     module: str,
-    resource_type: Optional[str] = None,
-    resource_id: Optional[int] = None,
-    details: Optional[str] = None,
-    old_values: Optional[str] = None,
-    new_values: Optional[str] = None,
-    ip_address: Optional[str] = None,
-    user_agent: Optional[str] = None,
+    resource_type: str | None = None,
+    resource_id: int | None = None,
+    details: str | None = None,
+    old_values: str | None = None,
+    new_values: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
 ) -> None:
     """
     记录敏感操作到审计日志表

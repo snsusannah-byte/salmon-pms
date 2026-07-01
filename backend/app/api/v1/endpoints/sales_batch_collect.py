@@ -3,7 +3,6 @@
 """
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -11,12 +10,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_sales
 from app.models import (
     BankAccount,
     Company,
     SalesReceipt,
     SalesStatus,
     TransactionRecord,
+    User,
     WholeFishSale,
 )
 
@@ -24,16 +25,18 @@ router = APIRouter()
 
 
 class BatchCollectRequest(BaseModel):
-    sale_ids: List[int]
-    bank_account_id: int
+    sale_ids: list[int]
+    bank_account_id: int | None = None  # 余额抵扣时无需银行账户
     collect_date: date
-    amount: Optional[float] = None  # 用户指定的实收金额，不传则按应收总额自动计算
+    amount: float | None = None  # 用户指定的实收金额，不传则按应收总额自动计算
+    payment_method: str = "transfer"  # 默认银行转账，支持 "balance" 余额抵扣
 
 
 @router.post("/batch-collect", status_code=status.HTTP_200_OK)
 async def batch_collect_sales(
     data: BatchCollectRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_sales),
 ):
     """合并收款：勾选多个销售单，一键收款"""
     
@@ -88,11 +91,35 @@ async def batch_collect_sales(
     else:
         collect_amount = total_receivable
     
-    # 5. 验证银行账户
-    bank_result = await db.execute(select(BankAccount).where(BankAccount.id == data.bank_account_id))
-    bank = bank_result.scalar_one_or_none()
-    if not bank:
-        raise HTTPException(status_code=404, detail="银行账户不存在")
+    is_balance_payment = data.payment_method == "balance"
+    
+    # 5. 余额抵扣：校验客户和余额
+    if is_balance_payment:
+        # 余额抵扣要求所有销售单必须是同一客户
+        if len(customer_ids) > 1:
+            raise HTTPException(status_code=400, detail="余额抵扣仅支持同一客户的销售单合并收款")
+        if not customer_ids:
+            raise HTTPException(status_code=400, detail="销售单未绑定客户，无法使用余额抵扣")
+        
+        company_result = await db.execute(
+            select(Company).where(Company.id == list(customer_ids)[0])
+        )
+        company = company_result.scalar_one_or_none()
+        if not company:
+            raise HTTPException(status_code=404, detail="客户不存在")
+        
+        available_balance = Decimal(str(company.prepaid_balance or 0))
+        if available_balance < collect_amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"客户预付款余额不足（当前余额 ¥{available_balance}，需扣款 ¥{collect_amount}）"
+            )
+    else:
+        # 非余额抵扣：验证银行账户
+        bank_result = await db.execute(select(BankAccount).where(BankAccount.id == data.bank_account_id))
+        bank = bank_result.scalar_one_or_none()
+        if not bank:
+            raise HTTPException(status_code=404, detail="银行账户不存在")
     
     # 6. 按FIFO（销售日期从早到晚）分配收款金额
     sorted_sales = sorted(sales, key=lambda s: (s.sale_date, s.id))
@@ -112,24 +139,26 @@ async def batch_collect_sales(
     
     actual_total = sum(sale_amounts.values())
     
-    # 7. 创建交易流水（金额为实际分配总额）
-    counterparty_name = ", ".join(customer_names) if customer_names else "多个客户"
-    
-    transaction = TransactionRecord(
-        type="income",
-        category="main_business_revenue",
-        amount=actual_total,
-        to_account_id=data.bank_account_id,
-        transaction_date=data.collect_date,
-        counterparty_name=counterparty_name[:100],
-        description=f"合并收款：{len(sales)} 个销售单",
-        reference_no=f"HK{data.collect_date.strftime('%Y%m%d')}",
-    )
-    db.add(transaction)
-    await db.flush()
-    
-    # 设置关联销售单
-    transaction.related_sale_ids = data.sale_ids
+    # 7. 创建交易流水（非余额抵扣时）
+    transaction = None
+    if not is_balance_payment:
+        counterparty_name = ", ".join(customer_names) if customer_names else "多个客户"
+        
+        transaction = TransactionRecord(
+            type="income",
+            category="main_business_revenue",
+            amount=actual_total,
+            to_account_id=data.bank_account_id,
+            transaction_date=data.collect_date,
+            counterparty_name=counterparty_name[:100],
+            description=f"合并收款：{len(sales)} 个销售单",
+            reference_no=f"HK{data.collect_date.strftime('%Y%m%d')}",
+        )
+        db.add(transaction)
+        await db.flush()
+        
+        # 设置关联销售单
+        transaction.related_sale_ids = data.sale_ids
     
     # 8. 为每个分配了金额的销售单创建 SalesReceipt
     for sale in sorted_sales:
@@ -141,10 +170,10 @@ async def batch_collect_sales(
             sale_id=sale.id,
             receipt_date=data.collect_date,
             amount=allocated,
-            payment_method="transfer",
-            bank_account_id=data.bank_account_id,
-            notes="合并收款",
-            transaction_id=transaction.id,
+            payment_method=data.payment_method,
+            bank_account_id=None if is_balance_payment else data.bank_account_id,
+            notes="合并收款" + ("（余额抵扣）" if is_balance_payment else ""),
+            transaction_id=transaction.id if transaction else None,
         )
         db.add(receipt)
         
@@ -159,12 +188,16 @@ async def batch_collect_sales(
         elif paid > 0:
             sale.status = SalesStatus.PARTIAL_PAID
     
+    # 9. 余额抵扣：扣减客户预付余额
+    if is_balance_payment and company:
+        company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) - actual_total
+    
     await db.commit()
     
     return {
-        "transaction_id": transaction.id,
+        "transaction_id": transaction.id if transaction else None,
         "total_amount": float(actual_total),
         "collect_amount": float(collect_amount),
         "sale_count": len(sales),
-        "message": "合并收款成功",
+        "message": "合并收款成功" + ("（余额抵扣）" if is_balance_payment else ""),
     }

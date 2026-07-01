@@ -1,22 +1,21 @@
-from decimal import Decimal
-from typing import List, Optional
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import InvoiceStatus, ExchangeStatus
+from app.models import InvoiceStatus
 from app.schemas.invoice import (
     InvoiceCreate,
-    InvoiceUpdate,
-    InvoiceResponse,
     InvoiceListResponse,
     InvoiceProductCreate,
-    InvoiceProductUpdate,
     InvoiceProductResponse,
+    InvoiceProductUpdate,
+    InvoiceResponse,
     InvoiceSummary,
+    InvoiceUpdate,
 )
 from app.services.invoice_service import InvoiceService
 
@@ -25,12 +24,12 @@ router = APIRouter()
 
 @router.get("/", response_model=InvoiceListResponse)
 async def list_invoices(
-    customs_status: Optional[InvoiceStatus] = Query(None, description="报关状态"),
-    exchange_status: Optional[str] = Query(None, description="购汇状态(支持逗号分隔多选: not_exchanged,partial,completed)"),
-    processing_plant_id: Optional[int] = Query(None, description="加工厂ID"),
-    start_date: Optional[date] = Query(None, description="开始日期"),
-    end_date: Optional[date] = Query(None, description="结束日期"),
-    search: Optional[str] = Query(None, description="搜索发票编号"),
+    customs_status: InvoiceStatus | None = Query(None, description="报关状态"),
+    exchange_status: str | None = Query(None, description="购汇状态(支持逗号分隔多选: not_exchanged,partial,completed)"),
+    processing_plant_id: int | None = Query(None, description="加工厂ID"),
+    start_date: date | None = Query(None, description="开始日期"),
+    end_date: date | None = Query(None, description="结束日期"),
+    search: str | None = Query(None, description="搜索发票编号"),
     exclude_assigned: bool = Query(False, description="排除已关联批次的发票"),
     exclude_with_fees: bool = Query(False, description="排除已有进口费用记录的发票（主票从票都不显示）"),
     skip: int = Query(0, ge=0, description="跳过数量"),
@@ -66,6 +65,7 @@ async def list_invoices(
     for item in items:
         # 手动查询产品明细
         from sqlalchemy import select
+
         from app.models import InvoiceProduct
         
         product_result = await db.execute(
@@ -88,6 +88,8 @@ async def list_invoices(
             "processing_plant_id": item.processing_plant_id,
             "fish_farm_id": item.fish_farm_id,
             "exporter_id": item.exporter_id,
+            "supplier_id": item.supplier_id,
+            "importer_id": item.importer_id,
             "total_amount_usd": item.total_amount_usd,
             "total_boxes": item.total_boxes,
             "total_weight_kg": item.total_weight_kg,
@@ -183,6 +185,15 @@ async def list_invoices(
                 item_dict["supplier_name"] = row[0]
                 item_dict["supplier_code"] = row[1]
         
+        if item.importer_id:
+            company_result = await db.execute(
+                select(Company.name, Company.code).where(Company.id == item.importer_id)
+            )
+            row = company_result.one_or_none()
+            if row:
+                item_dict["importer_name"] = row[0]
+                item_dict["importer_code"] = row[1]
+        
         # 添加产品明细，并实时汇总计算总箱数/总金额
         computed_boxes = 0
         computed_amount = Decimal("0")
@@ -246,6 +257,7 @@ async def create_invoice(
     
     # 手动构建响应
     from sqlalchemy import select
+
     from app.models import Company, InvoiceProduct
     
     result = {
@@ -277,6 +289,8 @@ async def create_invoice(
         "exporter_code": None,
         "supplier_name": None,
         "supplier_code": None,
+        "importer_name": None,
+        "importer_code": None,
         "products": [],
     }
     
@@ -307,6 +321,15 @@ async def create_invoice(
         if row:
             result["supplier_name"] = row[0]
             result["supplier_code"] = row[1]
+    
+    if invoice.importer_id:
+        company_result = await db.execute(
+            select(Company.name, Company.code).where(Company.id == invoice.importer_id)
+        )
+        row = company_result.one_or_none()
+        if row:
+            result["importer_name"] = row[0]
+            result["importer_code"] = row[1]
     
     # 查询产品明细
     product_result = await db.execute(
@@ -378,6 +401,8 @@ async def get_invoice(
         "fish_farm_name": invoice.fish_farm.name if invoice.fish_farm else None,
         "exporter_name": invoice.exporter.name if invoice.exporter else None,
         "supplier_name": invoice.supplier.name if invoice.supplier else None,
+        "importer_name": invoice.importer.name if invoice.importer else None,
+        "importer_id": invoice.importer_id,
         "products": [],
     }
     
@@ -396,7 +421,8 @@ async def get_invoice(
 async def _check_invoice_batch_locked(db: AsyncSession, invoice_id: int):
     """检查发票关联的批次是否已锁定"""
     from sqlalchemy import select as sa_select
-    from app.models import BatchInvoice, Batch, BatchStatus
+
+    from app.models import Batch, BatchInvoice, BatchStatus
     bi_result = await db.execute(
         sa_select(BatchInvoice, Batch)
         .join(Batch, BatchInvoice.batch_id == Batch.id)
@@ -436,6 +462,7 @@ async def update_invoice(
         
         # 手动构建响应（避免 ORM 关系映射问题）
         from sqlalchemy import select
+
         from app.models import Company, InvoiceProduct
         
         invoice_dict = {
@@ -619,6 +646,7 @@ async def update_invoice_product(
 ):
     """更新产品明细"""
     from sqlalchemy import select
+
     from app.models import InvoiceProduct
     
     # 检查发票锁定状态
@@ -653,6 +681,7 @@ async def delete_invoice_product(
 ):
     """删除产品明细"""
     from sqlalchemy import select
+
     from app.models import InvoiceProduct
     
     # 检查发票锁定状态
@@ -684,9 +713,9 @@ async def delete_invoice_product(
 @router.post("/{invoice_id}/allocate-costs", response_model=dict)
 async def allocate_costs(
     invoice_id: int,
-    clearance_cost: Optional[float] = Query(None, description="清关运费(总额)"),
-    import_duty: Optional[float] = Query(None, description="进口关税(总额)"),
-    import_vat: Optional[float] = Query(None, description="进口增值税(总额)"),
+    clearance_cost: float | None = Query(None, description="清关运费(总额)"),
+    import_duty: float | None = Query(None, description="进口关税(总额)"),
+    import_vat: float | None = Query(None, description="进口增值税(总额)"),
     allocation_method: str = Query("by_boxes", description="分摊方式: by_boxes / by_weight / by_amount"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -697,7 +726,8 @@ async def allocate_costs(
     清关费 ¥10,000 → 8703 分摊 81/108=¥7,500, 8710 分摊 27/108=¥2,500
     """
     from decimal import Decimal
-    from app.models import ImportTax, ClearanceCost, ImportInvoice
+
+    from app.models import ClearanceCost, ImportInvoice, ImportTax
     
     # 获取主票
     master = await InvoiceService.get_by_id(db, invoice_id)
@@ -814,7 +844,7 @@ async def allocate_costs(
 
 @router.post("/batch-import", status_code=status.HTTP_201_CREATED)
 async def batch_import_invoices(
-    records: List[dict],
+    records: list[dict],
     db: AsyncSession = Depends(get_db),
 ):
     """批量导入进口单证
@@ -823,9 +853,10 @@ async def batch_import_invoices(
     自动查找或创建加工厂/渔场/出口商
     返回: {created: 新增数, errors: 错误列表, items: 发票列表}
     """
-    from app.services.company_service import CompanyService
-    from app.models import CompanyType
     from datetime import datetime
+
+    from app.models import CompanyType
+    from app.services.company_service import CompanyService
     
     created_count = 0
     result_items = []

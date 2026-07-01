@@ -1,24 +1,23 @@
-from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, desc, and_
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.permissions import require_admin, UserRole
-from app.core.deps import get_current_user
-from app.models import User, AuditLog
+from app.core.permissions import require_admin
+from app.models import AuditLog, User
 
 router = APIRouter()
 
 
 @router.get("/logs", response_model=dict)
 async def list_audit_logs(
-    module: Optional[str] = Query(None, description="模块过滤"),
-    action: Optional[str] = Query(None, description="操作类型过滤"),
-    user_id: Optional[int] = Query(None, description="用户ID过滤"),
-    start_date: Optional[datetime] = Query(None, description="开始日期"),
-    end_date: Optional[datetime] = Query(None, description="结束日期"),
+    module: str | None = Query(None, description="模块过滤"),
+    action: str | None = Query(None, description="操作类型过滤"),
+    user_id: int | None = Query(None, description="用户ID过滤"),
+    start_date: datetime | None = Query(None, description="开始日期"),
+    end_date: datetime | None = Query(None, description="结束日期"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),

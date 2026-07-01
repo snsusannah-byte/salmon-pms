@@ -79,12 +79,14 @@ export default function MaterialPurchaseDialog({
     enabled: open,
   });
 
-  // 查询物料列表
+  // 查询物料列表（从物料管理接口获取）
   const { data: materials = [] } = useQuery<Material[]>({
     queryKey: ["materials-for-purchase"],
     queryFn: async () => {
-      const res = await api.get("/v1/material-purchases/materials");
-      return res.data || [];
+      const res = await api.get("/v1/materials?limit=500");
+      const data = res.data;
+      // 兼容两种格式：{items: [...]} 或 [...]
+      return data?.items || data || [];
     },
     enabled: open,
   });
@@ -111,12 +113,12 @@ export default function MaterialPurchaseDialog({
     enabled: open,
   });
 
-  // 默认选择辅料仓（必须在 warehouses 声明之后）
+  // 默认选择国内整包仓（必须在 warehouses 声明之后）
   useEffect(() => {
     if (open && warehouses.length > 0 && !warehouseId) {
-      const flWarehouse = warehouses.find((w) => w.name === "辅料仓" || w.name.includes("辅料"));
-      if (flWarehouse) {
-        setWarehouseId(String(flWarehouse.id));
+      const defaultWarehouse = warehouses.find((w) => w.name === "国内整包仓" || w.name.includes("整包"));
+      if (defaultWarehouse) {
+        setWarehouseId(String(defaultWarehouse.id));
       }
     }
   }, [open, warehouses]);

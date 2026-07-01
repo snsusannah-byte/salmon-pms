@@ -1,19 +1,18 @@
 """
 RBAC 权限系统单元测试
 """
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi import HTTPException, status
-from unittest.mock import AsyncMock, MagicMock
 
 from app.core.permissions import (
-    UserRole,
-    require_role,
-    require_admin,
-    require_finance,
-    require_sales,
-    require_warehouse,
     MODULE_PERMISSIONS,
     SENSITIVE_OPERATIONS,
+    UserRole,
+    require_admin,
+    require_finance,
+    require_role,
 )
 
 

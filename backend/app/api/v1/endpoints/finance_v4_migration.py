@@ -4,32 +4,31 @@
 """
 from datetime import date as _date
 from decimal import Decimal
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
+from app.core.permissions import require_warehouse, require_sales, require_admin
 from app.models import (
     Company,
     CompanyType,
-    PurchaseOrderV2,
-    PurchaseOrderProductV2,
+    FinishedProductAftersales,
+    FinishedProductReceipt,
     FinishedProductSaleV2,
     FinishedSaleProductV2,
     Product,
-    Warehouse,
+    PurchaseOrderProductV2,
+    PurchaseOrderV2,
+    ReturnOrder,
+    Stock,
     StockInbound,
     StockOutbound,
     StockStatus,
-    Stock,
-    FinishedProductReceipt,
-    FinishedProductAftersales,
-    BankAccount,
     TransactionRecord,
-    ReturnOrder,
+    Warehouse,
 )
 from app.models.enums import StockMovementType
 
@@ -352,11 +351,18 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
 # ==================== 产品列表（级联：名称 → 规格）====================
 
 @router.get("/products-by-name")
-async def api_get_products_by_name(category: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+async def api_get_products_by_name(
+    category: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
+):
     """获取产品列表，按名称分组返回规格选项"""
     query = select(Product).where(Product.is_active.is_(True))
     if category:
         query = query.where(Product.category == category)
+    else:
+        # 默认只返回整鱼和成品产品（排除原料、辅料等）
+        query = query.where(Product.category.in_(["whole_fish", "finished_product"]))
     result = await db.execute(query.order_by(Product.name, Product.spec))
     products = result.scalars().all()
 
@@ -375,7 +381,8 @@ async def api_get_products_by_name(category: Optional[str] = None, db: AsyncSess
 @router.get("/customers")
 async def api_get_customers(
     limit: int = Query(500, ge=1, le=1000),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_sales),
 ):
     """获取所有客户（简化版）"""
     result = await db.execute(
@@ -398,14 +405,15 @@ async def api_get_customers(
 
 @router.get("/suppliers")
 async def api_get_suppliers(
-    company_type: Optional[str] = Query(None, description="公司类型过滤，如 supplier"),
-    supplier_category: Optional[str] = Query(None, description="供应商分类过滤，如 material_supply"),
+    company_type: str | None = Query(None, description="公司类型过滤，如 supplier"),
+    supplier_category: str | None = Query(None, description="供应商分类过滤，如 material_supply"),
     limit: int = Query(500, ge=1, le=1000),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """获取公司列表（支持既是客户又是供应商的场景）"""
     from app.models.company import Company
-    from app.models.enums import CompanyType, SupplierCategory
+    from app.models.enums import CompanyType
 
     query = select(Company).order_by(Company.name)
 
@@ -444,7 +452,10 @@ async def api_get_suppliers(
 # ==================== 采购入库管理 ====================
 
 @router.get("/purchase-orders")
-async def api_get_purchase_orders(db: AsyncSession = Depends(get_db)):
+async def api_get_purchase_orders(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
+):
     """获取所有采购入库单（以订单为单位聚合返回）"""
     result = await db.execute(select(PurchaseOrderV2).order_by(PurchaseOrderV2.created_at.desc()))
     orders = result.scalars().all()
@@ -478,6 +489,8 @@ async def api_get_purchase_orders(db: AsyncSession = Depends(get_db)):
             "supplier_name": o.supplier_name,
             "order_type": o.order_type,
             "total_amount": total_amount,
+            "after_sales_adjustment": float(o.after_sales_adjustment or 0),
+            "net_amount": total_amount - float(o.after_sales_adjustment or 0),
             "total_weight": round(total_weight, 2),
             "total_boxes": total_boxes,
             "slaughter_date": o.slaughter_date.isoformat() if o.slaughter_date else None,
@@ -493,6 +506,7 @@ async def api_get_purchase_orders(db: AsyncSession = Depends(get_db)):
                     "factory": p.factory,
                     "box_count": p.box_count,
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
+                    "batch": p.batch,
                     "unit_price": float(p.unit_price) if p.unit_price else 0,
                     "total_amount": float(p.total_amount) if p.total_amount else 0,
                     "unit": p.unit or "kg",
@@ -514,7 +528,11 @@ async def api_get_purchase_orders(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/purchase-orders/{order_id}")
-async def api_get_purchase_order(order_id: int, db: AsyncSession = Depends(get_db)):
+async def api_get_purchase_order(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
+):
     """获取采购入库单详情"""
     from sqlalchemy.orm import selectinload
     result = await db.execute(
@@ -551,6 +569,8 @@ async def api_get_purchase_order(order_id: int, db: AsyncSession = Depends(get_d
             "supplier_name": order.supplier_name,
             "order_type": order.order_type,
             "total_amount": total_amount,
+            "after_sales_adjustment": float(order.after_sales_adjustment or 0),
+            "net_amount": total_amount - float(order.after_sales_adjustment or 0),
             "total_weight": round(total_weight, 2),
             "total_boxes": total_boxes,
             "slaughter_date": order.slaughter_date.isoformat() if order.slaughter_date else None,
@@ -568,6 +588,7 @@ async def api_get_purchase_order(order_id: int, db: AsyncSession = Depends(get_d
                     "factory": p.factory,
                     "box_count": p.box_count,
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
+                    "batch": p.batch,
                     "unit_price": float(p.unit_price) if p.unit_price else 0,
                     "total_amount": float(p.total_amount) if p.total_amount else 0,
                 }
@@ -578,7 +599,11 @@ async def api_get_purchase_order(order_id: int, db: AsyncSession = Depends(get_d
 
 
 @router.post("/purchase-orders")
-async def api_create_purchase_order(data: dict, db: AsyncSession = Depends(get_db)):
+async def api_create_purchase_order(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
+):
     """创建采购入库单，单号自动生成"""
     # 自动生成采购单号
     purchase_no = data.get("purchase_no")
@@ -624,6 +649,7 @@ async def api_create_purchase_order(data: dict, db: AsyncSession = Depends(get_d
             factory=p.get("factory"),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
+            batch=p.get("batch"),
             unit=p.get("unit"),
             unit_price=Decimal(str(p.get("unit_price", 0))),
             total_amount=Decimal(str(p.get("total_amount", 0))),
@@ -641,8 +667,17 @@ async def api_create_purchase_order(data: dict, db: AsyncSession = Depends(get_d
     )
     order = result.scalar_one()
 
-    # 以销定采：更新关联销售单的采购状态 + 同步采购实际重量到销售单明细
+    # 以销定采：一对一校验 + 更新销售单状态
     if order.sale_id:
+        existing = await db.execute(
+            select(PurchaseOrderV2).where(
+                PurchaseOrderV2.sale_id == order.sale_id,
+                PurchaseOrderV2.id != order.id
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="该销售单已有关联采购单，一个销售单只能对应一次采购")
+
         sale_result = await db.execute(
             select(FinishedProductSaleV2)
             .options(selectinload(FinishedProductSaleV2.products))
@@ -683,7 +718,12 @@ async def api_create_purchase_order(data: dict, db: AsyncSession = Depends(get_d
 
 
 @router.put("/purchase-orders/{order_id}")
-async def api_update_purchase_order(order_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+async def api_update_purchase_order(
+    order_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
+):
     """更新采购入库单"""
     result = await db.execute(select(PurchaseOrderV2).where(PurchaseOrderV2.id == order_id))
     order = result.scalar_one_or_none()
@@ -699,8 +739,21 @@ async def api_update_purchase_order(order_id: int, data: dict, db: AsyncSession 
     order.total_boxes = data.get("total_boxes", order.total_boxes)
     order.slaughter_date = _parse_date(data.get("slaughter_date")) or order.slaughter_date
     order.remark = data.get("remark", order.remark)
-    order.status = data.get("status", order.status)
-    order.sale_id = data.get("sale_id", order.sale_id)  # 以销定采：更新关联销售单
+    new_sale_id = data.get("sale_id", order.sale_id)
+    old_sale_id = order.sale_id
+
+    # 以销定采：一对一校验
+    if new_sale_id and new_sale_id != old_sale_id:
+        existing = await db.execute(
+            select(PurchaseOrderV2).where(
+                PurchaseOrderV2.sale_id == new_sale_id,
+                PurchaseOrderV2.id != order.id
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="该销售单已有关联采购单，一个销售单只能对应一次采购")
+
+    order.sale_id = new_sale_id
 
     # 删除旧明细
     await db.execute(
@@ -721,6 +774,7 @@ async def api_update_purchase_order(order_id: int, data: dict, db: AsyncSession 
             factory=p.get("factory"),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
+            batch=p.get("batch"),
             unit=p.get("unit"),
             unit_price=Decimal(str(p.get("unit_price", 0))),
             total_amount=Decimal(str(p.get("total_amount", 0))),
@@ -738,7 +792,15 @@ async def api_update_purchase_order(order_id: int, data: dict, db: AsyncSession 
     )
     order = result.scalar_one()
 
-    # 以销定采：更新后同步采购实际重量到销售单明细
+    # 以销定采：处理新旧销售单状态切换
+    if old_sale_id and old_sale_id != new_sale_id:
+        old_sale_result = await db.execute(
+            select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == old_sale_id)
+        )
+        old_sale = old_sale_result.scalar_one_or_none()
+        if old_sale:
+            old_sale.status = "pending"
+
     if order.sale_id:
         sale_result = await db.execute(
             select(FinishedProductSaleV2)
@@ -747,6 +809,7 @@ async def api_update_purchase_order(order_id: int, data: dict, db: AsyncSession 
         )
         sale = sale_result.scalar_one_or_none()
         if sale:
+            sale.status = "ordered"
             sale.weight = order.total_weight
             sale.quantity = order.total_boxes
             purchase_map = {p.product_spec: p for p in order.products}
@@ -765,10 +828,15 @@ async def api_update_purchase_order(order_id: int, data: dict, db: AsyncSession 
 
 
 @router.delete("/purchase-orders/{order_id}")
-async def api_delete_purchase_order(order_id: int, db: AsyncSession = Depends(get_db)):
+async def api_delete_purchase_order(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
+):
     """删除采购入库单，同步回退库存"""
-    from app.models.warehouse import StockInbound, Stock, StockMovement
     from sqlalchemy import delete as sa_delete
+
+    from app.models.warehouse import Stock, StockInbound, StockMovement
 
     result = await db.execute(select(PurchaseOrderV2).where(PurchaseOrderV2.id == order_id))
     order = result.scalar_one_or_none()
@@ -790,11 +858,8 @@ async def api_delete_purchase_order(order_id: int, db: AsyncSession = Depends(ge
             stock = stock_result.scalar_one_or_none()
             if stock:
                 stock.current_qty = (stock.current_qty or Decimal("0")) - inbound.qty
-                stock.available_qty = (stock.available_qty or Decimal("0")) - inbound.qty
                 if stock.current_qty < 0:
                     stock.current_qty = Decimal("0")
-                if stock.available_qty < 0:
-                    stock.available_qty = Decimal("0")
                 # 回退总成本
                 if inbound.total_cost and stock.total_cost:
                     stock.total_cost = stock.total_cost - inbound.total_cost
@@ -805,6 +870,10 @@ async def api_delete_purchase_order(order_id: int, db: AsyncSession = Depends(ge
                         stock.unit_cost = stock.total_cost / stock.current_qty
                     else:
                         stock.unit_cost = None
+                # available_qty 必须始终等于 current_qty - reserved_qty
+                stock.available_qty = stock.current_qty - (stock.reserved_qty or Decimal("0"))
+                if stock.available_qty < 0:
+                    stock.available_qty = Decimal("0")
 
         # 删除关联的库存变动记录
         await db.execute(
@@ -843,13 +912,15 @@ async def api_delete_purchase_order(order_id: int, db: AsyncSession = Depends(ge
 
 @router.get("/finished-product-sales")
 async def api_get_finished_sales(
-    sale_type: Optional[str] = Query(None, description="销售类型: whole_fish/finished_product"),
-    ids: Optional[str] = Query(None, description="按ID列表过滤，逗号分隔"),
-    db: AsyncSession = Depends(get_db)
+    sale_type: str | None = Query(None, description="销售类型: whole_fish/finished_product"),
+    ids: str | None = Query(None, description="按ID列表过滤，逗号分隔"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_sales),
 ):
     """获取所有成品销售记录（以销定采：包含关联采购单信息）"""
-    from app.models.finished_product import FinishedProductReceipt
     from sqlalchemy import func
+
+    from app.models.finished_product import FinishedProductReceipt
 
     query = select(FinishedProductSaleV2)
     if ids:
@@ -963,7 +1034,10 @@ async def api_get_finished_sales(
             "products": [
                 {
                     "variant_id": p.variant_id,
+                    "product_name": p.product_name,
                     "product_spec": p.product_spec,
+                    "factory": p.factory,
+                    "slaughter_date": p.slaughter_date.isoformat() if p.slaughter_date else None,
                     "box_count": p.box_count,
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
                     "unit_price": float(p.unit_price) if p.unit_price else 0,
@@ -980,7 +1054,11 @@ async def api_get_finished_sales(
 
 
 @router.get("/finished-product-sales/{sale_id}")
-async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)):
+async def api_get_finished_sale(
+    sale_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_sales),
+):
     """获取成品销售记录详情（以销定采：包含关联采购单）"""
     result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
     sale = result.scalar_one_or_none()
@@ -1081,7 +1159,10 @@ async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)
                 {
                     "id": p.id,
                     "variant_id": p.variant_id,
+                    "product_name": p.product_name,
                     "product_spec": p.product_spec,
+                    "factory": p.factory,
+                    "slaughter_date": p.slaughter_date.isoformat() if p.slaughter_date else None,
                     "box_count": p.box_count,
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
                     "unit_price": float(p.unit_price) if p.unit_price else 0,
@@ -1151,7 +1232,11 @@ async def api_get_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)
 
 
 @router.post("/finished-product-sales")
-async def api_create_finished_sale(data: dict, db: AsyncSession = Depends(get_db)):
+async def api_create_finished_sale(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_sales),
+):
     """创建成品销售记录（以销定采，单号自动生成）"""
     # 自动生成销售单号
     sale_no = data.get("sale_no")
@@ -1226,7 +1311,10 @@ async def api_create_finished_sale(data: dict, db: AsyncSession = Depends(get_db
         product = FinishedSaleProductV2(
             sale_id=sale.id,
             variant_id=p.get("variant_id"),
+            product_name=p.get("product_name"),
             product_spec=p.get("product_spec", ""),
+            factory=p.get("factory"),
+            slaughter_date=_parse_date(p.get("slaughter_date")),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
             unit_price=Decimal(str(p.get("unit_price", 0))),
@@ -1243,7 +1331,12 @@ async def api_create_finished_sale(data: dict, db: AsyncSession = Depends(get_db
 
 
 @router.put("/finished-product-sales/{sale_id}")
-async def api_update_finished_sale(sale_id: int, data: dict, db: AsyncSession = Depends(get_db)):
+async def api_update_finished_sale(
+    sale_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_sales),
+):
     """更新成品销售记录（自动重算 actual_amount / net_amount）"""
     result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
     sale = result.scalar_one_or_none()
@@ -1296,7 +1389,10 @@ async def api_update_finished_sale(sale_id: int, data: dict, db: AsyncSession = 
         product = FinishedSaleProductV2(
             sale_id=sale.id,
             variant_id=p.get("variant_id"),
+            product_name=p.get("product_name"),
             product_spec=p.get("product_spec", ""),
+            factory=p.get("factory"),
+            slaughter_date=_parse_date(p.get("slaughter_date")),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
             unit_price=Decimal(str(p.get("unit_price", 0))),
@@ -1312,11 +1408,16 @@ async def api_update_finished_sale(sale_id: int, data: dict, db: AsyncSession = 
 
 
 @router.delete("/finished-product-sales/{sale_id}")
-async def api_delete_finished_sale(sale_id: int, db: AsyncSession = Depends(get_db)):
+async def api_delete_finished_sale(
+    sale_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
+):
     """删除成品销售记录（以销定采：不需要回退库存）"""
-    from sqlalchemy.orm import selectinload
-    from app.models.finished_product import FinishedSaleProductV2
     from sqlalchemy import delete as sa_delete
+    from sqlalchemy.orm import selectinload
+
+    from app.models.finished_product import FinishedSaleProductV2
 
     result = await db.execute(
         select(FinishedProductSaleV2)
@@ -1375,11 +1476,16 @@ async def api_delete_finished_sale(sale_id: int, db: AsyncSession = Depends(get_
 
 
 @router.post("/finished-product-sales/batch-delete")
-async def api_batch_delete_finished_sales(data: dict, db: AsyncSession = Depends(get_db)):
+async def api_batch_delete_finished_sales(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
+):
     """批量删除成品销售记录"""
-    from sqlalchemy.orm import selectinload
-    from app.models.finished_product import FinishedSaleProductV2
     from sqlalchemy import delete as sa_delete
+    from sqlalchemy.orm import selectinload
+
+    from app.models.finished_product import FinishedSaleProductV2
 
     ids = data.get("ids", [])
     if not ids:
@@ -1475,7 +1581,7 @@ async def api_list_finished_sale_receipts(sale_id: int, db: AsyncSession = Depen
 @router.post("/finished-product-sales/{sale_id}/receipts")
 async def api_create_finished_sale_receipt(sale_id: int, data: dict, db: AsyncSession = Depends(get_db)):
     """创建成品销售收款记录（同步创建交易流水）"""
-    from app.models.enums import TransactionType, TransactionCategory
+    from app.models.enums import TransactionCategory, TransactionType
 
     sale_result = await db.execute(select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id))
     sale = sale_result.scalar_one_or_none()
@@ -1765,12 +1871,12 @@ async def api_delete_finished_sale_aftersales(sale_id: int, record_id: int, db: 
 @router.get("/stock-operations")
 async def api_get_stock_operations(
     product_name: str,
-    batch_no: Optional[str] = None,
+    batch_no: str | None = None,
     db: AsyncSession = Depends(get_db)
 ):
     """查询某个产品+批次的所有库存操作记录（出入库、销售出库）"""
-    from app.models.warehouse import StockMovement
     from app.models.finished_product import FinishedProductSaleV2
+    from app.models.warehouse import StockMovement
 
     # 1. 查产品ID（name 不唯一，limit 1）
     product_result = await db.execute(select(Product).where(Product.name == product_name).limit(1))

@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 interface ExportColumn {
   header: string;
   key: string;
-  format?: (value: any) => string;
+  format?: (value: any, row: any) => string;
 }
 
 export function exportExcel(
@@ -20,7 +20,7 @@ export function exportExcel(
     columns.map((col) => {
       const raw = row[col.key];
       if (col.format) {
-        return col.format(raw);
+        return col.format(raw, row);
       }
       if (raw === null || raw === undefined) {
         return "";

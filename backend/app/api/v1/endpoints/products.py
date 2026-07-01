@@ -1,25 +1,25 @@
-from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.permissions import require_warehouse, log_operation
-from app.models import ProductCategory, Brand, Product, User
+from app.core.permissions import require_warehouse
+from app.models import Brand, Product, ProductCategory, User
 from app.schemas.product import (
-    ProductCreate,
-    ProductUpdate,
-    ProductResponse,
-    ProductListResponse,
+    ProductAccessoryCreate,
+    ProductAccessoryResponse,
+    ProductAccessoryUpdate,
     ProductBOMCreate,
     ProductBOMResponse,
+    ProductCreate,
+    ProductListResponse,
     ProductPackagingCreate,
-    ProductPackagingUpdate,
     ProductPackagingResponse,
-    ProductAccessoryCreate,
-    ProductAccessoryUpdate,
-    ProductAccessoryResponse,
+    ProductPackagingUpdate,
+    ProductResponse,
+    ProductUpdate,
 )
 from app.services.product_service import ProductService
 
@@ -61,10 +61,10 @@ router = APIRouter()
 
 @router.get("/", response_model=ProductListResponse)
 async def list_products(
-    category: Optional[str] = Query(None, description="产品分类"),
-    categories: Optional[str] = Query(None, description="产品分类列表，逗号分隔"),
-    search: Optional[str] = Query(None, description="搜索"),
-    is_active: Optional[bool] = Query(None, description="是否启用"),
+    category: str | None = Query(None, description="产品分类"),
+    categories: str | None = Query(None, description="产品分类列表，逗号分隔"),
+    search: str | None = Query(None, description="搜索"),
+    is_active: bool | None = Query(None, description="是否启用"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -200,7 +200,7 @@ async def get_low_stock_products(
 
 # ==================== BOM管理 ====================
 
-@router.get("/{product_id}/boms", response_model=List[ProductBOMResponse])
+@router.get("/{product_id}/boms", response_model=list[ProductBOMResponse])
 async def get_product_boms(
     product_id: int,
     db: AsyncSession = Depends(get_db),
@@ -293,10 +293,10 @@ async def delete_product_bom(
 
 # ==================== 包装物管理 ====================
 
-@router.get("/{product_id}/packagings", response_model=List[ProductPackagingResponse])
+@router.get("/{product_id}/packagings", response_model=list[ProductPackagingResponse])
 async def get_product_packagings(
     product_id: int,
-    brand_id: Optional[int] = Query(None, description="品牌变体ID，筛选特定品牌的包装物"),
+    brand_id: int | None = Query(None, description="品牌变体ID，筛选特定品牌的包装物"),
     db: AsyncSession = Depends(get_db),
 ):
     """获取成品包装物清单
@@ -439,7 +439,7 @@ async def delete_product_packaging(
 
 # ==================== 配套产品管理 ====================
 
-@router.get("/{product_id}/accessories", response_model=List[ProductAccessoryResponse])
+@router.get("/{product_id}/accessories", response_model=list[ProductAccessoryResponse])
 async def get_product_accessories(
     product_id: int,
     db: AsyncSession = Depends(get_db),
@@ -568,33 +568,33 @@ class ProductNameStatItem(BaseModel):
     """按产品名称统计的单个品牌变体"""
     model_config = ConfigDict(from_attributes=True)
     product_id: int
-    brand_id: Optional[int] = None
-    brand_name: Optional[str] = None
+    brand_id: int | None = None
+    brand_name: str | None = None
     code: str
     is_oem: bool = False
     stock_quantity: int
     safety_stock: int
-    cost_price: Optional[float] = None
-    suggested_retail_price: Optional[float] = None
+    cost_price: float | None = None
+    suggested_retail_price: float | None = None
 
 
 class ProductNameAggregate(BaseModel):
     """按产品名称聚合统计"""
     model_config = ConfigDict(from_attributes=True)
     product_name: str
-    spec: Optional[str] = None
+    spec: str | None = None
     category: str
     unit: str
     total_stock: int
     total_safety_stock: int
     brand_variants: int
-    items: List[ProductNameStatItem]
+    items: list[ProductNameStatItem]
 
 
-@router.get("/stats/by-name", response_model=List[ProductNameAggregate])
+@router.get("/stats/by-name", response_model=list[ProductNameAggregate])
 async def stats_by_product_name(
-    category: Optional[str] = Query(None, description="产品分类: finished_product"),
-    search: Optional[str] = Query(None, description="搜索产品名称"),
+    category: str | None = Query(None, description="产品分类: finished_product"),
+    search: str | None = Query(None, description="搜索产品名称"),
     db: AsyncSession = Depends(get_db),
 ):
     """按产品名称聚合统计（跨品牌）

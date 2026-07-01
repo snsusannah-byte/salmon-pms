@@ -1,13 +1,12 @@
 """
 采购入库模块 API
 """
-from datetime import date
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import require_warehouse, require_admin
 from app.services.purchase_order_service import PurchaseOrderService
 
 router = APIRouter()
@@ -19,6 +18,7 @@ router = APIRouter()
 async def create_purchase_order(
     data: dict,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """创建采购单"""
     order = await PurchaseOrderService.create_order(db, data)
@@ -27,12 +27,13 @@ async def create_purchase_order(
 
 @router.get("/purchase-orders")
 async def list_purchase_orders(
-    status: Optional[str] = Query(None),
-    supplier_id: Optional[int] = Query(None),
-    main_product_type: Optional[str] = Query(None),
+    status: str | None = Query(None),
+    supplier_id: int | None = Query(None),
+    main_product_type: str | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """采购单列表"""
     items, total = await PurchaseOrderService.list_orders(
@@ -46,6 +47,7 @@ async def list_purchase_orders(
 async def get_purchase_order(
     order_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """采购单详情"""
     order = await PurchaseOrderService.get_order(db, order_id)
@@ -60,6 +62,7 @@ async def update_purchase_order(
     order_id: int,
     data: dict,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """修改采购单（仅待入库状态）"""
     order = await PurchaseOrderService.get_order(db, order_id)
@@ -76,6 +79,7 @@ async def update_purchase_order(
 async def cancel_purchase_order(
     order_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """取消采购单"""
     order = await PurchaseOrderService.get_order(db, order_id)
@@ -92,6 +96,7 @@ async def cancel_purchase_order(
 async def delete_purchase_order(
     order_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
 ):
     """删除采购单（仅待入库状态可删除）"""
     order = await PurchaseOrderService.get_order(db, order_id)
@@ -110,6 +115,7 @@ async def confirm_purchase_inbound(
     order_id: int,
     data: dict,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """采购单入库确认"""
     inbound_items = data.get("items", [])
@@ -125,6 +131,7 @@ async def confirm_purchase_inbound(
 @router.get("/purchase-orders/summary")
 async def purchase_order_summary(
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """采购统计"""
     return await PurchaseOrderService.get_summary(db)

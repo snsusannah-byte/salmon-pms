@@ -72,6 +72,7 @@ const finishedProductItems = [
 
 const afterSalesItems = [
   { icon: ArrowLeftRight, label: "退货管理", path: "/returns" },
+  { icon: Package, label: "采购售后", path: "/purchase-returns" },
 ];
 
 const productDefinitionItems = [

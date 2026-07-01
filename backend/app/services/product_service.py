@@ -1,18 +1,23 @@
-from typing import List, Optional, Any
 from decimal import Decimal
+from typing import Any
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Product, ProductBOM, ProductCategory
-from app.schemas.product import ProductCreate, ProductUpdate, ProductBOMCreate, ProductBOMUpdate
+from app.schemas.product import (
+    ProductBOMCreate,
+    ProductBOMUpdate,
+    ProductCreate,
+    ProductUpdate,
+)
 
 
 class ProductService:
     """产品管理服务"""
 
     @staticmethod
-    async def get_by_id(db: AsyncSession, product_id: int) -> Optional[Product]:
+    async def get_by_id(db: AsyncSession, product_id: int) -> Product | None:
         """根据ID获取产品"""
         result = await db.execute(
             select(Product).where(Product.id == product_id)
@@ -22,13 +27,13 @@ class ProductService:
     @staticmethod
     async def list_products(
         db: AsyncSession,
-        category: Optional[ProductCategory] = None,
-        categories: Optional[List[ProductCategory]] = None,
-        search: Optional[str] = None,
-        is_active: Optional[bool] = None,
+        category: ProductCategory | None = None,
+        categories: list[ProductCategory] | None = None,
+        search: str | None = None,
+        is_active: bool | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> tuple[List[Product], int]:
+    ) -> tuple[list[Product], int]:
         """获取产品列表"""
         query = select(Product)
         count_query = select(func.count(Product.id))
@@ -136,7 +141,7 @@ class ProductService:
         return product
 
     @staticmethod
-    async def update(db: AsyncSession, product_id: int, data: ProductUpdate) -> Optional[Product]:
+    async def update(db: AsyncSession, product_id: int, data: ProductUpdate) -> Product | None:
         """更新产品"""
         result = await db.execute(
             select(Product).where(Product.id == product_id)
@@ -170,7 +175,7 @@ class ProductService:
     # ==================== BOM管理 ====================
 
     @staticmethod
-    async def get_boms(db: AsyncSession, finished_product_id: int) -> List[ProductBOM]:
+    async def get_boms(db: AsyncSession, finished_product_id: int) -> list[ProductBOM]:
         """获取成品BOM列表"""
         result = await db.execute(
             select(ProductBOM).where(ProductBOM.finished_product_id == finished_product_id)
@@ -193,7 +198,7 @@ class ProductService:
         return bom
 
     @staticmethod
-    async def update_bom(db: AsyncSession, bom_id: int, data: ProductBOMUpdate) -> Optional[ProductBOM]:
+    async def update_bom(db: AsyncSession, bom_id: int, data: ProductBOMUpdate) -> ProductBOM | None:
         """更新BOM"""
         result = await db.execute(
             select(ProductBOM).where(ProductBOM.id == bom_id)
@@ -274,7 +279,7 @@ class ProductService:
         return total_cost
 
     @staticmethod
-    async def check_low_stock(db: AsyncSession) -> List[Product]:
+    async def check_low_stock(db: AsyncSession) -> list[Product]:
         """查询低库存成品（库存 < 安全库存线）"""
         result = await db.execute(
             select(Product)
@@ -287,7 +292,7 @@ class ProductService:
     # ==================== 包装物管理 ====================
 
     @staticmethod
-    async def get_packagings(db: AsyncSession, product_id: int, brand_id: Optional[int] = None) -> List[Any]:
+    async def get_packagings(db: AsyncSession, product_id: int, brand_id: int | None = None) -> list[Any]:
         """获取成品包装物清单"""
         from app.models import ProductPackaging
         query = select(ProductPackaging).where(ProductPackaging.product_id == product_id)
@@ -317,7 +322,7 @@ class ProductService:
         return packaging
 
     @staticmethod
-    async def update_packaging(db: AsyncSession, packaging_id: int, data) -> Optional[Any]:
+    async def update_packaging(db: AsyncSession, packaging_id: int, data) -> Any | None:
         """更新包装物"""
         from app.models import ProductPackaging
         result = await db.execute(
@@ -353,7 +358,7 @@ class ProductService:
     # ==================== 配套产品管理 ====================
 
     @staticmethod
-    async def get_accessories(db: AsyncSession, product_id: int) -> List[Any]:
+    async def get_accessories(db: AsyncSession, product_id: int) -> list[Any]:
         """获取成品配套产品清单"""
         from app.models import ProductAccessory
         result = await db.execute(
@@ -378,7 +383,7 @@ class ProductService:
         return accessory
 
     @staticmethod
-    async def update_accessory(db: AsyncSession, accessory_id: int, data) -> Optional[Any]:
+    async def update_accessory(db: AsyncSession, accessory_id: int, data) -> Any | None:
         """更新配套产品"""
         from app.models import ProductAccessory
         result = await db.execute(

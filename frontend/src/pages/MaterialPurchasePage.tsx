@@ -153,7 +153,8 @@ export default function MaterialPurchasePage() {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.append("status", statusFilter);
       const res = await api.get(`/v1/material-purchases?${params.toString()}`);
-      return res.data || [];
+      // 后端返回 { total, items, skip, limit }，提取 items 数组
+      return res.data?.items || [];
     },
   });
 

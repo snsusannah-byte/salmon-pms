@@ -20,6 +20,7 @@ import { toast } from "sonner";
 interface Sale {
   id: number;
   sale_no: string;
+  customer_id?: number | null;
   customer_name?: string | null;
   net_amount: number;
   paid_amount: number;
@@ -35,6 +36,7 @@ interface BatchCollectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sales: Sale[];
+  onSuccess?: () => void;
 }
 
 export function BatchCollectDialog({ open, onOpenChange, sales }: BatchCollectDialogProps) {
@@ -42,6 +44,7 @@ export function BatchCollectDialog({ open, onOpenChange, sales }: BatchCollectDi
   const [bankAccountId, setBankAccountId] = useState("");
   const [collectDate, setCollectDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [collectAmount, setCollectAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("transfer");
 
   const { data: bankAccounts } = useQuery({
     queryKey: ["bank-accounts"],
@@ -53,14 +56,30 @@ export function BatchCollectDialog({ open, onOpenChange, sales }: BatchCollectDi
     enabled: open,
   });
 
+  // 查询客户预付余额（当使用余额抵扣时）
+  const isBalancePayment = paymentMethod === "balance";
+  const firstCustomerId = sales[0]?.customer_id || sales[0]?.customer_id;
+  const { data: customerBalance } = useQuery({
+    queryKey: ["customer-balance", firstCustomerId],
+    queryFn: async () => {
+      if (!firstCustomerId) return null;
+      const res = await api.get(`/v1/companies/${firstCustomerId}`);
+      return res.data?.prepaid_balance ?? 0;
+    },
+    enabled: open && isBalancePayment && !!firstCustomerId,
+  });
+
   const collectMutation = useMutation({
     mutationFn: async () => {
       const saleIds = sales.map((s) => s.id);
       const payload: any = {
         sale_ids: saleIds,
-        bank_account_id: Number(bankAccountId),
         collect_date: collectDate,
+        payment_method: paymentMethod,
       };
+      if (!isBalancePayment) {
+        payload.bank_account_id = Number(bankAccountId);
+      }
       const amt = Number(collectAmount);
       if (amt > 0 && amt !== totalAmount) {
         payload.amount = amt;
@@ -77,6 +96,7 @@ export function BatchCollectDialog({ open, onOpenChange, sales }: BatchCollectDi
       queryClient.invalidateQueries({ queryKey: ["customer-receivables"] });
       queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      onSuccess?.();
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.detail || "合并收款失败");
@@ -96,17 +116,23 @@ export function BatchCollectDialog({ open, onOpenChange, sales }: BatchCollectDi
     if (open) {
       setCollectAmount(totalAmount > 0 ? totalAmount.toFixed(2) : "");
       setBankAccountId("");
+      setPaymentMethod("transfer");
     }
   }, [open, totalAmount]);
 
   const handleSubmit = () => {
-    if (!bankAccountId) {
+    if (!isBalancePayment && !bankAccountId) {
       toast.error("请选择收款账户");
       return;
     }
     const amt = Number(collectAmount);
     if (!amt || amt <= 0) {
       toast.error("收款金额必须大于0");
+      return;
+    }
+    // 余额抵扣：校验余额充足
+    if (isBalancePayment && customerBalance != null && amt > Number(customerBalance)) {
+      toast.error(`客户预付款余额不足（当前余额 ¥${Number(customerBalance).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}）`);
       return;
     }
     collectMutation.mutate();
@@ -164,20 +190,44 @@ export function BatchCollectDialog({ open, onOpenChange, sales }: BatchCollectDi
           {/* 收款信息 */}
           <div className="space-y-3">
             <div className="space-y-2">
-              <Label>收款账户 *</Label>
-              <Select value={bankAccountId} onValueChange={setBankAccountId}>
+              <Label>收款方式 *</Label>
+              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                 <SelectTrigger>
-                  <SelectValue placeholder="选择银行账户" />
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {bankAccounts?.map((acc: BankAccount) => (
-                    <SelectItem key={acc.id} value={String(acc.id)}>
-                      {acc.bank_name} - {acc.account_name}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="transfer">银行转账</SelectItem>
+                  <SelectItem value="balance">余额抵扣</SelectItem>
+                  <SelectItem value="cash">现金</SelectItem>
+                  <SelectItem value="check">支票</SelectItem>
+                  <SelectItem value="scan">扫码</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {!isBalancePayment && (
+              <div className="space-y-2">
+                <Label>收款账户 *</Label>
+                <Select value={bankAccountId} onValueChange={setBankAccountId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择银行账户" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {bankAccounts?.map((acc: BankAccount) => (
+                      <SelectItem key={acc.id} value={String(acc.id)}>
+                        {acc.bank_name} - {acc.account_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {isBalancePayment && customerBalance != null && (
+              <div className="text-xs text-orange-600 bg-orange-50 rounded-md p-2">
+                客户当前预付款余额: ¥{Number(customerBalance).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>本次实收金额</Label>
@@ -222,7 +272,7 @@ export function BatchCollectDialog({ open, onOpenChange, sales }: BatchCollectDi
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={collectMutation.isPending || !bankAccountId || Number(collectAmount) <= 0}
+            disabled={collectMutation.isPending || (isBalancePayment ? false : !bankAccountId) || Number(collectAmount) <= 0}
           >
             {collectMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             确认收款 ¥{Number(collectAmount || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}

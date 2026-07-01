@@ -1,28 +1,37 @@
+import csv
+import io
+from datetime import date, datetime
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Body
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Optional
-from datetime import date, datetime
-import io
-import csv
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import SalesStatus, WholeFishSale, AftersalesRecord, Company, Batch, BatchInvoice, ImportInvoice
+from app.core.permissions import require_sales
+from app.models import (
+    AftersalesRecord,
+    Batch,
+    BatchInvoice,
+    Company,
+    ImportInvoice,
+    User,
+    WholeFishSale,
+)
 from app.schemas.sales import (
-    WholeFishSaleCreate,
-    WholeFishSaleUpdate,
-    WholeFishSaleResponse,
-    WholeFishSaleListResponse,
-    WholeFishSaleItemResponse,
+    AftersalesRecordCreate,
+    AftersalesRecordResponse,
+    AftersalesRecordUpdate,
     SalesReceiptCreate,
     SalesReceiptResponse,
-    AftersalesRecordCreate,
-    AftersalesRecordUpdate,
-    AftersalesRecordResponse,
     SaleSummary,
+    WholeFishSaleCreate,
+    WholeFishSaleItemResponse,
+    WholeFishSaleListResponse,
+    WholeFishSaleResponse,
+    WholeFishSaleUpdate,
 )
 from app.services.sales_service import SalesService
 
@@ -31,7 +40,7 @@ router = APIRouter()
 
 # ==================== 批次锁定检查 ====================
 
-async def _check_batch_locked(db: AsyncSession, batch_id: Optional[int] = None, invoice_id: Optional[int] = None, sale_id: Optional[int] = None):
+async def _check_batch_locked(db: AsyncSession, batch_id: int | None = None, invoice_id: int | None = None, sale_id: int | None = None):
     """检查批次是否已锁定，如果锁定则抛出403
     
     支持通过 batch_id / invoice_id / sale_id 三种方式检查
@@ -115,7 +124,6 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
     ]
 
     # 合并退货单数据到售后统计
-    from app.schemas.returns import ReturnOrderSummary
     from app.models import ReturnStatus
     return_orders = []
     total_return_amount = Decimal("0")
@@ -171,11 +179,11 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
 
 @router.get("/whole-fish", response_model=WholeFishSaleListResponse)
 async def list_whole_fish_sales(
-    batch_id: Optional[int] = Query(None, description="批次ID"),
-    customer_id: Optional[int] = Query(None, description="客户ID"),
-    ids: Optional[str] = Query(None, description="销售单ID列表(逗号分隔)"),
-    status: Optional[str] = Query(None, description="收款状态(支持逗号分隔多选: pending,partial_paid,fully_paid,after_sales)"),
-    search: Optional[str] = Query(None, description="搜索客户名称、批次名称或销售单号"),
+    batch_id: int | None = Query(None, description="批次ID"),
+    customer_id: int | None = Query(None, description="客户ID"),
+    ids: str | None = Query(None, description="销售单ID列表(逗号分隔)"),
+    status: str | None = Query(None, description="收款状态(支持逗号分隔多选: pending,partial_paid,fully_paid,after_sales)"),
+    search: str | None = Query(None, description="搜索客户名称、批次名称或销售单号"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -193,10 +201,10 @@ async def list_whole_fish_sales(
 
 @router.get("/whole-fish/export")
 async def export_whole_fish_sales(
-    batch_id: Optional[int] = Query(None, description="批次ID"),
-    customer_id: Optional[int] = Query(None, description="客户ID"),
-    status: Optional[str] = Query(None, description="收款状态(支持逗号分隔多选)"),
-    search: Optional[str] = Query(None, description="搜索客户名称、批次名称或销售单号"),
+    batch_id: int | None = Query(None, description="批次ID"),
+    customer_id: int | None = Query(None, description="客户ID"),
+    status: str | None = Query(None, description="收款状态(支持逗号分隔多选)"),
+    search: str | None = Query(None, description="搜索客户名称、批次名称或销售单号"),
     db: AsyncSession = Depends(get_db),
 ):
     """导出整鱼销售记录为 CSV"""
@@ -292,6 +300,7 @@ async def _generate_sale_no(db: AsyncSession, sale_date: str) -> str:
 async def create_whole_fish_sale(
     data: WholeFishSaleCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_sales),
 ):
     """创建整鱼销售"""
     await _check_batch_locked(db, batch_id=data.batch_id)
@@ -318,6 +327,7 @@ async def update_whole_fish_sale(
     sale_id: int,
     data: WholeFishSaleUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_sales),
 ):
     """更新整鱼销售"""
     sale = await SalesService.get_sale_by_id(db, sale_id)
@@ -336,8 +346,8 @@ async def update_whole_fish_sale(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
         import logging
+        import traceback
         logging.error(f"Update sale {sale_id} error: {str(e)}")
         logging.error(traceback.format_exc())
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新失败: {str(e)}")
@@ -358,7 +368,7 @@ async def delete_whole_fish_sale(
 
 
 class BatchDeleteRequest(BaseModel):
-    ids: List[int]
+    ids: list[int]
 
 
 @router.post("/whole-fish/batch-delete")
@@ -383,7 +393,7 @@ async def batch_delete_whole_fish_sales(
 
 
 class BatchLockRequest(BaseModel):
-    ids: List[int]
+    ids: list[int]
 
 
 @router.post("/whole-fish/batch-lock")
@@ -462,7 +472,7 @@ async def unlock_whole_fish_sale(
 
 # ==================== 收款记录 ====================
 
-@router.get("/whole-fish/{sale_id}/receipts", response_model=List[SalesReceiptResponse])
+@router.get("/whole-fish/{sale_id}/receipts", response_model=list[SalesReceiptResponse])
 async def list_sale_receipts(
     sale_id: int,
     db: AsyncSession = Depends(get_db),
@@ -506,7 +516,7 @@ async def delete_sale_receipt(
 
 # ==================== 售后记录 ====================
 
-@router.get("/whole-fish/{sale_id}/aftersales", response_model=List[AftersalesRecordResponse])
+@router.get("/whole-fish/{sale_id}/aftersales", response_model=list[AftersalesRecordResponse])
 async def list_aftersales(
     sale_id: int,
     db: AsyncSession = Depends(get_db),
@@ -695,7 +705,7 @@ async def batch_import_sales(
                 batch = batch_result.scalar_one_or_none()
             # 支持按发票号查找批次（适用于合并发票场景）
             if not batch:
-                from app.models import ImportInvoice, BatchInvoice
+                from app.models import BatchInvoice, ImportInvoice
                 invoice_result = await db.execute(
                     sa_select(ImportInvoice).where(ImportInvoice.invoice_no == batch_name)
                 )

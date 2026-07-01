@@ -118,7 +118,16 @@ export function ReturnOrderForm({ open, onClose, editData, prefillSale }: Return
       setSaleType(type);
       setSaleId(String(sale.id));
       setSaleDetail(sale);
-      setCustomerId(String(sale.customer_id || ""));
+      // 优先使用 customer_id，若不存在则通过名称匹配
+      let cid = sale.customer_id;
+      if (!cid && customersData?.items) {
+        const name = sale.customer_name || sale.customer;
+        if (name) {
+          const matched = customersData.items.find((c: any) => c.name === name);
+          if (matched) cid = matched.id;
+        }
+      }
+      setCustomerId(String(cid || ""));
       setSaleEuNo(sale.processing_plant_eu_no || null);
       setStep(2);
       // 默认只创建1条退货明细
@@ -134,7 +143,7 @@ export function ReturnOrderForm({ open, onClose, editData, prefillSale }: Return
         product_name: firstItem?.product_name,
       }]);
     }
-  }, [open, prefillSale]);
+  }, [open, prefillSale, customersData]);
 
   // 自动匹配加工厂
   useEffect(() => {
@@ -296,11 +305,26 @@ export function ReturnOrderForm({ open, onClose, editData, prefillSale }: Return
         {(step === 2 || isEdit) && (
           <div className="px-6 py-4 space-y-4">
 
-            {/* 基本信息行：2列（退货日期、加工厂） */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* 基本信息行：退货日期、客户（只读）、加工厂 */}
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">退货日期 *</Label>
                 <Input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} className="h-9 text-sm" />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">客户 *</Label>
+                {customerId ? (
+                  <div className="h-9 flex items-center px-3 rounded-md border bg-muted/30 text-sm">
+                    <span className="truncate">{getCustomerName(customerId)}</span>
+                  </div>
+                ) : (
+                  <Select value={customerId} onValueChange={setCustomerId}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="选择客户" /></SelectTrigger>
+                    <SelectContent>
+                      {customersData?.items?.map((c: any) => <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground mb-1 block">加工厂</Label>

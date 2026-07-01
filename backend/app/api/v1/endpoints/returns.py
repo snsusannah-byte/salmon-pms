@@ -4,29 +4,34 @@
 import os
 import uuid
 from datetime import date
-from decimal import Decimal
 from pathlib import Path
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
 
 from app.core.database import get_db
-from app.core.permissions import require_admin, require_finance, log_operation
-from app.core.config import settings
+from app.core.deps import get_current_user
 from app.models import (
-    ReturnOrder, ReturnItem, ReturnAttachment,
-    ReturnStatus, RefundMethod, ReturnAttachmentType,
-    Company, BankAccount, User,
-    WholeFishSale, FinishedProductSale, FinishedProductSaleV2,
+    Company,
+    FinishedProductSale,
+    FinishedProductSaleV2,
+    ReturnAttachmentType,
+    ReturnOrder,
+    ReturnStatus,
+    User,
+    WholeFishSale,
 )
 from app.schemas.returns import (
-    ReturnOrderCreate, ReturnOrderUpdate, ReturnOrderResponse,
-    ReturnOrderListResponse, ReturnOrderSummary,
-    ReturnItemCreate, ReturnItemUpdate, ReturnItemResponse,
-    ReturnAttachmentResponse, ReturnOrderRefund, ReturnOrderApproval,
-    ReturnStatsResponse,
+    ReturnAttachmentResponse,
+    ReturnItemResponse,
+    ReturnOrderApproval,
+    ReturnOrderCreate,
+    ReturnOrderListResponse,
+    ReturnOrderRefund,
+    ReturnOrderResponse,
+    ReturnOrderSummary,
+    ReturnOrderUpdate,
 )
 from app.services.return_service import ReturnService
 
@@ -65,10 +70,9 @@ def _get_file_type(mime_type: str) -> ReturnAttachmentType:
 async def _build_return_response(db: AsyncSession, order: ReturnOrder) -> ReturnOrderResponse:
     """构建退货单响应"""
     # 获取客户名称
-    customer_name = None
     if order.customer_id:
         r = await db.execute(select(Company.name).where(Company.id == order.customer_id))
-        customer_name = r.scalar()
+        r.scalar()
 
     # 获取关联销售单号
     sale_no = None
@@ -83,14 +87,12 @@ async def _build_return_response(db: AsyncSession, order: ReturnOrder) -> Return
         sale_no = r.scalar()
 
     # 获取创建人/审批人名称
-    created_by_name = None
-    approved_by_name = None
     if order.created_by_id:
         r = await db.execute(select(User.full_name).where(User.id == order.created_by_id))
-        created_by_name = r.scalar()
+        r.scalar()
     if order.approved_by_id:
         r = await db.execute(select(User.full_name).where(User.id == order.approved_by_id))
-        approved_by_name = r.scalar()
+        r.scalar()
 
     items = [ReturnItemResponse.model_validate(i) for i in (order.items or [])]
     attachments = []
@@ -149,14 +151,14 @@ async def _build_return_response(db: AsyncSession, order: ReturnOrder) -> Return
 
 @router.get("", response_model=ReturnOrderListResponse)
 async def list_returns(
-    sale_type: Optional[str] = Query(None, description="销售类型: whole_fish/finished_product"),
-    customer_id: Optional[int] = Query(None, description="客户ID"),
-    processing_plant_id: Optional[int] = Query(None, description="加工厂ID"),
-    status: Optional[ReturnStatus] = Query(None, description="退货单状态"),
-    start_date: Optional[date] = Query(None, description="开始日期"),
-    end_date: Optional[date] = Query(None, description="结束日期"),
-    search: Optional[str] = Query(None, description="搜索退货单号/客户/问题描述"),
-    finished_product_sale_v2_id: Optional[int] = Query(None, description="成品销售单v2 ID"),
+    sale_type: str | None = Query(None, description="销售类型: whole_fish/finished_product"),
+    customer_id: int | None = Query(None, description="客户ID"),
+    processing_plant_id: int | None = Query(None, description="加工厂ID"),
+    status: ReturnStatus | None = Query(None, description="退货单状态"),
+    start_date: date | None = Query(None, description="开始日期"),
+    end_date: date | None = Query(None, description="结束日期"),
+    search: str | None = Query(None, description="搜索退货单号/客户/问题描述"),
+    finished_product_sale_v2_id: int | None = Query(None, description="成品销售单v2 ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -185,10 +187,10 @@ async def list_returns(
 async def create_return(
     data: ReturnOrderCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """创建退货单"""
-    # TODO: 从认证中获取当前用户ID
-    created_by_id = None
+    created_by_id = current_user.id if current_user else None
     payload = data.model_dump()
     # 如果是成品销售(v2)，传递 finished_product_sale_v2_id
     if payload.get("sale_type") == "finished_product" and payload.get("finished_product_sale_v2_id"):
@@ -217,7 +219,7 @@ async def update_return(
 ):
     """更新退货单（仅草稿/待审批状态）"""
     from app.api.v1.endpoints.sales import _check_batch_locked
-    from app.models import WholeFishSale, FinishedProductSale
+    from app.models import FinishedProductSale
     
     order = await ReturnService.get_return_order(db, return_id)
     if not order:
@@ -246,7 +248,7 @@ async def delete_return(
 ):
     """删除退货单（仅草稿/已取消状态）"""
     from app.api.v1.endpoints.sales import _check_batch_locked
-    from app.models import WholeFishSale, FinishedProductSale
+    from app.models import FinishedProductSale
     
     order = await ReturnService.get_return_order(db, return_id)
     if not order:
@@ -287,12 +289,13 @@ async def approve_return(
     return_id: int,
     data: ReturnOrderApproval,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """审批退货单"""
     order = await ReturnService.get_return_order(db, return_id)
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="退货单不存在")
-    approved_by_id = None  # TODO: 从认证获取
+    approved_by_id = current_user.id if current_user else None
     if data.approved:
         updated = await ReturnService.approve(db, order, approved_by_id, data.notes)
     else:
@@ -305,12 +308,13 @@ async def refund_return(
     return_id: int,
     data: ReturnOrderRefund,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """执行退款"""
     order = await ReturnService.get_return_order(db, return_id)
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="退货单不存在")
-    processed_by_id = None  # TODO: 从认证获取
+    processed_by_id = current_user.id if current_user else None
     updated = await ReturnService.process_refund(db, order, data, processed_by_id)
     return await _build_return_response(db, updated)
 
@@ -331,7 +335,7 @@ async def cancel_return(
 @router.post("/{return_id}/revert", response_model=ReturnOrderResponse)
 async def revert_return(
     return_id: int,
-    notes: Optional[str] = None,
+    notes: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """撤销已完成/退款中的退货单，打回草稿"""
@@ -348,7 +352,7 @@ async def revert_return(
 async def upload_attachment(
     return_id: int,
     file: UploadFile = File(...),
-    description: Optional[str] = None,
+    description: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """上传附件"""
@@ -455,9 +459,9 @@ async def delete_attachment(
 
 @router.get("/stats/summary", response_model=dict)
 async def get_return_stats(
-    start_date: Optional[date] = Query(None, description="开始日期"),
-    end_date: Optional[date] = Query(None, description="结束日期"),
-    sale_type: Optional[str] = Query(None, description="销售类型"),
+    start_date: date | None = Query(None, description="开始日期"),
+    end_date: date | None = Query(None, description="结束日期"),
+    sale_type: str | None = Query(None, description="销售类型"),
     db: AsyncSession = Depends(get_db),
 ):
     """退货综合统计"""
@@ -467,7 +471,7 @@ async def get_return_stats(
 
 # ==================== 关联销售单的退货列表 ====================
 
-@router.get("/by-sale/{sale_type}/{sale_id}", response_model=List[ReturnOrderSummary])
+@router.get("/by-sale/{sale_type}/{sale_id}", response_model=list[ReturnOrderSummary])
 async def list_returns_by_sale(
     sale_type: str,
     sale_id: int,

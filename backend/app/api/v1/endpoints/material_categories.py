@@ -1,12 +1,11 @@
 """
 物料分类管理 API
 """
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
 from app.core.database import get_db
 from app.models import MaterialCategory
@@ -58,16 +57,16 @@ async def generate_unique_code(db: AsyncSession, base_code: str) -> str:
 
 class MaterialCategoryCreate(BaseModel):
     name: str
-    code: Optional[str] = None  # 可选，为空时自动生成
+    code: str | None = None  # 可选，为空时自动生成
     sort_order: int = 0
     is_active: bool = True
 
 
 class MaterialCategoryUpdate(BaseModel):
-    name: Optional[str] = None
-    code: Optional[str] = None
-    sort_order: Optional[int] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    code: str | None = None
+    sort_order: int | None = None
+    is_active: bool | None = None
 
 
 class MaterialCategoryItem(BaseModel):
@@ -81,14 +80,14 @@ class MaterialCategoryItem(BaseModel):
 
 class MaterialCategoryListResponse(BaseModel):
     total: int
-    items: List[MaterialCategoryItem]
+    items: list[MaterialCategoryItem]
 
 
 # ==================== CRUD ====================
 
 @router.get("/", response_model=MaterialCategoryListResponse)
 async def list_material_categories(
-    is_active: Optional[bool] = None,
+    is_active: bool | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """物料分类列表"""

@@ -4,7 +4,6 @@
 """
 # ruff: noqa: F821
 from decimal import Decimal
-from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -34,11 +33,11 @@ class MaterialSupplier(Base, TimestampMixin):
     material_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
     supplier_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     
-    unit_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))  # 采购单价
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))  # 采购单价
     min_order_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))  # 最小起订量
     lead_time_days: Mapped[int] = mapped_column(Integer, default=0)  # 供货周期(天)
     is_preferred: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否首选供应商
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
     
     material: Mapped["Product"] = relationship("Product", foreign_keys=[material_id], lazy="raise")
     supplier: Mapped["Company"] = relationship("Company", foreign_keys=[supplier_id], lazy="raise")

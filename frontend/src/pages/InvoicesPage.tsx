@@ -22,6 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { InvoiceFormDialog } from "@/components/InvoiceFormDialog";
 import { InvoiceDetailDrawer } from "@/components/InvoiceDetailDrawer";
 import { Plus, Search, Eye, Pencil, Trash2, Lock, Unlock, DollarSign, X } from "lucide-react";
@@ -97,6 +104,7 @@ interface Invoice {
   fish_farm_code: string | null;
   exporter_name: string | null;
   exporter_code: string | null;
+  importer_name: string | null;
   notes: string | null;
   products: InvoiceProduct[];
   sub_invoices?: { id: number; invoice_no: string }[] | null;
@@ -162,6 +170,10 @@ export function InvoicesPage() {
 
   const [deleteConfirm, setDeleteConfirm] = useState<Invoice | null>(null);
   const [allocateInvoice, setAllocateInvoice] = useState<Invoice | null>(null);
+  const [allocateClearanceCost, setAllocateClearanceCost] = useState("");
+  const [allocateImportDuty, setAllocateImportDuty] = useState("");
+  const [allocateImportVat, setAllocateImportVat] = useState("");
+  const [allocateMethod, setAllocateMethod] = useState("by_boxes");
 
   const handleDelete = async (invoice: Invoice) => {
     if (invoice.is_locked) {
@@ -348,6 +360,7 @@ export function InvoicesPage() {
                   <TableHead className="sticky top-0 bg-background z-10">ETA</TableHead>
                   <TableHead className="sticky top-0 bg-background z-10">加工厂</TableHead>
                   <TableHead className="sticky top-0 bg-background z-10">出口商</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">进口商</TableHead>
                   <TableHead className="sticky top-0 bg-background z-10">规格(箱数)</TableHead>
                   <TableHead className="sticky top-0 bg-background z-10">总箱数</TableHead>
                   <TableHead className="sticky top-0 bg-background z-10">总净重(kg)</TableHead>
@@ -361,13 +374,13 @@ export function InvoicesPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
                       加载中...
                     </TableCell>
                   </TableRow>
                 ) : (data?.items?.length ?? 0) === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
                       暂无数据
                     </TableCell>
                   </TableRow>
@@ -392,7 +405,7 @@ export function InvoicesPage() {
                             <span className="text-xs text-muted-foreground mr-1">└</span>
                           )}
                           {invoice.invoice_no}
-                          {(invoice.is_master === true || invoice.is_master === null) && !invoice.parent_invoice_id && (
+                          {invoice.is_master === true && !invoice.parent_invoice_id && (
                             <Badge variant="outline" className="ml-1 text-[10px] h-4 px-1 bg-blue-50 text-blue-600">主</Badge>
                           )}
                           {invoice.parent_invoice_id && invoice.parent_invoice_no && (
@@ -404,6 +417,7 @@ export function InvoicesPage() {
                         <TableCell>{invoice.eta ? new Date(invoice.eta).toLocaleString('zh-CN', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}).replace(/\//g, '-') : "-"}</TableCell>
                         <TableCell>{invoice.processing_plant_code ?? invoice.processing_plant_name ?? "-"}</TableCell>
                         <TableCell>{invoice.exporter_name ?? "-"}</TableCell>
+                        <TableCell>{invoice.importer_name ?? "-"}</TableCell>
                         <TableCell className="text-sm text-muted-foreground max-w-[150px] truncate" title={specSummary}>
                           {specSummary || "-"}
                         </TableCell>
@@ -572,19 +586,19 @@ export function InvoicesPage() {
             <div className="space-y-3 mb-6">
               <div className="space-y-1">
                 <Label className="text-xs">清关运费(总额)</Label>
-                <Input type="number" id="clearance_cost" placeholder="0" defaultValue="" />
+                <Input type="number" placeholder="0" value={allocateClearanceCost} onChange={(e) => setAllocateClearanceCost(e.target.value)} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">进口关税(总额)</Label>
-                <Input type="number" id="import_duty" placeholder="0" defaultValue="" />
+                <Input type="number" placeholder="0" value={allocateImportDuty} onChange={(e) => setAllocateImportDuty(e.target.value)} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">进口增值税(总额)</Label>
-                <Input type="number" id="import_vat" placeholder="0" defaultValue="" />
+                <Input type="number" placeholder="0" value={allocateImportVat} onChange={(e) => setAllocateImportVat(e.target.value)} />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">分摊方式</Label>
-                <Select defaultValue="by_boxes">
+                <Select value={allocateMethod} onValueChange={(v) => setAllocateMethod(v ?? "by_boxes")}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -597,26 +611,25 @@ export function InvoicesPage() {
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setAllocateInvoice(null)}>
+              <Button variant="outline" onClick={() => { setAllocateInvoice(null); setAllocateClearanceCost(""); setAllocateImportDuty(""); setAllocateImportVat(""); setAllocateMethod("by_boxes"); }}>
                 取消
               </Button>
               <Button onClick={async () => {
                 try {
-                  const clearance_cost = (document.getElementById('clearance_cost') as HTMLInputElement)?.value;
-                  const import_duty = (document.getElementById('import_duty') as HTMLInputElement)?.value;
-                  const import_vat = (document.getElementById('import_vat') as HTMLInputElement)?.value;
-                  const allocation_method = document.querySelector('[data-value]')?.getAttribute('data-value') || 'by_boxes';
-                  
                   const params = new URLSearchParams();
-                  if (clearance_cost) params.append('clearance_cost', clearance_cost);
-                  if (import_duty) params.append('import_duty', import_duty);
-                  if (import_vat) params.append('import_vat', import_vat);
-                  params.append('allocation_method', allocation_method);
+                  if (allocateClearanceCost) params.append('clearance_cost', allocateClearanceCost);
+                  if (allocateImportDuty) params.append('import_duty', allocateImportDuty);
+                  if (allocateImportVat) params.append('import_vat', allocateImportVat);
+                  params.append('allocation_method', allocateMethod);
                   
                   await api.post(`/v1/invoices/${allocateInvoice.id}/allocate-costs?${params.toString()}`);
                   toast.success('费用分摊成功');
                   queryClient.invalidateQueries({ queryKey: ['invoices'] });
                   setAllocateInvoice(null);
+                  setAllocateClearanceCost("");
+                  setAllocateImportDuty("");
+                  setAllocateImportVat("");
+                  setAllocateMethod("by_boxes");
                 } catch (error: any) {
                   toast.error(error.response?.data?.detail || '分摊失败');
                 }
@@ -629,24 +642,24 @@ export function InvoicesPage() {
       )}
 
       {/* 删除确认弹窗 */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg p-6 max-w-sm w-full mx-4 shadow-lg">
-            <h3 className="text-lg font-semibold mb-2">确认删除</h3>
-            <p className="text-muted-foreground mb-6">
-              确定要删除发票 "{deleteConfirm.invoice_no}" 吗？此操作不可撤销。
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
-                取消
-              </Button>
-              <Button variant="destructive" onClick={confirmDelete}>
-                删除
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>确认删除</DialogTitle>
+          </DialogHeader>
+          <p className="text-muted-foreground mb-6">
+            确定要删除发票 "{deleteConfirm?.invoice_no}" 吗？此操作不可撤销。
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete}>
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

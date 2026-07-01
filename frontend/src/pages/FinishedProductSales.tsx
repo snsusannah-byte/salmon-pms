@@ -85,6 +85,8 @@ interface FinishedSaleProduct {
   product_name?: string;
   product_spec: string;
   factory?: string;
+  slaughter_date?: string;
+  batch?: string;          // 批次号：加工厂-月日，如 N430-0130
   box_count: number;
   weight_kg: number;
   unit_price: number;
@@ -102,7 +104,8 @@ interface ProductGroup {
 }
 
 const emptyProduct: FinishedSaleProduct = {
-  variant_id: null, product_spec: '', box_count: 0, weight_kg: 0, unit_price: 0,
+  variant_id: null, product_name: '', product_spec: '', factory: '', slaughter_date: '', batch: '',
+  box_count: 0, weight_kg: 0, unit_price: 0,
   total_amount: 0, commission_rate: 0, commission_amount: 0, after_sales_adjustment: 0
 };
 
@@ -119,6 +122,28 @@ const emptyForm = {
 
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+// 解析批次号：N430-0130 -> { factory: 'N430', slaughter_date: '2026-01-30' }
+function parseBatch(batchStr: string, year: string | number): { factory: string; slaughter_date: string } | null {
+  if (!batchStr || !batchStr.includes('-')) return null;
+  const [factory, mmdd] = batchStr.split('-');
+  if (!factory || !mmdd || mmdd.length !== 4) return null;
+  const month = mmdd.slice(0, 2);
+  const day = mmdd.slice(2, 4);
+  if (!/\d{4}/.test(mmdd)) return null;
+  const y = String(year);
+  return {
+    factory: factory.trim(),
+    slaughter_date: `${y}-${month}-${day}`,
+  };
+}
+
+// 反向生成批次号：factory='N430', slaughter_date='2026-01-30' -> 'N430-0130'
+function formatBatch(factory?: string, slaughter_date?: string): string {
+  if (!factory || !slaughter_date) return '';
+  const d = slaughter_date.slice(5, 10).replace('-', ''); // '01-30' -> '0130'
+  return `${factory}-${d}`;
 }
 
 export function FinishedProductSales() {
@@ -160,12 +185,12 @@ export function FinishedProductSales() {
   const [selectedSale, setSelectedSale] = useState<FinishedSale | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 50; // 增加每页显示条数，避免屏幕留白
   // 退货表单
   const [returnFormOpen, setReturnFormOpen] = useState(false);
   const [returnPrefillSale, setReturnPrefillSale] = useState<{ type: "whole_fish" | "finished_product"; sale: any } | null>(null);
 
-  // 产品名称下拉
+  // 规格行级别：产品名称下拉（每行独立）
   const [activeProductNameIdx, setActiveProductNameIdx] = useState<number | null>(null);
   const [productNameSearch, setProductNameSearch] = useState('');
   const [productDropdownPos, setProductDropdownPos] = useState<{top:number,left:number,width:number}|null>(null);
@@ -251,7 +276,11 @@ export function FinishedProductSales() {
       ...form,
       sale_no: form.sale_no.trim() || undefined,
       paid: form.paid ? 1 : 0,
-      products: form.products.filter(p => p.product_spec.trim())
+      products: form.products.filter(p => p.product_spec.trim()).map(p => ({
+        ...p,
+        factory: p.factory || (p.batch ? parseBatch(p.batch, form.sale_date.slice(0, 4))?.factory : '') || '',
+        slaughter_date: p.slaughter_date || (p.batch ? parseBatch(p.batch, form.sale_date.slice(0, 4))?.slaughter_date : '') || '',
+      })),
     };
     try {
       if (editingId) {
@@ -274,7 +303,8 @@ export function FinishedProductSales() {
     if (res.ok && res.data) {
       const s = res.data.data || res.data;
       const products = (s.products?.length ? s.products : [emptyProduct]).map((p: any) => ({
-        product_name: p.product_name || '', product_spec: p.product_spec || '', factory: p.factory || '',
+        product_name: p.product_name || '', product_spec: p.product_spec || '', factory: p.factory || '', slaughter_date: p.slaughter_date || '',
+        batch: p.batch || formatBatch(p.factory, p.slaughter_date), // 兼容旧数据：反向生成批次号
         box_count: p.box_count || 0, weight_kg: p.weight_kg || 0, unit_price: p.unit_price || 0,
         total_amount: p.total_amount || 0, commission_rate: p.commission_rate || 0,
         commission_amount: p.commission_amount || 0, after_sales_adjustment: p.after_sales_adjustment || 0
@@ -641,15 +671,37 @@ export function FinishedProductSales() {
             <div className="border rounded-md overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 sticky top-0 z-10">
-                  <tr><th className="px-3 py-1 text-xs">产品名称</th><th className="px-3 py-1 text-xs">规格</th><th className="px-3 py-1 text-xs">箱数</th><th className="px-3 py-1 text-xs">重量(kg)</th><th className="px-3 py-1 text-xs">单价</th><th className="px-3 py-1 text-xs">金额</th></tr>
+                  <tr><th className="px-3 py-1 text-xs">产品名称</th><th className="px-3 py-1 text-xs">规格</th><th className="px-3 py-1 text-xs">批次</th><th className="px-3 py-1 text-xs">箱数</th><th className="px-3 py-1 text-xs">重量(kg)</th><th className="px-3 py-1 text-xs">单价</th><th className="px-3 py-1 text-xs">金额</th></tr>
                 </thead>
                 <tbody>
                   {(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.map((p: any, i: number) => (
-                    <tr key={i} className="border-t"><td className="px-3 py-1">{p.product_name || selectedSale.product_name || '-'}</td><td className="px-3 py-1">{p.product_spec || '-'}</td><td className="px-3 py-1">{p.box_count || '-'}</td><td className="px-3 py-1">{p.weight_kg || '-'}</td><td className="px-3 py-1">{p.unit_price || '-'}</td><td className="px-3 py-1">{p.total_amount || '-'}</td></tr>
+                    <tr key={i} className="border-t">
+                      <td className="px-3 py-1">{p.product_name || selectedSale.product_name || '-'}</td>
+                      <td className="px-3 py-1">{p.product_spec || '-'}</td>
+                      <td className="px-3 py-1">{p.batch || formatBatch(p.factory, p.slaughter_date) || '-'}</td>
+                      <td className="px-3 py-1">{p.box_count || '-'}</td>
+                      <td className="px-3 py-1">{p.weight_kg || '-'}</td>
+                      <td className="px-3 py-1">{p.unit_price || '-'}</td>
+                      <td className="px-3 py-1">{p.total_amount || '-'}</td>
+                    </tr>
                   )) : (
-                    <tr className="border-t"><td className="px-3 py-1">{selectedSale.product_name || '-'}</td><td className="px-3 py-1">-</td><td className="px-3 py-1">{selectedSale.quantity || '-'}</td><td className="px-3 py-1">{selectedSale.weight || '-'}</td><td className="px-3 py-1">{selectedSale.unit_price || '-'}</td><td className="px-3 py-1">{selectedSale.total_amount || '-'}</td></tr>
+                    <tr className="border-t">
+                      <td className="px-3 py-1">{selectedSale.product_name || '-'}</td>
+                      <td className="px-3 py-1">-</td>
+                      <td className="px-3 py-1">{formatBatch(selectedSale.factory, selectedSale.slaughter_date) || '-'}</td>
+                      <td className="px-3 py-1">{selectedSale.quantity || '-'}</td>
+                      <td className="px-3 py-1">{selectedSale.weight || '-'}</td>
+                      <td className="px-3 py-1">{selectedSale.unit_price || '-'}</td>
+                      <td className="px-3 py-1">{selectedSale.total_amount || '-'}</td>
+                    </tr>
                   )}
-                  <tr className="bg-gray-50 font-medium"><td className="px-3 py-1">合计</td><td className="px-3 py-1">-</td><td className="px-3 py-1">{(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.reduce((s: number, p: any) => s + (p.box_count || 0), 0) : (selectedSale.quantity || 0)}</td><td className="px-3 py-1">{(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.reduce((s: number, p: any) => s + (p.weight_kg || 0), 0) : (selectedSale.weight || 0)}</td><td className="px-3 py-1">-</td><td className="px-3 py-1">{(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.reduce((s: number, p: any) => s + (p.total_amount || 0), 0) : (selectedSale.total_amount || 0)}</td></tr>
+                  <tr className="bg-gray-50 font-medium">
+                    <td className="px-3 py-1" colSpan={3}>合计</td>
+                    <td className="px-3 py-1">{(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.reduce((s: number, p: any) => s + (p.box_count || 0), 0) : (selectedSale.quantity || 0)}</td>
+                    <td className="px-3 py-1">{(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.reduce((s: number, p: any) => s + (p.weight_kg || 0), 0) : (selectedSale.weight || 0)}</td>
+                    <td className="px-3 py-1">-</td>
+                    <td className="px-3 py-1">{(selectedSale.products && selectedSale.products.length > 0) ? selectedSale.products.reduce((s: number, p: any) => s + (p.total_amount || 0), 0) : (selectedSale.total_amount || 0)}</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -734,33 +786,83 @@ export function FinishedProductSales() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
-                      <th className="px-3 py-2 text-left w-[25%]">规格</th>
-                      <th className="px-3 py-2 text-right w-[14%]">箱数</th>
-                      <th className="px-3 py-2 text-right w-[16%]">重量(kg)</th>
-                      <th className="px-3 py-2 text-right w-[16%]">单价(元/kg)</th>
-                      <th className="px-3 py-2 text-right w-[16%]">金额</th>
-                      <th className="px-3 py-2 text-center w-[8%]"></th>
+                      <th className="px-3 py-2 text-left w-[18%]">产品名称</th>
+                      <th className="px-3 py-2 text-left w-[18%]">规格</th>
+                      <th className="px-3 py-2 text-left w-[14%]">批次</th>
+                      <th className="px-3 py-2 text-right w-[10%]">箱数</th>
+                      <th className="px-3 py-2 text-right w-[10%]">重量(kg)</th>
+                      <th className="px-3 py-2 text-right w-[10%]">单价(元/kg)</th>
+                      <th className="px-3 py-2 text-right w-[10%]">金额</th>
+                      <th className="px-3 py-2 text-center w-[2%]"></th>
                     </tr>
                   </thead>
                   <tbody>
                     {form.products.map((p, idx) => {
-                      const isSpecOpen = activeSpecIdx === idx;
-                      const filteredSpecs = specSearch.trim() && selectedProductGroup ? selectedProductGroup.specs.filter(s => (s.spec || '').toLowerCase().includes(specSearch.toLowerCase())) : (selectedProductGroup?.specs || []);
+                      const allSpecOptions = productGroups.flatMap((g: any) => g.specs.map((s: any) => ({
+                        key: `${g.name}###${s.spec || ''}`,
+                        productName: g.name,
+                        spec: s.spec || '',
+                        label: `${g.name} · ${s.spec || '(无规格)'}`,
+                      })));
+                      const currentKey = p.product_name && p.product_spec !== undefined
+                        ? `${p.product_name}###${p.product_spec}`
+                        : '';
                       return (
                         <tr key={idx} className="border-t">
-                          <td className="px-3 py-2 relative">
-                            <Input className="h-8 text-sm" value={isSpecOpen ? String(specSearch) : String(p.product_spec || '')} placeholder={selectedProductGroup ? "选择规格..." : "请先选择产品名称"} disabled={!form.product_name}
-                              onFocus={(e) => { if (form.product_name) { const rect = (e.target as HTMLInputElement).getBoundingClientRect(); setSpecDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width }); setActiveSpecIdx(idx); setSpecSearch(p.product_spec || ''); }}}
-                              onChange={e => { setSpecSearch(e.target.value); setActiveSpecIdx(idx); }}
-                              onBlur={() => { setTimeout(() => { setActiveSpecIdx(null); setSpecSearch(''); setSpecDropdownPos(null); }, 200); }}
-                            />
-                            {isSpecOpen && specDropdownPos && createPortal(
-                              <div className="fixed bg-white border rounded shadow-lg max-h-32 overflow-auto z-[9999]" style={{ top: specDropdownPos.top, left: specDropdownPos.left, width: specDropdownPos.width }}>
-                                {!selectedProductGroup ? <div className="px-3 py-2 text-sm text-gray-400">请先选择产品名称</div> : filteredSpecs.length === 0 ? <div className="px-3 py-2 text-sm text-gray-400">无匹配规格</div> : filteredSpecs.map(s => (
-                                  <div key={s.id} className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm" onMouseDown={() => { handleProductChange(idx, 'product_spec', s.spec || ''); setActiveSpecIdx(null); setSpecSearch(''); setSpecDropdownPos(null); }}>{s.spec || '(无规格)'} {s.code ? `· ${s.code}` : ''}</div>
+                          <td className="px-3 py-2">
+                            <div className="text-xs font-medium truncate min-w-0" title={p.product_name}>
+                              {p.product_name || <span className="text-muted-foreground">产品</span>}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            <Select value={currentKey} onValueChange={(v) => {
+                              const option = allSpecOptions.find((o: any) => o.key === v);
+                              if (option) {
+                                handleProductChange(idx, 'product_name', option.productName);
+                                handleProductChange(idx, 'product_spec', option.spec);
+                              }
+                            }}>
+                              <SelectTrigger className="h-8 text-xs px-2">
+                                <SelectValue placeholder="选择规格">
+                                  {currentKey && (() => {
+                                    const option = allSpecOptions.find((o: any) => o.key === currentKey);
+                                    return option ? option.spec || '选择规格' : '选择规格';
+                                  })()}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {allSpecOptions.map((o: any) => (
+                                  <SelectItem key={o.key} value={o.key} className="text-xs">
+                                    {o.label}
+                                  </SelectItem>
                                 ))}
-                              </div>, document.body
-                            )}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="px-3 py-2">
+                            <Input
+                              type="text"
+                              className="h-8 text-sm"
+                              value={String(p.batch || '')}
+                              onChange={e => {
+                                const batchStr = e.target.value;
+                                const year = form.sale_date ? form.sale_date.slice(0, 4) : new Date().getFullYear();
+                                const parsed = parseBatch(batchStr, year);
+                                if (parsed) {
+                                  handleProductChange(idx, 'batch', batchStr);
+                                  handleProductChange(idx, 'factory', parsed.factory);
+                                  handleProductChange(idx, 'slaughter_date', parsed.slaughter_date);
+                                } else {
+                                  handleProductChange(idx, 'batch', batchStr);
+                                  // 若格式不对，清空派生字段
+                                  if (!batchStr.includes('-')) {
+                                    handleProductChange(idx, 'factory', '');
+                                    handleProductChange(idx, 'slaughter_date', '');
+                                  }
+                                }
+                              }}
+                              placeholder="如 N430-0130"
+                            />
                           </td>
                           <td className="px-3 py-2"><Input type="text" className="h-8 text-sm text-right" value={String(p.box_count || '')} onChange={e => handleProductChange(idx, 'box_count', parseInt(e.target.value) || 0)} placeholder="待填写" /></td>
                           <td className="px-3 py-2"><Input type="text" className="h-8 text-sm text-right" value={String(p.weight_kg || '')} onChange={e => handleProductChange(idx, 'weight_kg', e.target.value)} onBlur={e => { const val = e.target.value.trim(); if (val.includes('+')) { const sum = val.split('+').reduce((a, b) => a + (parseFloat(b.trim()) || 0), 0); handleProductChange(idx, 'weight_kg', round2(sum)); } else { const num = parseFloat(val); if (!isNaN(num)) handleProductChange(idx, 'weight_kg', round2(num)); } }} placeholder="待填写" /></td>
@@ -1173,6 +1275,7 @@ function FinishedSaleDetailDialog({ sale, onClose }: { sale: FinishedSale; onClo
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-xs">规格</TableHead>
+                    <TableHead className="text-xs">批次</TableHead>
                     <TableHead className="text-xs text-right">箱数</TableHead>
                     <TableHead className="text-xs text-right">重量(kg)</TableHead>
                     <TableHead className="text-xs text-right">单价</TableHead>
@@ -1183,6 +1286,7 @@ function FinishedSaleDetailDialog({ sale, onClose }: { sale: FinishedSale; onClo
                   {sale.products.map((p) => (
                     <TableRow key={p.id ?? p.product_spec}>
                       <TableCell className="text-sm">{p.product_spec ?? "-"}</TableCell>
+                      <TableCell className="text-sm">{p.batch || formatBatch(p.factory, p.slaughter_date) || "-"}</TableCell>
                       <TableCell className="text-sm text-right">{p.box_count ?? "-"}</TableCell>
                       <TableCell className="text-sm text-right">{Number(p.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                       <TableCell className="text-sm text-right">{Number(p.unit_price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
@@ -1191,6 +1295,7 @@ function FinishedSaleDetailDialog({ sale, onClose }: { sale: FinishedSale; onClo
                   ))}
                   <TableRow className="bg-muted/50 font-medium text-sm">
                     <TableCell colSpan={2} className="text-right">合计:</TableCell>
+                    <TableCell className="text-right">{sale.products.reduce((s, it) => s + Number(it.box_count || 0), 0)}</TableCell>
                     <TableCell className="text-right">{sale.products.reduce((s, it) => s + Number(it.weight_kg || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</TableCell>
                     <TableCell />
                     <TableCell className="text-right">¥{sale.products.reduce((s, it) => s + Number(it.total_amount || 0), 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>

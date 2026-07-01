@@ -1,4 +1,4 @@
-from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -7,8 +7,8 @@ class UserProfileResponse(BaseModel):
     id: int
     username: str
     email: str
-    full_name: Optional[str] = None
-    phone: Optional[str] = None
+    full_name: str | None = None
+    phone: str | None = None
     role: str
     is_active: bool
 
@@ -18,9 +18,9 @@ class UserProfileResponse(BaseModel):
 
 class UserProfileUpdate(BaseModel):
     """更新用户资料"""
-    full_name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    full_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
 
 
 class UserPreferencesResponse(BaseModel):
@@ -37,11 +37,11 @@ class UserPreferencesResponse(BaseModel):
 
 class UserPreferencesUpdate(BaseModel):
     """更新用户偏好设置"""
-    notify_customs_change: Optional[bool] = None
-    notify_batch_lock: Optional[bool] = None
-    notify_payment: Optional[bool] = None
-    compact_mode: Optional[bool] = None
-    auto_refresh: Optional[bool] = None
+    notify_customs_change: bool | None = None
+    notify_batch_lock: bool | None = None
+    notify_payment: bool | None = None
+    compact_mode: bool | None = None
+    auto_refresh: bool | None = None
 
 
 class UserSettingsResponse(BaseModel):
@@ -52,8 +52,8 @@ class UserSettingsResponse(BaseModel):
 
 class UserSettingsUpdate(BaseModel):
     """完整更新请求"""
-    profile: Optional[UserProfileUpdate] = None
-    preferences: Optional[UserPreferencesUpdate] = None
+    profile: UserProfileUpdate | None = None
+    preferences: UserPreferencesUpdate | None = None
 
 
 class PasswordUpdate(BaseModel):

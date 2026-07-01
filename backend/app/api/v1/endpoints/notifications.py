@@ -1,12 +1,13 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.models import Notification
-from app.schemas.notification import NotificationResponse, NotificationListResponse
+from app.core.deps import get_current_user
+from app.models import Notification, User
+from app.schemas.notification import NotificationListResponse, NotificationResponse
 
 router = APIRouter()
 
@@ -17,6 +18,7 @@ async def list_notifications(
     limit: int = 50,
     unread_only: bool = False,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """获取通知列表"""
     query = select(Notification)
@@ -45,6 +47,7 @@ async def list_notifications(
 @router.get("/unread-count", response_model=dict)
 async def get_unread_count(
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """获取未读通知数量（小铃铛用）"""
     result = await db.execute(
@@ -58,6 +61,7 @@ async def get_unread_count(
 async def mark_as_read(
     notification_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """标记通知为已读"""
     result = await db.execute(

@@ -3,22 +3,20 @@
 """
 from datetime import date
 from decimal import Decimal
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.permissions import require_warehouse, require_admin, log_operation
+from app.core.permissions import require_admin, require_warehouse
+from app.models import ImportInvoice, Product, User, WholeFishSale
 from app.schemas.warehouse_v2 import (
-    WarehouseCreate,
-    WarehouseListResponse,
-    WarehouseResponse,
-    WarehouseUpdate,
     StockInboundCreate,
     StockInboundListResponse,
     StockInboundResponse,
     StockListResponse,
+    StockMovementListResponse,
     StockOutboundCreate,
     StockOutboundListResponse,
     StockOutboundResponse,
@@ -26,11 +24,12 @@ from app.schemas.warehouse_v2 import (
     StockTransferCreate,
     StockTransferListResponse,
     StockTransferResponse,
-    StockMovementListResponse,
+    WarehouseCreate,
+    WarehouseListResponse,
+    WarehouseResponse,
+    WarehouseUpdate,
 )
 from app.services.warehouse_v2_service import WarehouseV2Service
-from app.models import Product, ImportInvoice, WholeFishSale, User
-from sqlalchemy import select
 
 router = APIRouter()
 
@@ -40,7 +39,7 @@ router = APIRouter()
 @router.post("/inbounds/from-invoice", response_model=dict)
 async def create_inbound_from_invoice(
     invoice_id: int,
-    product_id: Optional[int] = None,
+    product_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """根据进口发票创建入库单（自动入库到 ZB-IMPORT）"""
@@ -80,7 +79,7 @@ async def create_inbound_from_invoice(
 @router.post("/outbounds/from-sale", response_model=dict)
 async def create_outbound_from_sale(
     sale_id: int,
-    warehouse_id: Optional[int] = None,
+    warehouse_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """根据整鱼销售单创建出库单"""
@@ -125,8 +124,8 @@ async def create_outbound_from_sale(
 
 @router.get("/warehouses", response_model=WarehouseListResponse)
 async def list_warehouses(
-    type: Optional[str] = Query(None),
-    is_active: Optional[bool] = Query(None),
+    type: str | None = Query(None),
+    is_active: bool | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -179,10 +178,10 @@ async def update_warehouse(
 
 @router.get("/stocks", response_model=StockListResponse)
 async def list_stocks(
-    warehouse_id: Optional[int] = Query(None),
-    product_id: Optional[int] = Query(None),
-    batch_id: Optional[int] = Query(None),
-    is_below_warning: Optional[bool] = Query(None),
+    warehouse_id: int | None = Query(None),
+    product_id: int | None = Query(None),
+    batch_id: int | None = Query(None),
+    is_below_warning: bool | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -215,11 +214,11 @@ async def create_inbound(
 
 @router.get("/inbounds", response_model=StockInboundListResponse)
 async def list_inbounds(
-    warehouse_id: Optional[int] = Query(None),
-    product_id: Optional[int] = Query(None),
-    status: Optional[str] = Query(None),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
+    warehouse_id: int | None = Query(None),
+    product_id: int | None = Query(None),
+    status: str | None = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -285,11 +284,11 @@ async def create_outbound(
 
 @router.get("/outbounds", response_model=StockOutboundListResponse)
 async def list_outbounds(
-    warehouse_id: Optional[int] = Query(None),
-    product_id: Optional[int] = Query(None),
-    status: Optional[str] = Query(None),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
+    warehouse_id: int | None = Query(None),
+    product_id: int | None = Query(None),
+    status: str | None = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -355,10 +354,10 @@ async def create_transfer(
 
 @router.get("/transfers", response_model=StockTransferListResponse)
 async def list_transfers(
-    from_warehouse_id: Optional[int] = Query(None),
-    to_warehouse_id: Optional[int] = Query(None),
-    product_id: Optional[int] = Query(None),
-    status: Optional[str] = Query(None),
+    from_warehouse_id: int | None = Query(None),
+    to_warehouse_id: int | None = Query(None),
+    product_id: int | None = Query(None),
+    status: str | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -419,11 +418,11 @@ async def cancel_transfer(
 
 @router.get("/movements", response_model=StockMovementListResponse)
 async def list_movements(
-    warehouse_id: Optional[int] = Query(None),
-    product_id: Optional[int] = Query(None),
-    movement_type: Optional[str] = Query(None),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
+    warehouse_id: int | None = Query(None),
+    product_id: int | None = Query(None),
+    movement_type: str | None = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -444,9 +443,10 @@ async def list_domestic_stocks(
     db: AsyncSession = Depends(get_db),
 ):
     """国内整包仓明细列表：按入库批次展示，含宰杀日期、加工厂、规格等"""
-    from app.models.warehouse import StockInbound, Warehouse, Stock
-    from app.models import Product, StockMovement
     from sqlalchemy import func
+
+    from app.models import Product, StockMovement
+    from app.models.warehouse import Stock, StockInbound, Warehouse
 
     # 查国内整包仓ID
     wh_result = await db.execute(select(Warehouse.id).where(Warehouse.code == "ZB-DOMESTIC"))

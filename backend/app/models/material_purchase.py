@@ -1,9 +1,10 @@
 """
 物料采购与批次管理模型
 """
+from __future__ import annotations
+
 from datetime import date
 from decimal import Decimal
-from typing import Optional, List
 
 from sqlalchemy import (
     Boolean,
@@ -28,28 +29,29 @@ class MaterialPurchaseOrder(Base, TimestampMixin):
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
     supplier_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
     
-    quoted_total: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
+    quoted_total: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     actual_total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    after_sales_adjustment: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     
     status: Mapped[str] = mapped_column(String(20), default="pending")
     payment_status: Mapped[str] = mapped_column(String(20), default="unpaid")
     
     # 入库日期（用于计算到货周期）
-    inbound_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    inbound_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     
-    warehouse_id: Mapped[Optional[int]] = mapped_column(ForeignKey("warehouses.id"))
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id"))
+    notes: Mapped[str | None] = mapped_column(Text)
     
     # 关系
-    items: Mapped[List["MaterialPurchaseItem"]] = relationship(
+    items: Mapped[list[MaterialPurchaseItem]] = relationship(
         "MaterialPurchaseItem",
         back_populates="order",
         lazy="selectin",
         cascade="all, delete-orphan",
     )
-    supplier: Mapped["Company"] = relationship("Company", lazy="joined")
-    warehouse: Mapped[Optional["Warehouse"]] = relationship("Warehouse", lazy="joined")
+    supplier: Mapped[Company] = relationship("Company", lazy="joined")
+    warehouse: Mapped[Warehouse | None] = relationship("Warehouse", lazy="joined")
 
 
 class MaterialPurchaseItem(Base, TimestampMixin):
@@ -70,8 +72,8 @@ class MaterialPurchaseItem(Base, TimestampMixin):
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
     
     # 价格（双轨）
-    quoted_unit_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
-    quoted_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
+    quoted_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    quoted_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     actual_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     actual_unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     
@@ -79,11 +81,11 @@ class MaterialPurchaseItem(Base, TimestampMixin):
     received_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
     is_fully_received: Mapped[bool] = mapped_column(Boolean, default=False)
     
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
     
     # 关系
-    order: Mapped["MaterialPurchaseOrder"] = relationship("MaterialPurchaseOrder", back_populates="items")
-    product: Mapped["Product"] = relationship("Product", lazy="joined")
+    order: Mapped[MaterialPurchaseOrder] = relationship("MaterialPurchaseOrder", back_populates="items")
+    product: Mapped[Product] = relationship("Product", lazy="joined")
 
 
 class MaterialBatch(Base, TimestampMixin):
@@ -96,15 +98,15 @@ class MaterialBatch(Base, TimestampMixin):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     
     # 来源（快照）
-    supplier_name: Mapped[Optional[str]] = mapped_column(String(200))
-    purchase_order_item_id: Mapped[Optional[int]] = mapped_column(
+    supplier_name: Mapped[str | None] = mapped_column(String(200))
+    purchase_order_item_id: Mapped[int | None] = mapped_column(
         ForeignKey("material_purchase_items.id"),
     )
     
     # 数量
     inbound_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     remaining_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
-    unit: Mapped[Optional[str]] = mapped_column(String(20))
+    unit: Mapped[str | None] = mapped_column(String(20))
     
     # 成本
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
@@ -112,15 +114,15 @@ class MaterialBatch(Base, TimestampMixin):
     
     # 时间
     inbound_date: Mapped[date] = mapped_column(Date, nullable=False)
-    expiry_date: Mapped[Optional[date]] = mapped_column(Date)
+    expiry_date: Mapped[date | None] = mapped_column(Date)
     
     # 仓库
-    warehouse_id: Mapped[Optional[int]] = mapped_column(ForeignKey("warehouses.id"))
-    location: Mapped[Optional[str]] = mapped_column(String(100))
+    warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id"))
+    location: Mapped[str | None] = mapped_column(String(100))
     
     # 状态
     status: Mapped[str] = mapped_column(String(20), default="active")
     
     # 关系
-    product: Mapped["Product"] = relationship("Product", lazy="joined")
-    warehouse: Mapped[Optional["Warehouse"]] = relationship("Warehouse", lazy="joined")
+    product: Mapped[Product] = relationship("Product", lazy="joined")
+    warehouse: Mapped[Warehouse | None] = relationship("Warehouse", lazy="joined")

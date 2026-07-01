@@ -5,16 +5,20 @@
 """
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
 from app.core.database import get_db
-from app.core.permissions import require_warehouse, log_operation
-from app.models import Product, ProductCategory, Company, MaterialSupplier, MaterialCategory, User
+from app.models import (
+    Company,
+    MaterialCategory,
+    MaterialSupplier,
+    Product,
+    ProductCategory,
+)
 from app.models.finished_product_v2 import WarehousePurchaseOrder, WarehouseStock
 
 router = APIRouter()
@@ -30,25 +34,25 @@ class MaterialCategoryBrief(BaseModel):
 
 
 class MaterialCreate(BaseModel):
-    code: Optional[str] = None
+    code: str | None = None
     name: str
-    spec: Optional[str] = None
+    spec: str | None = None
     unit: str = "个"
-    cost_price: Optional[float] = None
-    category_id: Optional[int] = None
+    cost_price: float | None = None
+    category_id: int | None = None
     is_active: bool = True
-    items_per_box: Optional[int] = None  # 每箱数量
+    items_per_box: int | None = None  # 每箱数量
 
 
 class MaterialUpdate(BaseModel):
-    code: Optional[str] = None
-    name: Optional[str] = None
-    spec: Optional[str] = None
-    unit: Optional[str] = None
-    cost_price: Optional[float] = None
-    category_id: Optional[int] = None
-    is_active: Optional[bool] = None
-    items_per_box: Optional[int] = None
+    code: str | None = None
+    name: str | None = None
+    spec: str | None = None
+    unit: str | None = None
+    cost_price: float | None = None
+    category_id: int | None = None
+    is_active: bool | None = None
+    items_per_box: int | None = None
 
 
 class MaterialSupplierItem(BaseModel):
@@ -56,12 +60,12 @@ class MaterialSupplierItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     supplier_id: int
-    supplier_name: Optional[str] = None
-    unit_price: Optional[Decimal] = None
-    min_order_qty: Optional[Decimal] = None
-    lead_time_days: Optional[int] = None
+    supplier_name: str | None = None
+    unit_price: Decimal | None = None
+    min_order_qty: Decimal | None = None
+    lead_time_days: int | None = None
     is_preferred: bool = False
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class MaterialItem(BaseModel):
@@ -70,27 +74,27 @@ class MaterialItem(BaseModel):
     id: int
     code: str
     name: str
-    spec: Optional[str] = None
+    spec: str | None = None
     unit: str
-    supplier_id: Optional[int] = None  # 兼容旧字段
-    supplier_name: Optional[str] = None
+    supplier_id: int | None = None  # 兼容旧字段
+    supplier_name: str | None = None
     stock_quantity: Decimal
-    lead_time_days: Optional[int] = None
-    last_purchase_price: Optional[Decimal] = None
-    cost_price: Optional[Decimal] = None
+    lead_time_days: int | None = None
+    last_purchase_price: Decimal | None = None
+    cost_price: Decimal | None = None
     is_active: bool
-    category_id: Optional[int] = None  # 新增：分类ID
-    category: Optional[MaterialCategoryBrief] = None  # 物料分类
-    suppliers: List[MaterialSupplierItem] = []  # 新增：多供应商
-    items_per_box: Optional[int] = None  # 每箱数量
-    material_type: Optional[str] = "standalone"
-    parent_id: Optional[int] = None
-    variants: List["MaterialItem"] = []  # 嵌套变体
+    category_id: int | None = None  # 新增：分类ID
+    category: MaterialCategoryBrief | None = None  # 物料分类
+    suppliers: list[MaterialSupplierItem] = []  # 新增：多供应商
+    items_per_box: int | None = None  # 每箱数量
+    material_type: str | None = "standalone"
+    parent_id: int | None = None
+    variants: list["MaterialItem"] = []  # 嵌套变体
 
 
 class MaterialListResponse(BaseModel):
     total: int
-    items: List[MaterialItem]
+    items: list[MaterialItem]
     skip: int
     limit: int
 
@@ -104,14 +108,14 @@ class MaterialConsumptionRecord(BaseModel):
     material_name: str
     quantity_used: Decimal
     unit: str
-    related_slaughter_id: Optional[int] = None
-    related_slaughter_date: Optional[date] = None
-    notes: Optional[str] = None
+    related_slaughter_id: int | None = None
+    related_slaughter_date: date | None = None
+    notes: str | None = None
 
 
 class MaterialConsumptionListResponse(BaseModel):
     total: int
-    items: List[MaterialConsumptionRecord]
+    items: list[MaterialConsumptionRecord]
     skip: int
     limit: int
 
@@ -124,7 +128,7 @@ class MaterialSummary(BaseModel):
     low_stock_count: int  # 低于安全库存的数量
     recent_purchase_count: int  # 最近30天采购次数
     recent_purchase_amount: Decimal  # 最近30天采购金额
-    top_consumption: List[dict] = []  # 消耗最多的物料
+    top_consumption: list[dict] = []  # 消耗最多的物料
 
 
 class MaterialMovementRecord(BaseModel):
@@ -137,15 +141,15 @@ class MaterialMovementRecord(BaseModel):
     material_name: str
     quantity: Decimal
     unit: str
-    unit_price: Optional[Decimal] = None
-    total_amount: Optional[Decimal] = None
+    unit_price: Decimal | None = None
+    total_amount: Decimal | None = None
     reason: str
-    related_order_id: Optional[int] = None
+    related_order_id: int | None = None
 
 
 class MaterialMovementListResponse(BaseModel):
     total: int
-    items: List[MaterialMovementRecord]
+    items: list[MaterialMovementRecord]
     skip: int
     limit: int
 
@@ -154,11 +158,11 @@ class MaterialMovementListResponse(BaseModel):
 
 @router.get("/", response_model=MaterialListResponse)
 async def list_materials(
-    search: Optional[str] = Query(None),
-    supplier_id: Optional[int] = Query(None),
-    material_category_id: Optional[int] = Query(None),
-    is_active: Optional[bool] = Query(None),
-    is_low_stock: Optional[bool] = Query(None),
+    search: str | None = Query(None),
+    supplier_id: int | None = Query(None),
+    material_category_id: int | None = Query(None),
+    is_active: bool | None = Query(None),
+    is_low_stock: bool | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -206,11 +210,11 @@ async def list_materials(
 
     # 获取所有相关物料ID（基础物料 + 它们的变体）
     all_product_ids = [p.id for p in products]
-    variant_map: dict[int, List[Product]] = {}
+    variant_map: dict[int, list[Product]] = {}
     for p in products:
         if p.material_type == "basic":
             variant_result = await db.execute(
-                select(Product).where(Product.parent_id == p.id).where(Product.is_active == True)
+                select(Product).where(Product.parent_id == p.id).where(Product.is_active)
             )
             variants = variant_result.scalars().all()
             variant_map[p.id] = variants
@@ -228,7 +232,7 @@ async def list_materials(
         .join(Company, MaterialSupplier.supplier_id == Company.id)
         .where(MaterialSupplier.material_id.in_(all_product_ids))
     )
-    supplier_map: dict[int, List[MaterialSupplierItem]] = {}
+    supplier_map: dict[int, list[MaterialSupplierItem]] = {}
     for ms, company in ms_result.all():
         if ms.material_id not in supplier_map:
             supplier_map[ms.material_id] = []
@@ -434,10 +438,10 @@ async def get_material_summary(
 
 @router.get("/movements", response_model=MaterialMovementListResponse)
 async def list_material_movements(
-    material_id: Optional[int] = Query(None),
-    movement_type: Optional[str] = Query(None, description="in / out"),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
+    material_id: int | None = Query(None),
+    movement_type: str | None = Query(None, description="in / out"),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -487,23 +491,23 @@ async def list_material_movements(
 class MaterialSupplierCreate(BaseModel):
     """添加物料供应商"""
     supplier_id: int
-    unit_price: Optional[float] = None
-    min_order_qty: Optional[float] = None
-    lead_time_days: Optional[int] = None
+    unit_price: float | None = None
+    min_order_qty: float | None = None
+    lead_time_days: int | None = None
     is_preferred: bool = False
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class MaterialSupplierUpdate(BaseModel):
     """更新物料供应商"""
-    unit_price: Optional[float] = None
-    min_order_qty: Optional[float] = None
-    lead_time_days: Optional[int] = None
-    is_preferred: Optional[bool] = None
-    notes: Optional[str] = None
+    unit_price: float | None = None
+    min_order_qty: float | None = None
+    lead_time_days: int | None = None
+    is_preferred: bool | None = None
+    notes: str | None = None
 
 
-@router.get("/{material_id}/suppliers", response_model=List[MaterialSupplierItem])
+@router.get("/{material_id}/suppliers", response_model=list[MaterialSupplierItem])
 async def list_material_suppliers(
     material_id: int,
     db: AsyncSession = Depends(get_db),

@@ -1,21 +1,30 @@
 from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.permissions import require_finance, require_admin, log_operation
+from app.core.permissions import require_admin, require_finance
+from app.models import Batch, BatchInvoice, ImportInvoice, User
 from app.schemas.finance import (
-    ExchangeRecordCreate, ExchangeRecordUpdate, ExchangeRecordResponse,
-    ImportTaxCreate, ImportTaxUpdate, ImportTaxResponse,
-    ClearanceCostCreate, ClearanceCostUpdate, ClearanceCostResponse,
-    TransactionRecordCreate, TransactionRecordUpdate, TransactionRecordResponse,
+    ClearanceCostCreate,
+    ClearanceCostResponse,
+    ClearanceCostUpdate,
+    ExchangeRecordCreate,
+    ExchangeRecordResponse,
+    ExchangeRecordUpdate,
     FinanceSummary,
-    ImportFeeCreate, ImportFeeUpdate,
+    ImportFeeCreate,
+    ImportFeeUpdate,
+    ImportTaxCreate,
+    ImportTaxResponse,
+    ImportTaxUpdate,
+    TransactionRecordCreate,
+    TransactionRecordResponse,
+    TransactionRecordUpdate,
 )
 from app.services.finance_service import FinanceService
-from app.models import BatchInvoice, Batch, User
-from sqlalchemy import select
 
 router = APIRouter()
 
@@ -48,7 +57,8 @@ async def list_bank_accounts(
     db: AsyncSession = Depends(get_db),
 ):
     """银行账户列表 - 余额根据交易流水实时计算"""
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
+
     from app.models import BankAccount, Company, TransactionRecord
     
     result = await db.execute(
@@ -111,7 +121,8 @@ async def create_bank_account(
     db: AsyncSession = Depends(get_db),
 ):
     """创建银行账户（编号自动生成）"""
-    from sqlalchemy import select, func
+    from sqlalchemy import func, select
+
     from app.models import BankAccount
     
     # 自动生成编号: BA + 6位自增序号
@@ -152,6 +163,7 @@ async def update_bank_account(
 ):
     """更新银行账户"""
     from sqlalchemy import select
+
     from app.models import BankAccount
     
     result = await db.execute(select(BankAccount).where(BankAccount.id == account_id))
@@ -180,6 +192,7 @@ async def delete_bank_account(
 ):
     """删除银行账户（软删除）"""
     from sqlalchemy import select
+
     from app.models import BankAccount
     
     result = await db.execute(select(BankAccount).where(BankAccount.id == account_id))
@@ -194,10 +207,10 @@ async def delete_bank_account(
 
 # ==================== 购汇记录 ====================
 
-@router.get("/exchange", response_model=List[ExchangeRecordResponse])
+@router.get("/exchange", response_model=list[ExchangeRecordResponse])
 async def list_exchange_records(
-    invoice_id: Optional[int] = Query(None, description="发票ID"),
-    batch_id: Optional[int] = Query(None, description="批次ID"),
+    invoice_id: int | None = Query(None, description="发票ID"),
+    batch_id: int | None = Query(None, description="批次ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -207,19 +220,33 @@ async def list_exchange_records(
     
     # 收集所有需要查询的发票ID
     all_invoice_ids = set()
+    importer_ids = set()
     for r in items:
         if r.related_invoice_ids:
             all_invoice_ids.update(r.related_invoice_ids)
+        if r.importer_id:
+            importer_ids.add(r.importer_id)
     
     # 查询发票号映射
     invoice_no_map = {}
     if all_invoice_ids:
-        from app.models import ImportInvoice
         from sqlalchemy import select
+
+        from app.models import ImportInvoice
         result = await db.execute(
             select(ImportInvoice.id, ImportInvoice.invoice_no).where(ImportInvoice.id.in_(list(all_invoice_ids)))
         )
         invoice_no_map = {row[0]: row[1] for row in result.all()}
+    
+    # 查询进口商名称映射
+    importer_name_map = {}
+    if importer_ids:
+        from sqlalchemy import select
+        from app.models import Company
+        result = await db.execute(
+            select(Company.id, Company.name).where(Company.id.in_(list(importer_ids)))
+        )
+        importer_name_map = {row[0]: row[1] for row in result.all()}
     
     # 构建响应
     responses = []
@@ -227,6 +254,7 @@ async def list_exchange_records(
         resp_data = {
             **r.__dict__,
             "related_invoice_nos": [invoice_no_map.get(iid, str(iid)) for iid in (r.related_invoice_ids or [])] if r.related_invoice_ids else None,
+            "importer_name": importer_name_map.get(r.importer_id) if r.importer_id else None,
         }
         responses.append(ExchangeRecordResponse.model_validate(resp_data))
     
@@ -244,8 +272,9 @@ async def create_exchange_record(
     
     # 校验合并购汇的发票均未购汇（防止重复购汇）
     if data.related_invoice_ids:
-        from app.models import ImportInvoice
         from sqlalchemy import select
+
+        from app.models import ImportInvoice
         result = await db.execute(
             select(ImportInvoice.id, ImportInvoice.invoice_no, ImportInvoice.exchange_status)
             .where(ImportInvoice.id.in_(data.related_invoice_ids))
@@ -301,7 +330,7 @@ async def delete_exchange_record(
 
 @router.get("/import-fees")
 async def list_import_fees(
-    invoice_id: Optional[int] = Query(None, description="发票ID"),
+    invoice_id: int | None = Query(None, description="发票ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -363,9 +392,9 @@ async def get_batch_purchase_total(
 
 # ==================== 进口税费 (保留旧接口兼容) ====================
 
-@router.get("/taxes", response_model=List[ImportTaxResponse])
+@router.get("/taxes", response_model=list[ImportTaxResponse])
 async def list_import_taxes(
-    invoice_id: Optional[int] = Query(None, description="发票ID"),
+    invoice_id: int | None = Query(None, description="发票ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -393,6 +422,7 @@ async def update_import_tax(
 ):
     """更新进口税费"""
     from sqlalchemy import select
+
     from app.models import ImportTax
     result = await db.execute(select(ImportTax).where(ImportTax.id == record_id))
     record = result.scalar_one_or_none()
@@ -409,6 +439,7 @@ async def delete_import_tax(
 ):
     """删除进口税费"""
     from sqlalchemy import select
+
     from app.models import ImportTax
     result = await db.execute(select(ImportTax).where(ImportTax.id == record_id))
     record = result.scalar_one_or_none()
@@ -420,9 +451,9 @@ async def delete_import_tax(
 
 # ==================== 清关运费 (保留旧接口兼容) ====================
 
-@router.get("/clearance", response_model=List[ClearanceCostResponse])
+@router.get("/clearance", response_model=list[ClearanceCostResponse])
 async def list_clearance_costs(
-    invoice_id: Optional[int] = Query(None, description="发票ID"),
+    invoice_id: int | None = Query(None, description="发票ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -450,6 +481,7 @@ async def update_clearance_cost(
 ):
     """更新清关运费"""
     from sqlalchemy import select
+
     from app.models import ClearanceCost
     result = await db.execute(select(ClearanceCost).where(ClearanceCost.id == record_id))
     record = result.scalar_one_or_none()
@@ -466,6 +498,7 @@ async def delete_clearance_cost(
 ):
     """删除清关运费"""
     from sqlalchemy import select
+
     from app.models import ClearanceCost
     result = await db.execute(select(ClearanceCost).where(ClearanceCost.id == record_id))
     record = result.scalar_one_or_none()
@@ -479,15 +512,15 @@ async def delete_clearance_cost(
 
 @router.get("/transactions")
 async def list_transactions(
-    type: Optional[str] = Query(None, description="类型"),
-    category: Optional[str] = Query(None, description="分类"),
-    related_sale_id: Optional[int] = Query(None, description="关联销售单ID"),
-    sale_no: Optional[str] = Query(None, description="关联销售单号（模糊匹配，如20260106匹配XS20260106-XXX）"),
-    is_locked: Optional[bool] = Query(None, description="锁定状态筛选"),
-    start_date: Optional[str] = Query(None, description="开始日期"),
-    end_date: Optional[str] = Query(None, description="结束日期"),
-    search: Optional[str] = Query(None, description="搜索关键词（日期/对方名称/描述/参考号）"),
-    bank_account_id: Optional[int] = Query(None, description="银行账户ID"),
+    type: str | None = Query(None, description="类型"),
+    category: str | None = Query(None, description="分类"),
+    related_sale_id: int | None = Query(None, description="关联销售单ID"),
+    sale_no: str | None = Query(None, description="关联销售单号（模糊匹配，如20260106匹配XS20260106-XXX）"),
+    is_locked: bool | None = Query(None, description="锁定状态筛选"),
+    start_date: str | None = Query(None, description="开始日期"),
+    end_date: str | None = Query(None, description="结束日期"),
+    search: str | None = Query(None, description="搜索关键词（日期/对方名称/描述/参考号）"),
+    bank_account_id: int | None = Query(None, description="银行账户ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -497,9 +530,26 @@ async def list_transactions(
     sd = date.fromisoformat(start_date) if start_date else None
     ed = date.fromisoformat(end_date) if end_date else None
     items, total = await FinanceService.list_transactions(db, type=type, category=category, related_sale_id=related_sale_id, sale_no=sale_no, is_locked=is_locked, start_date=sd, end_date=ed, search=search, bank_account_id=bank_account_id, skip=skip, limit=limit)
+    
+    # 批量获取关联发票号
+    invoice_ids = [r.related_invoice_id for r in items if r.related_invoice_id]
+    invoice_map = {}
+    if invoice_ids:
+        inv_result = await db.execute(
+            select(ImportInvoice.id, ImportInvoice.invoice_no).where(ImportInvoice.id.in_(invoice_ids))
+        )
+        invoice_map = {row[0]: row[1] for row in inv_result.all()}
+    
+    result_items = []
+    for r in items:
+        data = TransactionRecordResponse.model_validate(r).model_dump()
+        if r.related_invoice_id:
+            data["related_invoice_no"] = invoice_map.get(r.related_invoice_id)
+        result_items.append(data)
+    
     return {
         "total": total,
-        "items": [TransactionRecordResponse.model_validate(r).model_dump() for r in items],
+        "items": result_items,
         "skip": skip,
         "limit": limit,
     }
@@ -523,6 +573,7 @@ async def update_transaction(
 ):
     """更新交易记录"""
     from sqlalchemy import select
+
     from app.models import TransactionRecord
     result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
     record = result.scalar_one_or_none()
@@ -542,6 +593,7 @@ async def delete_transaction(
 ):
     """删除交易记录"""
     from sqlalchemy import select
+
     from app.models import TransactionRecord
     result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
     record = result.scalar_one_or_none()
@@ -564,6 +616,7 @@ async def batch_lock_transactions(
     返回: {"locked": 3, "not_found": 0, "already_locked": 0}
     """
     from sqlalchemy import select
+
     from app.models import TransactionRecord
 
     ids = data.get("ids", [])
@@ -606,6 +659,7 @@ async def batch_unlock_transactions(
     返回: {"unlocked": 3, "not_found": 0, "not_locked": 0}
     """
     from sqlalchemy import select
+
     from app.models import TransactionRecord
 
     ids = data.get("ids", [])
@@ -645,6 +699,7 @@ async def lock_transaction(
 ):
     """锁定交易记录"""
     from sqlalchemy import select
+
     from app.models import TransactionRecord
     result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
     record = result.scalar_one_or_none()
@@ -664,6 +719,7 @@ async def unlock_transaction(
 ):
     """解锁交易记录"""
     from sqlalchemy import select
+
     from app.models import TransactionRecord
     result = await db.execute(select(TransactionRecord).where(TransactionRecord.id == record_id))
     record = result.scalar_one_or_none()
@@ -713,7 +769,7 @@ async def get_finance_summary(
 
 @router.post("/batch-import", status_code=status.HTTP_201_CREATED)
 async def batch_import_finance(
-    records: List[dict],
+    records: list[dict],
     db: AsyncSession = Depends(get_db),
 ):
     """批量导入财务记录
@@ -721,8 +777,9 @@ async def batch_import_finance(
     支持导入: 购汇记录 / 税费 / 清关费
     返回: {created: 新增数, errors: 错误列表}
     """
-    from decimal import Decimal
     from datetime import datetime
+    from decimal import Decimal
+
     from app.models import ImportInvoice
     
     created_count = 0
@@ -791,7 +848,7 @@ async def batch_import_finance(
 
 @router.post("/transactions/batch-import", status_code=status.HTTP_201_CREATED)
 async def batch_import_transactions(
-    records: List[dict],
+    records: list[dict],
     db: AsyncSession = Depends(get_db),
 ):
     """批量导入交易流水记录
@@ -799,8 +856,8 @@ async def batch_import_transactions(
     支持导入: 交易流水
     返回: {created: 新增数, errors: 错误列表}
     """
-    from decimal import Decimal
     from datetime import datetime
+    from decimal import Decimal
     
     created_count = 0
     errors = []

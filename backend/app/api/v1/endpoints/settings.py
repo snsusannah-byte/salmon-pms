@@ -4,14 +4,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.core.security import verify_password, get_password_hash
+from app.core.security import get_password_hash, verify_password
 from app.models import User, UserSettings
 from app.schemas.settings import (
+    PasswordUpdate,
+    UserPreferencesResponse,
+    UserProfileResponse,
     UserSettingsResponse,
     UserSettingsUpdate,
-    PasswordUpdate,
-    UserProfileResponse,
-    UserPreferencesResponse,
 )
 
 router = APIRouter()

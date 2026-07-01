@@ -3,10 +3,8 @@
 """
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict
-
 
 # ==================== 枚举值字符串常量 ====================
 
@@ -28,7 +26,7 @@ ITEM_TYPE_ACCESSORY = "accessory"
 class DailySlaughterRecordBase(BaseModel):
     slaughter_date: date
     slaughter_type: str = SLAUGHTER_TYPE_WHOLE_FISH
-    fish_count: Optional[int] = 0
+    fish_count: int | None = 0
     total_weight_kg: Decimal
     meat_weight_kg: Decimal
     byproduct_head_count: int = 0
@@ -36,8 +34,8 @@ class DailySlaughterRecordBase(BaseModel):
     byproduct_bone_count: int = 0
     byproduct_trim_weight_kg: Decimal = Decimal("0")
     loss_weight_kg: Decimal = Decimal("0")
-    cost_price_per_kg: Optional[Decimal] = None
-    notes: Optional[str] = None
+    cost_price_per_kg: Decimal | None = None
+    notes: str | None = None
 
 
 class DailySlaughterRecordCreate(DailySlaughterRecordBase):
@@ -45,16 +43,16 @@ class DailySlaughterRecordCreate(DailySlaughterRecordBase):
 
 
 class DailySlaughterRecordUpdate(BaseModel):
-    fish_count: Optional[int] = None
-    total_weight_kg: Optional[Decimal] = None
-    meat_weight_kg: Optional[Decimal] = None
-    byproduct_head_count: Optional[int] = None
-    byproduct_tail_count: Optional[int] = None
-    byproduct_bone_count: Optional[int] = None
-    byproduct_trim_weight_kg: Optional[Decimal] = None
-    loss_weight_kg: Optional[Decimal] = None
-    cost_price_per_kg: Optional[Decimal] = None
-    notes: Optional[str] = None
+    fish_count: int | None = None
+    total_weight_kg: Decimal | None = None
+    meat_weight_kg: Decimal | None = None
+    byproduct_head_count: int | None = None
+    byproduct_tail_count: int | None = None
+    byproduct_bone_count: int | None = None
+    byproduct_trim_weight_kg: Decimal | None = None
+    loss_weight_kg: Decimal | None = None
+    cost_price_per_kg: Decimal | None = None
+    notes: str | None = None
 
 
 class DailySlaughterRecordResponse(DailySlaughterRecordBase):
@@ -74,7 +72,7 @@ class DailySlaughterRecordResponse(DailySlaughterRecordBase):
 
 class DailySlaughterListResponse(BaseModel):
     total: int
-    items: List[DailySlaughterRecordResponse]
+    items: list[DailySlaughterRecordResponse]
     skip: int
     limit: int
 
@@ -101,18 +99,18 @@ class SlaughterDateOption(BaseModel):
 class WarehousePurchaseOrderBase(BaseModel):
     order_date: date
     product_id: int
-    supplier_id: Optional[int] = None
-    batch_no: Optional[str] = None
+    supplier_id: int | None = None
+    batch_no: str | None = None
     quantity: Decimal
     unit: str = "kg"
     unit_price: Decimal
-    total_amount: Optional[Decimal] = None
-    actual_amount: Optional[Decimal] = None  # 实付金额
-    box_count: Optional[int] = None  # 箱数
-    items_per_box: Optional[int] = None  # 每箱数量
+    total_amount: Decimal | None = None
+    actual_amount: Decimal | None = None  # 实付金额
+    box_count: int | None = None  # 箱数
+    items_per_box: int | None = None  # 每箱数量
     lead_time_days: int = 0
-    warehouse_location: Optional[str] = None
-    notes: Optional[str] = None
+    warehouse_location: str | None = None
+    notes: str | None = None
 
 
 class WarehousePurchaseOrderCreate(WarehousePurchaseOrderBase):
@@ -120,34 +118,34 @@ class WarehousePurchaseOrderCreate(WarehousePurchaseOrderBase):
 
 
 class WarehousePurchaseOrderUpdate(BaseModel):
-    order_date: Optional[date] = None
-    product_id: Optional[int] = None
-    supplier_id: Optional[int] = None
-    batch_no: Optional[str] = None
-    quantity: Optional[Decimal] = None
-    unit: Optional[str] = None
-    unit_price: Optional[Decimal] = None
-    total_amount: Optional[Decimal] = None
-    actual_amount: Optional[Decimal] = None
-    box_count: Optional[int] = None
-    items_per_box: Optional[int] = None
-    lead_time_days: Optional[int] = None
-    warehouse_location: Optional[str] = None
-    notes: Optional[str] = None
+    order_date: date | None = None
+    product_id: int | None = None
+    supplier_id: int | None = None
+    batch_no: str | None = None
+    quantity: Decimal | None = None
+    unit: str | None = None
+    unit_price: Decimal | None = None
+    total_amount: Decimal | None = None
+    actual_amount: Decimal | None = None
+    box_count: int | None = None
+    items_per_box: int | None = None
+    lead_time_days: int | None = None
+    warehouse_location: str | None = None
+    notes: str | None = None
 
 
 class WarehousePurchaseOrderResponse(WarehousePurchaseOrderBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    product_name: Optional[str] = None
-    supplier_name: Optional[str] = None
+    product_name: str | None = None
+    supplier_name: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class WarehousePurchaseOrderListResponse(BaseModel):
     total: int
-    items: List[WarehousePurchaseOrderResponse]
+    items: list[WarehousePurchaseOrderResponse]
     skip: int
     limit: int
 
@@ -157,28 +155,28 @@ class WarehouseStockBase(BaseModel):
     current_quantity: Decimal = Decimal("0")
     reserved_quantity: Decimal = Decimal("0")
     available_quantity: Decimal = Decimal("0")
-    unit_cost: Optional[Decimal] = None
-    warehouse_location: Optional[str] = None
-    warning_threshold: Optional[int] = 0
+    unit_cost: Decimal | None = None
+    warehouse_location: str | None = None
+    warning_threshold: int | None = 0
     is_below_warning: bool = False
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class WarehouseStockResponse(WarehouseStockBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    product_name: Optional[str] = None
-    product_category: Optional[str] = None
-    product_unit: Optional[str] = None
-    last_in_date: Optional[date] = None
-    last_out_date: Optional[date] = None
+    product_name: str | None = None
+    product_category: str | None = None
+    product_unit: str | None = None
+    last_in_date: date | None = None
+    last_out_date: date | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class WarehouseStockListResponse(BaseModel):
     total: int
-    items: List[WarehouseStockResponse]
+    items: list[WarehouseStockResponse]
 
 
 class WarehouseStockWarningResponse(BaseModel):
@@ -195,24 +193,24 @@ class WarehouseStockWarningResponse(BaseModel):
 
 class WarehouseStockWarningListResponse(BaseModel):
     total: int
-    items: List[WarehouseStockWarningResponse]
+    items: list[WarehouseStockWarningResponse]
 
 
 class StockInRequest(BaseModel):
     product_id: int
     quantity: Decimal
     unit_price: Decimal
-    order_date: Optional[date] = None
-    batch_no: Optional[str] = None
-    supplier_id: Optional[int] = None
-    warehouse_location: Optional[str] = None
-    notes: Optional[str] = None
+    order_date: date | None = None
+    batch_no: str | None = None
+    supplier_id: int | None = None
+    warehouse_location: str | None = None
+    notes: str | None = None
 
 
 class StockOutRequest(BaseModel):
     product_id: int
     quantity: Decimal
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 # ==================== LossRecord Schemas ====================
@@ -220,12 +218,12 @@ class StockOutRequest(BaseModel):
 class LossRecordBase(BaseModel):
     loss_date: date
     loss_type: str
-    slaughter_date: Optional[date] = None
-    product_id: Optional[int] = None
+    slaughter_date: date | None = None
+    product_id: int | None = None
     weight_kg: Decimal = Decimal("0")
     quantity: int = 0
-    reason: Optional[str] = None
-    notes: Optional[str] = None
+    reason: str | None = None
+    notes: str | None = None
 
 
 class LossRecordCreate(LossRecordBase):
@@ -233,27 +231,27 @@ class LossRecordCreate(LossRecordBase):
 
 
 class LossRecordUpdate(BaseModel):
-    loss_date: Optional[date] = None
-    loss_type: Optional[str] = None
-    slaughter_date: Optional[date] = None
-    product_id: Optional[int] = None
-    weight_kg: Optional[Decimal] = None
-    quantity: Optional[int] = None
-    reason: Optional[str] = None
-    notes: Optional[str] = None
+    loss_date: date | None = None
+    loss_type: str | None = None
+    slaughter_date: date | None = None
+    product_id: int | None = None
+    weight_kg: Decimal | None = None
+    quantity: int | None = None
+    reason: str | None = None
+    notes: str | None = None
 
 
 class LossRecordResponse(LossRecordBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    product_name: Optional[str] = None
+    product_name: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class LossRecordListResponse(BaseModel):
     total: int
-    items: List[LossRecordResponse]
+    items: list[LossRecordResponse]
     skip: int
     limit: int
 
@@ -269,11 +267,11 @@ class LossRecordSummary(BaseModel):
 class FinishedProductSaleItemBase(BaseModel):
     item_type: str
     product_id: int
-    weight_kg: Optional[Decimal] = None
-    quantity: Optional[int] = None
-    unit_price: Optional[Decimal] = None
+    weight_kg: Decimal | None = None
+    quantity: int | None = None
+    unit_price: Decimal | None = None
     amount: Decimal = Decimal("0")
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class FinishedProductSaleItemCreate(FinishedProductSaleItemBase):
@@ -284,8 +282,8 @@ class FinishedProductSaleItemResponse(FinishedProductSaleItemBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     sale_id: int
-    product_name: Optional[str] = None
-    product_spec: Optional[str] = None
+    product_name: str | None = None
+    product_spec: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -301,11 +299,11 @@ class FinishedProductSaleWithItemsCreate(BaseModel):
     unit_price: Decimal
     gross_amount: Decimal
     net_amount: Decimal
-    slaughter_date: Optional[date] = None
-    total_weight_kg: Optional[Decimal] = None
-    scan_fee: Optional[Decimal] = Decimal("0")
-    discount: Optional[Decimal] = Decimal("0")
-    commission: Optional[Decimal] = Decimal("0")
-    salesperson_id: Optional[int] = None
-    notes: Optional[str] = None
-    items: Optional[List[dict]] = None
+    slaughter_date: date | None = None
+    total_weight_kg: Decimal | None = None
+    scan_fee: Decimal | None = Decimal("0")
+    discount: Decimal | None = Decimal("0")
+    commission: Decimal | None = Decimal("0")
+    salesperson_id: int | None = None
+    notes: str | None = None
+    items: list[dict] | None = None

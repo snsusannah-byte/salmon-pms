@@ -3,7 +3,6 @@
 """
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -13,16 +12,14 @@ from app.core.database import get_db
 from app.models import Company
 from app.schemas.material_purchase import (
     MaterialCreate,
+    MaterialInboundRequest,
     MaterialListItem,
+    MaterialOutboundRequest,
     MaterialPurchaseOrderCreate,
     MaterialPurchaseOrderList,
-    MaterialPurchaseOrderResponse,
-    MaterialPurchaseItemResponse,
-    MaterialInboundRequest,
-    MaterialOutboundRequest,
-    MaterialStockResponse,
     MaterialUpdate,
 )
+from app.core.permissions import require_warehouse, require_admin
 from app.services.material_purchase_service import MaterialPurchaseService
 
 router = APIRouter()
@@ -30,11 +27,12 @@ router = APIRouter()
 
 # ==================== 物料管理 ====================
 
-@router.get("/materials", response_model=List[MaterialListItem])
+@router.get("/materials", response_model=list[MaterialListItem])
 async def list_materials(
-    category_id: Optional[int] = Query(None),
-    keyword: Optional[str] = Query(None),
+    category_id: int | None = Query(None),
+    keyword: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """物料列表（含库存汇总）"""
     items = await MaterialPurchaseService.list_materials_with_stock(
@@ -47,6 +45,7 @@ async def list_materials(
 async def create_material(
     data: MaterialCreate,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """创建物料"""
     from app.models import Product
@@ -71,6 +70,7 @@ async def create_material(
 async def get_material(
     material_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """物料详情（含库存和批次）"""
     stock = await MaterialPurchaseService.get_stock(db, material_id)
@@ -82,10 +82,12 @@ async def update_material(
     material_id: int,
     data: MaterialUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """更新物料"""
-    from app.models import Product
     from sqlalchemy import select
+
+    from app.models import Product
     result = await db.execute(select(Product).where(Product.id == material_id))
     product = result.scalar_one_or_none()
     if not product:
@@ -103,10 +105,12 @@ async def update_material(
 async def delete_material(
     material_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
 ):
     """删除物料（检查无活跃批次）"""
-    from app.models import Product, MaterialBatch
-    from sqlalchemy import select, and_
+    from sqlalchemy import and_, select
+
+    from app.models import MaterialBatch, Product
     result = await db.execute(select(Product).where(Product.id == material_id))
     product = result.scalar_one_or_none()
     if not product:
@@ -134,6 +138,7 @@ async def delete_material(
 async def create_material_purchase_order(
     data: MaterialPurchaseOrderCreate,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """创建物料采购单"""
     try:
@@ -143,15 +148,16 @@ async def create_material_purchase_order(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("", response_model=List[MaterialPurchaseOrderList])
+@router.get("")
 async def list_material_purchase_orders(
-    supplier_id: Optional[int] = Query(None),
-    status: Optional[str] = Query(None),
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
+    supplier_id: int | None = Query(None),
+    status: str | None = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """物料采购单列表"""
     items, total = await MaterialPurchaseService.list_orders(
@@ -163,17 +169,24 @@ async def list_material_purchase_orders(
         skip=skip,
         limit=limit,
     )
-    return items
+    return {"total": total, "items": items, "skip": skip, "limit": limit}
 
 
 @router.get("/{order_id}")
 async def get_material_purchase_order(
     order_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """采购单详情"""
-    from app.models import MaterialPurchaseOrder, MaterialPurchaseItem, Product, Company, Warehouse
     from sqlalchemy import select
+
+    from app.models import (
+        MaterialPurchaseItem,
+        MaterialPurchaseOrder,
+        Product,
+        Warehouse,
+    )
     result = await db.execute(
         select(MaterialPurchaseOrder).where(MaterialPurchaseOrder.id == order_id)
     )
@@ -194,6 +207,7 @@ async def get_material_purchase_order(
             "product_id": item.product_id,
             "product_name": product.name,
             "product_code": product.code,
+            "product_spec": product.spec or "",
             "box_count": item.box_count,
             "items_per_box": item.items_per_box,
             "total_qty": item.total_qty,
@@ -225,7 +239,9 @@ async def get_material_purchase_order(
         "supplier_name": supplier.name if supplier else "",
         "quoted_total": order.quoted_total,
         "actual_total": order.actual_total,
-        "paid_amount": order.paid_amount,
+        "after_sales_adjustment": order.after_sales_adjustment or Decimal("0"),
+        "net_amount": order.actual_total - (order.after_sales_adjustment or Decimal("0")),
+        "paid_amount": order.paid_amount or Decimal("0"),
         "status": order.status,
         "payment_status": order.payment_status,
         "warehouse_id": order.warehouse_id,
@@ -241,6 +257,7 @@ async def get_material_purchase_order(
 async def cancel_material_purchase_order(
     order_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """取消采购单"""
     order = await MaterialPurchaseService.get_order(db, order_id)
@@ -257,6 +274,7 @@ async def cancel_material_purchase_order(
 async def delete_material_purchase_order(
     order_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
 ):
     """删除采购单（仅待入库状态）"""
     order = await MaterialPurchaseService.get_order(db, order_id)
@@ -276,6 +294,7 @@ async def delete_material_purchase_order(
 async def batch_delete_material_purchase_orders(
     data: dict,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin),
 ):
     """批量删除采购单（仅待入库状态）"""
     ids = data.get("ids", [])
@@ -309,6 +328,7 @@ async def material_purchase_payment(
     order_id: int,
     data: dict,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """采购单收款 — 同时创建交易流水，更新供应商期末欠款"""
     order = await MaterialPurchaseService.get_order(db, order_id)
@@ -321,8 +341,9 @@ async def material_purchase_payment(
     
     order.paid_amount = (order.paid_amount or Decimal("0")) + amount
     
-    # 更新付款状态
-    if order.paid_amount >= order.actual_total:
+    # 更新付款状态（考虑售后扣款）
+    net_amount = order.actual_total - (order.after_sales_adjustment or Decimal("0"))
+    if order.paid_amount >= net_amount:
         order.payment_status = "paid"
     elif order.paid_amount > 0:
         order.payment_status = "partial"
@@ -330,10 +351,10 @@ async def material_purchase_payment(
         order.payment_status = "unpaid"
     
     # 创建交易流水（支出：包装物及低值易耗品）
-    from app.services.finance_service import FinanceService
-    from app.models.enums import TransactionType, TransactionCategory
     from datetime import date
-    from app.models import Company
+
+    from app.models.enums import TransactionCategory, TransactionType
+    from app.services.finance_service import FinanceService
     
     # 查询供应商名称
     supplier_result = await db.execute(select(Company).where(Company.id == order.supplier_id))
@@ -362,13 +383,56 @@ async def material_purchase_payment(
     }
 
 
+# ==================== 售后扣款 ====================
+
+@router.post("/{order_id}/after-sales-adjustment")
+async def material_purchase_after_sales_adjustment(
+    order_id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
+):
+    """采购单售后扣款 — 调整应付金额"""
+    order = await MaterialPurchaseService.get_order(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="采购单不存在")
+    
+    adjustment = Decimal(str(data.get("after_sales_adjustment", 0)))
+    if adjustment < 0:
+        raise HTTPException(status_code=400, detail="售后扣款金额不能为负数")
+    if adjustment > order.actual_total:
+        raise HTTPException(status_code=400, detail="售后扣款金额不能超过采购总金额")
+    
+    order.after_sales_adjustment = adjustment
+    
+    # 更新付款状态（考虑售后扣款）
+    net_amount = order.actual_total - adjustment
+    if order.paid_amount >= net_amount:
+        order.payment_status = "paid"
+    elif order.paid_amount > 0:
+        order.payment_status = "partial"
+    else:
+        order.payment_status = "unpaid"
+    
+    await db.commit()
+    await db.refresh(order)
+    return {
+        "id": order.id,
+        "after_sales_adjustment": float(order.after_sales_adjustment),
+        "net_amount": float(net_amount),
+        "payment_status": order.payment_status,
+        "message": "售后扣款调整成功",
+    }
+
+
 # ==================== 入库 ====================
 
 @router.post("/{order_id}/inbound")
 async def confirm_material_inbound(
     order_id: int,
-    data: List[MaterialInboundRequest],
+    data: list[MaterialInboundRequest],
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """采购单入库确认"""
     try:
@@ -385,6 +449,7 @@ async def confirm_material_inbound(
 async def material_outbound(
     data: MaterialOutboundRequest,
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """物料出库"""
     try:
@@ -401,10 +466,11 @@ async def material_outbound(
             allocations = [alloc]
 
         # 确认出库并更新仓库
-        from app.models import Product
         from sqlalchemy import select
+
+        from app.models import Product
         prod_result = await db.execute(select(Product).where(Product.id == data.product_id))
-        product = prod_result.scalar_one_or_none()
+        prod_result.scalar_one_or_none()
         warehouse_id = 1  # 默认仓库，实际应从库存查询获取
 
         result = await MaterialPurchaseService.confirm_outbound(
@@ -422,6 +488,7 @@ async def get_material_stock(
     product_id: int = Query(...),
     include_batches: bool = Query(True),
     db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_warehouse),
 ):
     """物料库存（总库存 + 批次明细）"""
     stock = await MaterialPurchaseService.get_stock(db, product_id)

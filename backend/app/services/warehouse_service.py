@@ -3,16 +3,15 @@
 """
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
-from sqlalchemy import select, func, desc
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models import Product, ProductCategory
 from app.models.finished_product_v2 import (
     WarehousePurchaseOrder,
     WarehouseStock,
 )
-from app.models import Product, ProductCategory
 
 
 class WarehouseService:
@@ -139,13 +138,13 @@ class WarehouseService:
     @staticmethod
     async def list_purchase_orders(
         db: AsyncSession,
-        product_id: Optional[int] = None,
-        supplier_id: Optional[int] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        product_id: int | None = None,
+        supplier_id: int | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[WarehousePurchaseOrder], int]:
+    ) -> tuple[list[WarehousePurchaseOrder], int]:
         """采购入库列表"""
         query = select(WarehousePurchaseOrder)
         
@@ -169,7 +168,7 @@ class WarehouseService:
         return list(result.scalars().all()), total
 
     @staticmethod
-    async def get_purchase_order_by_id(db: AsyncSession, order_id: int) -> Optional[WarehousePurchaseOrder]:
+    async def get_purchase_order_by_id(db: AsyncSession, order_id: int) -> WarehousePurchaseOrder | None:
         """按ID获取采购单"""
         result = await db.execute(
             select(WarehousePurchaseOrder).where(WarehousePurchaseOrder.id == order_id)
@@ -202,11 +201,11 @@ class WarehouseService:
     @staticmethod
     async def list_stocks(
         db: AsyncSession,
-        category: Optional[str] = None,
-        is_below_warning: Optional[bool] = None,
+        category: str | None = None,
+        is_below_warning: bool | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         """库存列表（含产品信息）"""
         query = select(WarehouseStock, Product).join(
             Product, WarehouseStock.product_id == Product.id
@@ -253,7 +252,7 @@ class WarehouseService:
         return items, total
 
     @staticmethod
-    async def get_stock_by_product(db: AsyncSession, product_id: int) -> Optional[dict]:
+    async def get_stock_by_product(db: AsyncSession, product_id: int) -> dict | None:
         """按产品获取库存"""
         result = await db.execute(
             select(WarehouseStock, Product)
@@ -304,7 +303,7 @@ class WarehouseService:
         db: AsyncSession,
         product_id: int,
         quantity: Decimal,
-        unit_price: Optional[Decimal] = None,
+        unit_price: Decimal | None = None,
         reason: str = "manual",
     ) -> WarehouseStock:
         """直接入库（无采购单）"""
@@ -363,7 +362,7 @@ class WarehouseService:
             stock.is_below_warning = False
 
     @staticmethod
-    async def get_warning_list(db: AsyncSession) -> List[dict]:
+    async def get_warning_list(db: AsyncSession) -> list[dict]:
         """获取库存预警列表"""
         result = await db.execute(
             select(WarehouseStock, Product)

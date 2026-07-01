@@ -3,9 +3,8 @@
 """
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
-from sqlalchemy import select, func, desc
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.finished_product_v2 import LossRecord
@@ -17,13 +16,13 @@ class LossRecordService:
     @staticmethod
     async def list_records(
         db: AsyncSession,
-        loss_type: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
-        product_id: Optional[int] = None,
+        loss_type: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        product_id: int | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[LossRecord], int]:
+    ) -> tuple[list[LossRecord], int]:
         """损耗记录列表"""
         query = select(LossRecord)
         
@@ -47,7 +46,7 @@ class LossRecordService:
         return list(result.scalars().all()), total
 
     @staticmethod
-    async def get_by_id(db: AsyncSession, record_id: int) -> Optional[LossRecord]:
+    async def get_by_id(db: AsyncSession, record_id: int) -> LossRecord | None:
         """按ID获取"""
         result = await db.execute(
             select(LossRecord).where(LossRecord.id == record_id)
@@ -155,8 +154,8 @@ class LossRecordService:
     @staticmethod
     async def get_summary(
         db: AsyncSession,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> dict:
         """损耗汇总统计"""
         query = select(LossRecord)

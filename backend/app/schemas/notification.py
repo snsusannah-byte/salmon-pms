@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -11,11 +11,11 @@ class NotificationResponse(BaseModel):
     user_id: int
     type: str
     title: str
-    content: Optional[str] = None
-    related_type: Optional[str] = None
-    related_id: Optional[int] = None
+    content: str | None = None
+    related_type: str | None = None
+    related_id: int | None = None
     is_read: bool
-    read_at: Optional[datetime] = None
+    read_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

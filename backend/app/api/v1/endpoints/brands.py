@@ -2,16 +2,14 @@
 品牌管理 API
 支持自有品牌 + OEM代工客户品牌
 """
-from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
 from app.core.database import get_db
-from app.core.permissions import require_warehouse, log_operation
-from app.models import Brand, Company, User
+from app.models import Brand, Company
 
 router = APIRouter()
 
@@ -20,45 +18,45 @@ router = APIRouter()
 
 class BrandCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="品牌名称")
-    code: Optional[str] = Field(None, max_length=50, description="品牌编码")
-    company_id: Optional[int] = Field(None, description="关联公司ID（OEM客户）")
+    code: str | None = Field(None, max_length=50, description="品牌编码")
+    company_id: int | None = Field(None, description="关联公司ID（OEM客户）")
     is_oem: bool = Field(False, description="是否为代工品牌")
-    notes: Optional[str] = Field(None, description="备注")
+    notes: str | None = Field(None, description="备注")
 
 
 class BrandUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    code: Optional[str] = Field(None, max_length=50)
-    company_id: Optional[int] = None
-    is_oem: Optional[bool] = None
-    is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    name: str | None = Field(None, min_length=1, max_length=100)
+    code: str | None = Field(None, max_length=50)
+    company_id: int | None = None
+    is_oem: bool | None = None
+    is_active: bool | None = None
+    notes: str | None = None
 
 
 class BrandResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
-    code: Optional[str] = None
-    company_id: Optional[int] = None
-    company_name: Optional[str] = None
+    code: str | None = None
+    company_id: int | None = None
+    company_name: str | None = None
     is_oem: bool = False
     is_active: bool = True
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class BrandListResponse(BaseModel):
     total: int
-    items: List[BrandResponse]
+    items: list[BrandResponse]
 
 
 # ==================== API ====================
 
 @router.get("/", response_model=BrandListResponse)
 async def list_brands(
-    is_oem: Optional[bool] = Query(None, description="是否为代工品牌"),
-    is_active: Optional[bool] = Query(True, description="是否启用"),
-    search: Optional[str] = Query(None, description="搜索品牌名称/编码"),
+    is_oem: bool | None = Query(None, description="是否为代工品牌"),
+    is_active: bool | None = Query(True, description="是否启用"),
+    search: str | None = Query(None, description="搜索品牌名称/编码"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),

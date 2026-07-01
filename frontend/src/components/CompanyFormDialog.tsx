@@ -44,7 +44,7 @@ const formSchema = z.object({
   code: z.string().max(50).optional().or(z.literal("")),
   contact_person: z.string().max(100).optional().or(z.literal("")),
   phone: z.string().max(50).optional().or(z.literal("")),
-  email: z.string().max(100).optional().or(z.literal("")),
+  email: z.string().max(100).optional().or(z.literal("")).refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), { message: "邮箱格式不正确" }),
   address: z.string().optional().or(z.literal("")),
   registration_code: z.string().max(100).optional().or(z.literal("")),
   enterprise_registration_no: z.string().max(100).optional().or(z.literal("")),
@@ -54,7 +54,7 @@ const formSchema = z.object({
   cooperation_date: z.string().optional().or(z.literal("")),
   bank_name: z.string().max(200).optional().or(z.literal("")),
   bank_account: z.string().max(100).optional().or(z.literal("")),
-  credit_limit: z.string().optional().or(z.literal("")),
+  credit_limit: z.string().optional().or(z.literal("")).refine((v) => !v || !isNaN(Number(v)), { message: "信用额度必须是有效数字" }),
   logistics_info: z.string().optional().or(z.literal("")),
   salesperson_id: z.string().optional().or(z.literal("")),
   customer_category: z.string().optional().or(z.literal("")),
@@ -104,13 +104,17 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
   // 获取用户列表（用于业务员选择）
   useEffect(() => {
     if (open) {
-      api.get("/v1/auth/users", { validateStatus: () => true })  // 不触发全局 401 拦截
+      api.get("/v1/auth/users", { validateStatus: (s) => s < 500 })  // 5xx 才抛错，401/403 正常处理
         .then(res => {
           if (res.status === 401) {
             toast.error("登录已过期，请重新登录");
             return;
           }
-          setUsers(res.data || []);
+          if (res.status >= 200 && res.status < 300) {
+            setUsers(res.data || []);
+          } else {
+            setUsers([]);
+          }
         })
         .catch(() => setUsers([]));
     }
@@ -188,7 +192,7 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
         registration_code: "",
         enterprise_registration_no: "",
         coc_cert_no: "",
-        farming_area: "FAO 27",
+        farming_area: "",
         website: "",
         cooperation_date: "",
         bank_name: "",
@@ -201,6 +205,16 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
       });
     }
   };
+
+  // 类型切换时自动填充/清空养殖区
+  useEffect(() => {
+    const currentType = form.watch("type");
+    if (currentType === "fish_farm") {
+      if (!form.watch("farming_area")) form.setValue("farming_area", "FAO 27");
+    } else if (currentType && currentType !== "fish_farm") {
+      if (form.watch("farming_area") === "FAO 27") form.setValue("farming_area", "");
+    }
+  }, [form.watch("type")]);
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);

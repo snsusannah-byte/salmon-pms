@@ -1,9 +1,8 @@
 # ruff: noqa: F821
-from enum import Enum as PyEnum
+from enum import StrEnum
 
 
-
-class CompanyType(str, PyEnum):
+class CompanyType(StrEnum):
     PROCESSING_PLANT = "processing_plant"      # 加工厂
     FISH_FARM = "fish_farm"                    # 渔场
     EXPORTER = "exporter"                      # 出口商
@@ -15,7 +14,7 @@ class CompanyType(str, PyEnum):
 
 
 
-class InvoiceStatus(str, PyEnum):
+class InvoiceStatus(StrEnum):
     """报关状态（3态流转）"""
     PENDING_CUSTOMS = "pending_customs"        # 待报关（新建发票默认）
     CUSTOMS_PROCESSING = "customs_processing"  # 已报关（费用录入后）
@@ -27,7 +26,7 @@ class InvoiceStatus(str, PyEnum):
 
 
 
-class ExchangeStatus(str, PyEnum):
+class ExchangeStatus(StrEnum):
     """购汇状态"""
     NOT_EXCHANGED = "not_exchanged"            # 未购汇
     PARTIAL = "partial"                        # 部分购汇
@@ -35,14 +34,14 @@ class ExchangeStatus(str, PyEnum):
 
 
 
-class BatchStatus(str, PyEnum):
+class BatchStatus(StrEnum):
     OPEN = "open"                              # 开放
     LOCKED = "locked"                          # 已锁定
     SETTLED = "settled"                        # 已结算
 
 
 
-class SalesStatus(str, PyEnum):
+class SalesStatus(StrEnum):
     PENDING = "pending"                        # 待收款
     PARTIAL_PAID = "partial_paid"              # 部分收款
     FULLY_PAID = "fully_paid"                  # 全部收款
@@ -50,7 +49,7 @@ class SalesStatus(str, PyEnum):
 
 
 
-class TransactionType(str, PyEnum):
+class TransactionType(StrEnum):
     INCOME = "income"                          # 收入
     EXPENSE = "expense"                        # 支出
     TRANSFER = "transfer"                      # 转账
@@ -58,7 +57,7 @@ class TransactionType(str, PyEnum):
 
 
 
-class TransactionCategory(str, PyEnum):
+class TransactionCategory(StrEnum):
     # === 收入 ===
     MAIN_BUSINESS_REVENUE = "main_business_revenue"       # 主营业务收入（整鱼/成品/副产品）
     OTHER_BUSINESS_REVENUE = "other_business_revenue"     # 其他业务收入（废料）
@@ -117,7 +116,7 @@ class TransactionCategory(str, PyEnum):
 
 
 
-class InventoryStatus(str, PyEnum):
+class InventoryStatus(StrEnum):
     IN_STOCK = "in_stock"                      # 在库
     RESERVED = "reserved"                      # 预留
     PROCESSING = "processing"                  # 加工中
@@ -125,7 +124,7 @@ class InventoryStatus(str, PyEnum):
 
 
 
-class MovementType(str, PyEnum):
+class MovementType(StrEnum):
     INBOUND = "inbound"                        # 入库
     OUTBOUND = "outbound"                      # 出库
     ADJUSTMENT = "adjustment"                  # 调整
@@ -135,7 +134,7 @@ class MovementType(str, PyEnum):
 # ==================== 仓库模块V2 枚举 ====================
 
 
-class WarehouseType(str, PyEnum):
+class WarehouseType(StrEnum):
     """仓库类型"""
     WHOLE_PACKAGE = "whole_package"   # 整包仓
     SUB_PACKAGE = "sub_package"       # 分包仓
@@ -145,7 +144,7 @@ class WarehouseType(str, PyEnum):
 
 
 
-class WarehouseBusinessScope(str, PyEnum):
+class WarehouseBusinessScope(StrEnum):
     """仓库业务范围"""
     IMPORT = "import"       # 进口单证
     DOMESTIC = "domestic"   # 国内业务
@@ -153,7 +152,7 @@ class WarehouseBusinessScope(str, PyEnum):
 
 
 
-class StockStatus(str, PyEnum):
+class StockStatus(StrEnum):
     """单据状态"""
     PENDING = "pending"     # 待确认
     COMPLETED = "completed" # 已完成
@@ -161,7 +160,7 @@ class StockStatus(str, PyEnum):
 
 
 
-class StockMovementType(str, PyEnum):
+class StockMovementType(StrEnum):
     """库存变动类型"""
     INBOUND = "inbound"           # 入库
     OUTBOUND = "outbound"         # 出库
@@ -173,7 +172,7 @@ class StockMovementType(str, PyEnum):
 # ==================== 基础层 ====================
 
 
-class CustomerCategory(str, PyEnum):
+class CustomerCategory(StrEnum):
     """客户分类"""
     WHOLESALER = "wholesaler"          # 批发商
     DISTRIBUTOR = "distributor"        # 渠道商
@@ -183,7 +182,7 @@ class CustomerCategory(str, PyEnum):
 
 
 
-class SupplierCategory(str, PyEnum):
+class SupplierCategory(StrEnum):
     """供应商分类"""
     RAW_MATERIAL = "raw_material"          # 原料供应
     MATERIAL_SUPPLY = "material_supply"    # 物料供应
@@ -192,7 +191,7 @@ class SupplierCategory(str, PyEnum):
 
 
 
-class PurchaseOrderStatus(str, PyEnum):
+class PurchaseOrderStatus(StrEnum):
     """采购单状态"""
     PENDING = "pending"           # 待入库
     PARTIAL = "partial"         # 部分入库

@@ -1,6 +1,5 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -21,36 +20,36 @@ def get_business_role(company_type: str) -> str:
 class CompanyBase(BaseModel):
     """主体基础信息"""
     name: str = Field(..., max_length=200, description="主体名称")
-    chinese_name: Optional[str] = Field(None, max_length=200, description="中文名称（备用）")
-    company_full_name: Optional[str] = Field(None, max_length=200, description="公司全称")
-    brands: Optional[str] = Field(None, max_length=500, description="旗下品牌（逗号分隔）")
+    chinese_name: str | None = Field(None, max_length=200, description="中文名称（备用）")
+    company_full_name: str | None = Field(None, max_length=200, description="公司全称")
+    brands: str | None = Field(None, max_length=500, description="旗下品牌（逗号分隔）")
     type: CompanyType = Field(..., description="主体类型")
-    code: Optional[str] = Field(None, max_length=50, description="EU注册号（加工厂对外的短号）")
-    cooperation_date: Optional[str] = Field(None, description="合作日期")
-    contact_person: Optional[str] = Field(None, max_length=100, description="联系人")
-    phone: Optional[str] = Field(None, max_length=50, description="联系电话")
-    email: Optional[str] = Field(None, max_length=100, description="邮箱")
-    address: Optional[str] = Field(None, description="地址")
-    registration_code: Optional[str] = Field(None, max_length=100, description="CN海关准入")
-    enterprise_registration_no: Optional[str] = Field(None, max_length=100, description="养殖GGN")
-    coc_cert_no: Optional[str] = Field(None, max_length=100, description="监管链COC")
-    farming_area: Optional[str] = Field("FAO 27", max_length=100, description="养殖区")
-    website: Optional[str] = Field(None, max_length=255, description="网址")
-    bank_name: Optional[str] = Field(None, max_length=200, description="开户行")
-    bank_account: Optional[str] = Field(None, max_length=100, description="银行账号")
-    payee: Optional[str] = Field(None, max_length=200, description="收款人")
-    credit_limit: Optional[Decimal] = Field(None, ge=0, description="信用额度")
+    code: str | None = Field(None, max_length=50, description="EU注册号（加工厂对外的短号）")
+    cooperation_date: str | None = Field(None, description="合作日期")
+    contact_person: str | None = Field(None, max_length=100, description="联系人")
+    phone: str | None = Field(None, max_length=50, description="联系电话")
+    email: str | None = Field(None, max_length=100, description="邮箱")
+    address: str | None = Field(None, description="地址")
+    registration_code: str | None = Field(None, max_length=100, description="CN海关准入")
+    enterprise_registration_no: str | None = Field(None, max_length=100, description="养殖GGN")
+    coc_cert_no: str | None = Field(None, max_length=100, description="监管链COC")
+    farming_area: str | None = Field("FAO 27", max_length=100, description="养殖区")
+    website: str | None = Field(None, max_length=255, description="网址")
+    bank_name: str | None = Field(None, max_length=200, description="开户行")
+    bank_account: str | None = Field(None, max_length=100, description="银行账号")
+    payee: str | None = Field(None, max_length=200, description="收款人")
+    credit_limit: Decimal | None = Field(None, ge=0, description="信用额度")
     # 客户专用字段
-    logistics_info: Optional[str] = Field(None, description="物流信息")
-    salesperson_id: Optional[int] = Field(None, description="业务员ID")
-    customer_category: Optional[CustomerCategory] = Field(None, description="客户分类: wholesaler/distributor/retailer/platform/group_buying")
-    customer_level: Optional[str] = Field(None, max_length=20, description="客户等级: normal/vip/wholesale/bulk")
-    supplier_category: Optional[SupplierCategory] = Field(None, description="供应商分类: raw_material/material_supply/customs_broker/service_provider")
-    prepaid_balance: Optional[Decimal] = Field(Decimal("0"), ge=0, description="客户预付款余额")
-    customer_type: Optional[str] = Field(None, description="客户类型: normal/internal_processor/oem")
-    is_internal: Optional[bool] = Field(False, description="是否内部客户（加工厂/代工方）")
-    is_active: Optional[bool] = Field(True, description="是否启用")
-    notes: Optional[str] = Field(None, description="备注")
+    logistics_info: str | None = Field(None, description="物流信息")
+    salesperson_id: int | None = Field(None, description="业务员ID")
+    customer_category: CustomerCategory | None = Field(None, description="客户分类: wholesaler/distributor/retailer/platform/group_buying")
+    customer_level: str | None = Field(None, max_length=20, description="客户等级: normal/vip/wholesale/bulk")
+    supplier_category: SupplierCategory | None = Field(None, description="供应商分类: raw_material/material_supply/customs_broker/service_provider")
+    prepaid_balance: Decimal | None = Field(Decimal("0"), ge=0, description="客户预付款余额")
+    customer_type: str | None = Field(None, description="客户类型: normal/internal_processor/oem")
+    is_internal: bool | None = Field(False, description="是否内部客户（加工厂/代工方）")
+    is_active: bool | None = Field(True, description="是否启用")
+    notes: str | None = Field(None, description="备注")
 
     @field_validator("website", mode="before")
     @classmethod
@@ -78,34 +77,34 @@ class CompanyCreate(CompanyBase):
 
 class CompanyUpdate(BaseModel):
     """更新主体请求"""
-    name: Optional[str] = Field(None, max_length=200)
-    chinese_name: Optional[str] = Field(None, max_length=200)
-    company_full_name: Optional[str] = Field(None, max_length=200)
-    brands: Optional[str] = Field(None, max_length=500)
-    type: Optional[CompanyType] = None
-    code: Optional[str] = Field(None, max_length=50)
-    cooperation_date: Optional[str] = None
-    contact_person: Optional[str] = Field(None, max_length=100)
-    phone: Optional[str] = Field(None, max_length=50)
-    email: Optional[str] = Field(None, max_length=100)
-    address: Optional[str] = None
-    registration_code: Optional[str] = Field(None, max_length=100)
-    enterprise_registration_no: Optional[str] = Field(None, max_length=100)
-    coc_cert_no: Optional[str] = Field(None, max_length=100)
-    farming_area: Optional[str] = Field(None, max_length=100)
-    website: Optional[str] = Field(None, max_length=255)
-    bank_name: Optional[str] = Field(None, max_length=200)
-    bank_account: Optional[str] = Field(None, max_length=100)
-    payee: Optional[str] = Field(None, max_length=200)
-    currency: Optional[str] = Field("CNY", max_length=10, description="币种: CNY/USD/EUR")
-    credit_limit: Optional[Decimal] = Field(None, ge=0)
-    logistics_info: Optional[str] = Field(None)
-    salesperson_id: Optional[int] = Field(None)
-    customer_category: Optional[CustomerCategory] = None
-    customer_level: Optional[str] = Field(None, max_length=20)
-    supplier_category: Optional[SupplierCategory] = None
-    is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    name: str | None = Field(None, max_length=200)
+    chinese_name: str | None = Field(None, max_length=200)
+    company_full_name: str | None = Field(None, max_length=200)
+    brands: str | None = Field(None, max_length=500)
+    type: CompanyType | None = None
+    code: str | None = Field(None, max_length=50)
+    cooperation_date: str | None = None
+    contact_person: str | None = Field(None, max_length=100)
+    phone: str | None = Field(None, max_length=50)
+    email: str | None = Field(None, max_length=100)
+    address: str | None = None
+    registration_code: str | None = Field(None, max_length=100)
+    enterprise_registration_no: str | None = Field(None, max_length=100)
+    coc_cert_no: str | None = Field(None, max_length=100)
+    farming_area: str | None = Field(None, max_length=100)
+    website: str | None = Field(None, max_length=255)
+    bank_name: str | None = Field(None, max_length=200)
+    bank_account: str | None = Field(None, max_length=100)
+    payee: str | None = Field(None, max_length=200)
+    currency: str | None = Field("CNY", max_length=10, description="币种: CNY/USD/EUR")
+    credit_limit: Decimal | None = Field(None, ge=0)
+    logistics_info: str | None = Field(None)
+    salesperson_id: int | None = Field(None)
+    customer_category: CustomerCategory | None = None
+    customer_level: str | None = Field(None, max_length=20)
+    supplier_category: SupplierCategory | None = None
+    is_active: bool | None = None
+    notes: str | None = None
 
 
 class CompanyResponse(CompanyBase):
@@ -113,10 +112,10 @@ class CompanyResponse(CompanyBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    salesperson_name: Optional[str] = Field(None, description="业务员名称")
+    salesperson_name: str | None = Field(None, description="业务员名称")
     business_role: str = Field(default="business_partner", description="业务角色：upstream(上游溯源) / business_partner(业务往来)")
-    payable_usd: Optional[Decimal] = Field(None, description="应付款(USD)")
-    payable_cny: Optional[Decimal] = Field(None, description="应付款(CNY)")
+    payable_usd: Decimal | None = Field(None, description="应付款(USD)")
+    payable_cny: Decimal | None = Field(None, description="应付款(CNY)")
     created_at: datetime
     updated_at: datetime
 
@@ -134,11 +133,11 @@ class CompanyListResponse(BaseModel):
 class SalespersonBase(BaseModel):
     """业务员基础"""
     name: str = Field(..., max_length=100, description="姓名")
-    phone: Optional[str] = Field(None, max_length=50, description="电话")
-    email: Optional[str] = Field(None, max_length=100, description="邮箱")
+    phone: str | None = Field(None, max_length=50, description="电话")
+    email: str | None = Field(None, max_length=100, description="邮箱")
     commission_rate: Decimal = Field(Decimal("0"), ge=0, description="默认提成单价 元/kg")
     is_active: bool = Field(True, description="是否在职")
-    notes: Optional[str] = Field(None, description="备注")
+    notes: str | None = Field(None, description="备注")
 
 
 class SalespersonCreate(SalespersonBase):
@@ -148,12 +147,12 @@ class SalespersonCreate(SalespersonBase):
 
 class SalespersonUpdate(BaseModel):
     """更新业务员"""
-    name: Optional[str] = Field(None, max_length=100)
-    phone: Optional[str] = Field(None, max_length=50)
-    email: Optional[str] = Field(None, max_length=100)
-    commission_rate: Optional[Decimal] = Field(None, ge=0, description="提成单价 元/kg")
-    is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    name: str | None = Field(None, max_length=100)
+    phone: str | None = Field(None, max_length=50)
+    email: str | None = Field(None, max_length=100)
+    commission_rate: Decimal | None = Field(None, ge=0, description="提成单价 元/kg")
+    is_active: bool | None = None
+    notes: str | None = None
 
 
 class SalespersonResponse(SalespersonBase):
@@ -168,14 +167,14 @@ class CommissionResponse(BaseModel):
     """提成记录响应"""
     id: int
     salesperson_id: int
-    salesperson_name: Optional[str] = None
+    salesperson_name: str | None = None
     sale_id: int
-    sale_date: Optional[str] = None
-    customer_name: Optional[str] = None
+    sale_date: str | None = None
+    customer_name: str | None = None
     sale_amount: Decimal
     weight_kg: Decimal
     commission_rate: Decimal
     commission_amount: Decimal
     status: str
-    paid_date: Optional[str] = None
-    notes: Optional[str] = None
+    paid_date: str | None = None
+    notes: str | None = None

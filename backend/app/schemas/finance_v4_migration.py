@@ -1,23 +1,22 @@
 from datetime import date, datetime
-from decimal import Decimal
-from typing import Optional, List
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, ConfigDict
 
 
 class V4MigrationStatus(BaseModel):
     """V4迁移状态"""
     model_config = ConfigDict(from_attributes=True)
     status: str
-    progress: Optional[float] = None
-    message: Optional[str] = None
-    completed_at: Optional[datetime] = None
+    progress: float | None = None
+    message: str | None = None
+    completed_at: datetime | None = None
 
 
 class V4MigrationRequest(BaseModel):
     """V4迁移请求"""
     model_config = ConfigDict(from_attributes=True)
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
+    start_date: date | None = None
+    end_date: date | None = None
     dry_run: bool = True
 
 
@@ -27,5 +26,5 @@ class V4MigrationResponse(BaseModel):
     success: bool
     records_processed: int = 0
     records_failed: int = 0
-    errors: List[str] = []
-    summary: Optional[str] = None
+    errors: list[str] = []
+    summary: str | None = None

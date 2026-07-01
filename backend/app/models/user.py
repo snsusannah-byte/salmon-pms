@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
+
 class User(Base, TimestampMixin):
     """用户管理"""
     __tablename__ = "users"
@@ -20,11 +21,11 @@ class User(Base, TimestampMixin):
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    full_name: Mapped[Optional[str]] = mapped_column(String(100))
-    phone: Mapped[Optional[str]] = mapped_column(String(50))
+    full_name: Mapped[str | None] = mapped_column(String(100))
+    phone: Mapped[str | None] = mapped_column(String(50))
     role: Mapped[str] = mapped_column(String(50), default="user")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_login: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime)
 
     # 关联设置
     settings: Mapped[Optional["UserSettings"]] = relationship("UserSettings", uselist=False, back_populates="user")

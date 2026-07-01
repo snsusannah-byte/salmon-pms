@@ -33,7 +33,13 @@ export function ComboBox({
   // 同步外部 value - 显示对应的label而不是value本身
   React.useEffect(() => {
     const option = options.find((o) => o.value === value);
-    setInputValue(option ? option.label : value);
+    if (option) {
+      setInputValue(option.label);
+    } else if (value === "" || value === "0") {
+      setInputValue("");
+    } else {
+      setInputValue(value);
+    }
   }, [value, options]);
 
   // 点击外部关闭
@@ -126,24 +132,31 @@ export function ComboBox({
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         disabled={disabled}
+        autoComplete="off"
       />
-      {open && filtered.length > 0 && (
+      {open && (
         <div className="absolute z-50 mt-1 w-full rounded-md border border-input bg-popover text-popover-foreground shadow-md max-h-60 overflow-auto">
-          <ul ref={listRef} className="py-1">
-            {filtered.map((option, idx) => (
-              <li
-                key={option.value}
-                className={cn(
-                  "px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground",
-                  idx === activeIndex && "bg-accent text-accent-foreground"
-                )}
-                onClick={() => handleSelect(option)}
-                onMouseEnter={() => setActiveIndex(idx)}
-              >
-                {option.label}
-              </li>
-            ))}
-          </ul>
+          {filtered.length > 0 ? (
+            <ul ref={listRef} className="py-1">
+              {filtered.map((option, idx) => (
+                <li
+                  key={option.value}
+                  className={cn(
+                    "px-3 py-2 text-sm cursor-pointer hover:bg-accent hover:text-accent-foreground",
+                    idx === activeIndex && "bg-accent text-accent-foreground"
+                  )}
+                  onClick={() => handleSelect(option)}
+                  onMouseEnter={() => setActiveIndex(idx)}
+                >
+                  {option.label}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="px-3 py-2 text-sm text-muted-foreground">
+              {options.length === 0 ? "暂无选项" : "无匹配结果"}
+            </div>
+          )}
         </div>
       )}
     </div>

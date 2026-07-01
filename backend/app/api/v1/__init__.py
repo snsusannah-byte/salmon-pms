@@ -1,35 +1,36 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    audit,
     auth,
-    companies,
-    products,
+    batches,
     brands,
+    companies,
+    daily_slaughter,
+    dashboard,
+    finance,
+    finished_product_sales,
+    finished_product_sales_v2,
     finished_products,
     invoices,
-    batches,
+    loss_records,
+    material_categories,
+    material_purchases,
+    materials,
+    notifications,
+    products,
+    purchase_inbound,
+    purchase_orders,
+    purchase_returns,
+    reports,
+    returns,
     sales,
     sales_batch_collect,
-    finished_product_sales,
-    finance,
-    reports,
-    dashboard,
-    settings,
     salespersons,
-    notifications,
-    daily_slaughter,
-    warehouse,
-    loss_records,
-    finished_product_sales_v2,
-    materials,
-    material_categories,
-    warehouse_v2,
+    settings,
     traceability,
-    returns,
-    purchase_orders,
-    material_purchases,
-    finance_v4_migration,
-    audit,
+    warehouse,
+    warehouse_v2,
 )
 
 api_router = APIRouter()
@@ -65,5 +66,6 @@ api_router.include_router(purchase_orders.router, prefix="/purchase-orders", tag
 api_router.include_router(traceability.router, prefix="/traceability", tags=["追溯系统"])
 api_router.include_router(returns.router, prefix="/returns", tags=["退货管理"])
 
-# V4 迁移路由 (已在 main.py 中单独挂载到 /api/v4)
+api_router.include_router(purchase_inbound.router, tags=["采购入库"])
+api_router.include_router(purchase_returns.router, prefix="/purchase-returns", tags=["采购售后"])
 # api_router.include_router(finance_v4_migration.router, prefix="/v4", tags=["国内采购与成品销售"])

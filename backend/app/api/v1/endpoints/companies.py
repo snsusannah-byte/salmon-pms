@@ -1,16 +1,16 @@
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.permissions import require_admin, log_operation
-from app.models import CompanyType, User, SupplierCategory, CustomerCategory
+from app.core.permissions import log_operation, require_admin
+from app.models import CompanyType, CustomerCategory, SupplierCategory, User
 from app.schemas.company import (
     CompanyCreate,
-    CompanyUpdate,
-    CompanyResponse,
     CompanyListResponse,
+    CompanyResponse,
+    CompanyUpdate,
     get_business_role,
 )
 from app.services.company_service import CompanyService
@@ -27,7 +27,6 @@ async def _build_company_response(db: AsyncSession, company, payables: dict = No
     
     payable = payables.get(company.id) if payables else None
     
-    print(f"DEBUG _build_company_response: company.id={company.id}, name={company.name}, payable={payable}")
     data = {
         "id": company.id,
         "name": company.name,
@@ -73,13 +72,13 @@ async def _build_company_response(db: AsyncSession, company, payables: dict = No
 
 @router.get("/", response_model=CompanyListResponse)
 async def list_companies(
-    type: Optional[CompanyType] = Query(None, description="主体类型"),
-    exclude_type: List[CompanyType] = Query([], description="排除类型（可传多个，如 customer,supplier）"),
-    business_role: Optional[str] = Query(None, description="业务角色筛选：upstream(上游溯源) / business_partner(业务往来)"),
-    supplier_category: Optional[SupplierCategory] = Query(None, description="供应商分类筛选：raw_material/material_supply/customs_broker/service_provider"),
-    customer_category: Optional[CustomerCategory] = Query(None, description="客户分类筛选：wholesaler/distributor/retailer/platform/group_buying"),
-    search: Optional[str] = Query(None, description="搜索关键词"),
-    is_active: Optional[bool] = Query(True, description="是否启用"),
+    type: CompanyType | None = Query(None, description="主体类型"),
+    exclude_type: list[CompanyType] = Query([], description="排除类型（可传多个，如 customer,supplier）"),
+    business_role: str | None = Query(None, description="业务角色筛选：upstream(上游溯源) / business_partner(业务往来)"),
+    supplier_category: SupplierCategory | None = Query(None, description="供应商分类筛选：raw_material/material_supply/customs_broker/service_provider"),
+    customer_category: CustomerCategory | None = Query(None, description="客户分类筛选：wholesaler/distributor/retailer/platform/group_buying"),
+    search: str | None = Query(None, description="搜索关键词"),
+    is_active: bool | None = Query(True, description="是否启用"),
     skip: int = Query(0, ge=0, description="跳过数量"),
     limit: int = Query(100, ge=1, le=500, description="返回数量"),
     db: AsyncSession = Depends(get_db),
@@ -108,9 +107,7 @@ async def list_companies(
     )
     
     supplier_ids = [item.id for item in items if hasattr(item.type, 'value') and item.type.value == "supplier"]
-    print(f"DEBUG list_companies: items count={len(items)}, supplier_ids={supplier_ids}")
     payables = await CompanyService.get_supplier_payables(db, supplier_ids)
-    print(f"DEBUG list_companies: payables={payables}")
     
     result_items = []
     for item in items:
@@ -121,7 +118,7 @@ async def list_companies(
 
 @router.post("/batch-import", status_code=status.HTTP_201_CREATED)
 async def batch_import_customers(
-    customers: List[dict],
+    customers: list[dict],
     db: AsyncSession = Depends(get_db),
 ):
     """批量导入客户（销售导入用）

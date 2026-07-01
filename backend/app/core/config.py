@@ -1,6 +1,5 @@
 import os
 import secrets
-from typing import List
 
 from pydantic_settings import BaseSettings
 
@@ -37,7 +36,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
     # ── CORS ──
-    CORS_ORIGINS: List[str] = [
+    CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
@@ -60,10 +59,10 @@ class Settings(BaseSettings):
         """生产环境安全检查 — 启动时调用"""
         if not self.is_production:
             return
-        issues: List[str] = []
+        issues: list[str] = []
         if self.DEBUG:
             issues.append("DEBUG=True 不应出现在生产环境")
-        if self.SECRET_KEY == _generate_secret() or len(self.SECRET_KEY) < 32:
+        if _generate_secret() == self.SECRET_KEY or len(self.SECRET_KEY) < 32:
             issues.append("SECRET_KEY 未正确配置或为弱密钥")
         if "salmon123" in self.DATABASE_URL:
             issues.append("DATABASE_URL 使用了默认密码")

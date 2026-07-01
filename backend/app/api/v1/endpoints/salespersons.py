@@ -1,11 +1,11 @@
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from typing import List, Optional
 
 from app.core.database import get_db
-from app.core.permissions import require_admin, log_operation
-from app.models import Salesperson, CommissionRecord, User
+from app.core.deps import get_current_user
+from app.models import CommissionRecord, Salesperson, User
 from app.schemas.company import (
     SalespersonCreate,
     SalespersonUpdate,
@@ -18,9 +18,10 @@ router = APIRouter()
 
 @router.get("/", response_model=dict)
 async def list_salespersons(
-    search: Optional[str] = Query(None, description="搜索名称"),
-    is_active: Optional[bool] = Query(None, description="是否在职"),
+    search: str | None = Query(None, description="搜索名称"),
+    is_active: bool | None = Query(None, description="是否在职"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """业务员列表"""
     query = select(Salesperson)
@@ -65,6 +66,7 @@ async def list_salespersons(
 async def create_salesperson(
     data: SalespersonCreate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """创建业务员"""
     sp = Salesperson(
@@ -95,6 +97,7 @@ async def create_salesperson(
 async def get_salesperson(
     sp_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """业务员详情"""
     result = await db.execute(select(Salesperson).where(Salesperson.id == sp_id))
@@ -119,6 +122,7 @@ async def update_salesperson(
     sp_id: int,
     data: SalespersonUpdate,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """更新业务员"""
     result = await db.execute(select(Salesperson).where(Salesperson.id == sp_id))
@@ -149,6 +153,7 @@ async def update_salesperson(
 async def delete_salesperson(
     sp_id: int,
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """删除业务员（软删除：标记停用）"""
     result = await db.execute(select(Salesperson).where(Salesperson.id == sp_id))
@@ -164,15 +169,17 @@ async def delete_salesperson(
 
 @router.get("/commissions/")
 async def list_commissions(
-    month: Optional[str] = Query(None, description="月份 YYYY-MM"),
-    salesperson_id: Optional[int] = Query(None, description="业务员ID"),
-    status: Optional[str] = Query(None, description="状态 pending/paid"),
-    batch_id: Optional[int] = Query(None, description="批次ID"),
+    month: str | None = Query(None, description="月份 YYYY-MM"),
+    salesperson_id: int | None = Query(None, description="业务员ID"),
+    status: str | None = Query(None, description="状态 pending/paid"),
+    batch_id: int | None = Query(None, description="批次ID"),
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """提成记录列表"""
-    from app.models import WholeFishSale, Company
     from sqlalchemy.orm import joinedload
+
+    from app.models import Company, WholeFishSale
     
     query = select(CommissionRecord).options(joinedload(CommissionRecord.salesperson))
     
@@ -271,8 +278,9 @@ async def list_commissions(
 @router.post("/{sp_id}/pay-commission", status_code=status.HTTP_200_OK)
 async def pay_commission(
     sp_id: int,
-    record_ids: List[int],
+    record_ids: list[int],
     db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """发放提成"""
     from datetime import date

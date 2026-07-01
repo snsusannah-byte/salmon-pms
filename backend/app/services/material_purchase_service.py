@@ -2,11 +2,10 @@
 物料采购与批次管理服务层
 """
 from datetime import date
-from decimal import Decimal, ROUND_CEILING
-from typing import List, Optional, Tuple
+from decimal import ROUND_CEILING, Decimal
 from uuid import uuid4
 
-from sqlalchemy import func, select, desc, and_
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -60,9 +59,14 @@ class MaterialPurchaseService:
 
         order_no = await MaterialPurchaseService._generate_order_no(db)
 
+        # 处理日期：字符串转 date 对象
+        order_date = data.get("order_date", date.today())
+        if isinstance(order_date, str):
+            order_date = date.fromisoformat(order_date)
+
         order = MaterialPurchaseOrder(
             order_no=order_no,
-            order_date=data.get("order_date", date.today()),
+            order_date=order_date,
             supplier_id=data["supplier_id"],
             warehouse_id=data.get("warehouse_id"),
             quoted_total=Decimal(str(data.get("quoted_total", 0))) if data.get("quoted_total") else None,
@@ -113,7 +117,7 @@ class MaterialPurchaseService:
             order_items.append((item, product_id, box_count, items_per_box, total_qty, unit, actual_amount, actual_unit_price))
 
         # 创建应付记录
-        from app.models import PurchaseOrderV2, PurchaseOrderProductV2
+        from app.models import PurchaseOrderProductV2, PurchaseOrderV2
         purchase_no = f"CGCL-{order.order_no}"
         supplier_result = await db.execute(select(Company.name).where(Company.id == order.supplier_id))
         supplier_name = supplier_result.scalar() or ""
@@ -156,7 +160,7 @@ class MaterialPurchaseService:
         return order
 
     @staticmethod
-    async def get_order(db: AsyncSession, order_id: int) -> Optional[MaterialPurchaseOrder]:
+    async def get_order(db: AsyncSession, order_id: int) -> MaterialPurchaseOrder | None:
         result = await db.execute(
             select(MaterialPurchaseOrder).where(MaterialPurchaseOrder.id == order_id)
         )
@@ -165,13 +169,13 @@ class MaterialPurchaseService:
     @staticmethod
     async def list_orders(
         db: AsyncSession,
-        supplier_id: Optional[int] = None,
-        status: Optional[str] = None,
-        date_from: Optional[date] = None,
-        date_to: Optional[date] = None,
+        supplier_id: int | None = None,
+        status: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         query = (
             select(MaterialPurchaseOrder, Company)
             .join(Company, MaterialPurchaseOrder.supplier_id == Company.id)
@@ -238,6 +242,9 @@ class MaterialPurchaseService:
                 "supplier_id": order.supplier_id,
                 "supplier_name": supplier.name,
                 "actual_total": order.actual_total,
+                "after_sales_adjustment": order.after_sales_adjustment or Decimal("0"),
+                "net_amount": order.actual_total - (order.after_sales_adjustment or Decimal("0")),
+                "paid_amount": order.paid_amount or Decimal("0"),
                 "status": order.status,
                 "payment_status": order.payment_status,
                 "item_count": item_count,
@@ -264,11 +271,57 @@ class MaterialPurchaseService:
 
     @staticmethod
     async def delete_order(db: AsyncSession, order: MaterialPurchaseOrder) -> None:
-        """删除采购单（含关联数据完整清理）"""
-        from app.models import MaterialBatch, MaterialPurchaseItem, PurchaseOrderV2, PurchaseOrderProductV2, TransactionRecord, StockInbound, StockMovement
-        from sqlalchemy import delete, text, select
+        """删除采购单（含关联数据完整清理）—— 回滚库存"""
+        from sqlalchemy import delete, select, text
 
-        # 1. 清理关联的批次和明细
+        from app.models import (
+            MaterialBatch,
+            MaterialPurchaseItem,
+            PurchaseOrderProductV2,
+            PurchaseOrderV2,
+            Stock,
+            StockInbound,
+            StockMovement,
+            TransactionRecord,
+        )
+
+        # 1. 查询所有入库记录（用于回滚库存）
+        inbound_result = await db.execute(
+            select(StockInbound).where(
+                StockInbound.source_type == "material_purchase",
+                StockInbound.source_id == order.id
+            )
+        )
+        inbounds = list(inbound_result.scalars().all())
+
+        # 2. 回滚库存（按 warehouse_id + product_id + batch_id 分组）
+        for inbound in inbounds:
+            stock_result = await db.execute(
+                select(Stock).where(
+                    Stock.warehouse_id == inbound.warehouse_id,
+                    Stock.product_id == inbound.product_id,
+                    Stock.batch_id == inbound.batch_id,
+                )
+            )
+            stock = stock_result.scalar_one_or_none()
+            if stock and stock.current_qty >= inbound.qty:
+                # 精确回滚数量和成本
+                old_total = stock.current_qty * (stock.unit_cost or Decimal("0"))
+                remove_total = inbound.qty * inbound.unit_cost
+                new_total = old_total - remove_total
+                new_qty = stock.current_qty - inbound.qty
+
+                stock.current_qty = new_qty.quantize(Decimal("0.001"))
+                stock.available_qty = (stock.current_qty - stock.reserved_qty).quantize(Decimal("0.001"))
+
+                if new_qty > 0:
+                    stock.unit_cost = (new_total / new_qty).quantize(Decimal("0.0001"))
+                    stock.total_cost = new_total.quantize(Decimal("0.01"))
+                else:
+                    stock.unit_cost = None
+                    stock.total_cost = Decimal("0")
+
+        # 3. 清理关联的批次和明细
         items_result = await db.execute(
             select(MaterialPurchaseItem).where(MaterialPurchaseItem.purchase_order_id == order.id)
         )
@@ -282,26 +335,21 @@ class MaterialPurchaseService:
             # 删除明细
             await db.delete(item)
 
-        # 2. 删除库存变动记录（两种 ref_type 都要处理）
-        # 先找到 StockInbound 记录，删除对应的 StockMovement
-        inbound_result = await db.execute(
-            select(StockInbound.id).where(
-                StockInbound.source_type == "material_purchase",
-                StockInbound.source_id == order.id
-            )
-        )
-        inbound_ids = [r[0] for r in inbound_result.all()]
+        # 4. 删除库存变动记录
+        inbound_ids = [inbound.id for inbound in inbounds]
         if inbound_ids:
             await db.execute(
-                delete(StockMovement).where(StockMovement.ref_id.in_(inbound_ids), StockMovement.ref_type == "StockInbound")
+                delete(StockMovement).where(
+                    StockMovement.ref_id.in_(inbound_ids),
+                    StockMovement.ref_type == "StockInbound"
+                )
             )
-        # 删除 material_purchase 类型的记录
         await db.execute(
             text("DELETE FROM stock_movements WHERE ref_type = 'material_purchase' AND ref_id = :order_id"),
             {"order_id": order.id}
         )
 
-        # 3. 删除入库记录
+        # 5. 删除入库记录
         await db.execute(
             delete(StockInbound).where(
                 StockInbound.source_type == "material_purchase",
@@ -309,7 +357,7 @@ class MaterialPurchaseService:
             )
         )
 
-        # 4. 删除应付记录（先删子表，再删父表）
+        # 6. 删除应付记录（先删子表，再删父表）
         po_v2_result = await db.execute(
             select(PurchaseOrderV2.id).where(PurchaseOrderV2.purchase_no == f"CGCL-{order.order_no}")
         )
@@ -322,19 +370,19 @@ class MaterialPurchaseService:
                 delete(PurchaseOrderV2).where(PurchaseOrderV2.id == po_v2_id)
             )
 
-        # 5. 删除交易流水
+        # 7. 删除交易流水
         await db.execute(
             delete(TransactionRecord).where(TransactionRecord.reference_no == order.order_no)
         )
 
-        # 6. 删除采购单
+        # 8. 删除采购单
         await db.delete(order)
         await db.commit()
 
     # ==================== 入库 ====================
 
     @staticmethod
-    async def confirm_inbound(db: AsyncSession, order_id: int, inbound_data: List[dict]) -> dict:
+    async def confirm_inbound(db: AsyncSession, order_id: int, inbound_data: list[dict]) -> dict:
         """采购单入库确认 — 支持部分入库、多次入库"""
         order = await MaterialPurchaseService.get_order(db, order_id)
         if not order:
@@ -471,7 +519,7 @@ class MaterialPurchaseService:
     # ==================== 出库 ====================
 
     @staticmethod
-    async def fifo_outbound(db: AsyncSession, product_id: int, qty: Decimal) -> List[dict]:
+    async def fifo_outbound(db: AsyncSession, product_id: int, qty: Decimal) -> list[dict]:
         """FIFO 先进先出出库"""
         if qty <= 0:
             raise ValueError("出库数量必须大于0")
@@ -539,7 +587,7 @@ class MaterialPurchaseService:
         }
 
     @staticmethod
-    async def confirm_outbound(db: AsyncSession, product_id: int, qty: Decimal, allocations: List[dict], warehouse_id: int, reason: Optional[str] = None) -> dict:
+    async def confirm_outbound(db: AsyncSession, product_id: int, qty: Decimal, allocations: list[dict], warehouse_id: int, reason: str | None = None) -> dict:
         """确认出库并更新仓库库存"""
         prod_result = await db.execute(select(Product).where(Product.id == product_id))
         product = prod_result.scalar_one_or_none()
@@ -628,9 +676,9 @@ class MaterialPurchaseService:
     @staticmethod
     async def list_materials_with_stock(
         db: AsyncSession,
-        category_id: Optional[int] = None,
-        keyword: Optional[str] = None,
-    ) -> List[dict]:
+        category_id: int | None = None,
+        keyword: str | None = None,
+    ) -> list[dict]:
         """物料列表（含库存汇总）"""
         query = select(Product).where(Product.category == "bom_material")
 
@@ -641,7 +689,7 @@ class MaterialPurchaseService:
                 Product.name.ilike(f"%{keyword}%") | Product.code.ilike(f"%{keyword}%")
             )
 
-        query = query.where(Product.is_active == True).order_by(Product.code)
+        query = query.where(Product.is_active).order_by(Product.code)
 
         result = await db.execute(query)
         products = list(result.scalars().all())

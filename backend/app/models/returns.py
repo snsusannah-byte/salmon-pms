@@ -1,23 +1,27 @@
 """
 退货模块模型 — 三文鱼PMS
 """
-from datetime import datetime, date
+from datetime import date, datetime
 from decimal import Decimal
-from enum import Enum as PyEnum
-from typing import Optional, List
+from enum import StrEnum
 
 from sqlalchemy import (
-    Date, DateTime, Enum, ForeignKey, Integer,
-    Numeric, String, Text,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
 
-
 # ==================== 枚举定义 ====================
 
-class ReturnReason(str, PyEnum):
+class ReturnReason(StrEnum):
     """退货原因"""
     QUALITY_ISSUE = "quality_issue"           # 质量问题（变质/异味/色泽异常）
     LOGISTICS_DAMAGE = "logistics_damage"     # 物流损坏（包装破损/挤压）
@@ -29,7 +33,7 @@ class ReturnReason(str, PyEnum):
     OTHER = "other"                         # 其他
 
 
-class ReturnStatus(str, PyEnum):
+class ReturnStatus(StrEnum):
     """退货单状态（简化版）"""
     DRAFT = "draft"                         # 草稿
     PENDING_APPROVAL = "pending_approval"   # 待审批
@@ -39,7 +43,7 @@ class ReturnStatus(str, PyEnum):
     CANCELLED = "cancelled"                 # 已取消
 
 
-class RefundMethod(str, PyEnum):
+class RefundMethod(StrEnum):
     """退款方式"""
     DIRECT_REFUND = "direct_refund"         # 直接退款（银行转账/扫码）
     BALANCE_DEDUCTION = "balance_deduction" # 抵扣货款
@@ -47,7 +51,7 @@ class RefundMethod(str, PyEnum):
     DEFERRED = "deferred"                   # 挂账/延期处理
 
 
-class ReturnAttachmentType(str, PyEnum):
+class ReturnAttachmentType(StrEnum):
     """附件类型"""
     IMAGE = "image"                         # 图片
     VIDEO = "video"                         # 视频
@@ -65,18 +69,18 @@ class ReturnOrder(Base, TimestampMixin):
 
     # 关联销售单（三选一）
     sale_type: Mapped[str] = mapped_column(String(20), nullable=False)  # whole_fish / finished_product
-    whole_fish_sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("whole_fish_sales.id"), nullable=True)
-    finished_product_sale_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales.id"), nullable=True)
-    finished_product_sale_v2_id: Mapped[Optional[int]] = mapped_column(ForeignKey("finished_product_sales_v2.id"), nullable=True)
+    whole_fish_sale_id: Mapped[int | None] = mapped_column(ForeignKey("whole_fish_sales.id"), nullable=True)
+    finished_product_sale_id: Mapped[int | None] = mapped_column(ForeignKey("finished_product_sales.id"), nullable=True)
+    finished_product_sale_v2_id: Mapped[int | None] = mapped_column(ForeignKey("finished_product_sales_v2.id"), nullable=True)
 
     # 基本信息
     return_date: Mapped[date] = mapped_column(Date, nullable=False)
     customer_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
 
     # 加工厂追溯
-    processing_plant_id: Mapped[Optional[int]] = mapped_column(ForeignKey("companies.id"), nullable=True)
-    processing_plant_name: Mapped[Optional[str]] = mapped_column(String(200))
-    processing_plant_eu_no: Mapped[Optional[str]] = mapped_column(String(100))  # 加工厂EU注册号
+    processing_plant_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"), nullable=True)
+    processing_plant_name: Mapped[str | None] = mapped_column(String(200))
+    processing_plant_eu_no: Mapped[str | None] = mapped_column(String(100))  # 加工厂EU注册号
 
     # 退货汇总
     total_weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
@@ -84,33 +88,33 @@ class ReturnOrder(Base, TimestampMixin):
     total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
 
     # 退款信息
-    refund_method: Mapped[Optional[RefundMethod]] = mapped_column(Enum(RefundMethod), nullable=True)
+    refund_method: Mapped[RefundMethod | None] = mapped_column(Enum(RefundMethod), nullable=True)
     refund_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
-    refund_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    bank_account_id: Mapped[Optional[int]] = mapped_column(ForeignKey("bank_accounts.id"), nullable=True)
-    transaction_id: Mapped[Optional[int]] = mapped_column(ForeignKey("transaction_records.id"), nullable=True)
+    refund_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    bank_account_id: Mapped[int | None] = mapped_column(ForeignKey("bank_accounts.id"), nullable=True)
+    transaction_id: Mapped[int | None] = mapped_column(ForeignKey("transaction_records.id"), nullable=True)
 
     # 状态与审批
     status: Mapped[ReturnStatus] = mapped_column(Enum(ReturnStatus), default=ReturnStatus.DRAFT)
 
     # 问题描述
-    problem_description: Mapped[Optional[str]] = mapped_column(Text)
-    customer_feedback: Mapped[Optional[str]] = mapped_column(Text)
-    internal_notes: Mapped[Optional[str]] = mapped_column(Text)
+    problem_description: Mapped[str | None] = mapped_column(Text)
+    customer_feedback: Mapped[str | None] = mapped_column(Text)
+    internal_notes: Mapped[str | None] = mapped_column(Text)
 
     # 处理人
-    created_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
-    approved_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
-    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # 关联
-    items: Mapped[List["ReturnItem"]] = relationship(
+    items: Mapped[list["ReturnItem"]] = relationship(
         "ReturnItem",
         back_populates="return_order",
         lazy="selectin",
         cascade="all, delete-orphan",
     )
-    attachments: Mapped[List["ReturnAttachment"]] = relationship(
+    attachments: Mapped[list["ReturnAttachment"]] = relationship(
         "ReturnAttachment",
         back_populates="return_order",
         lazy="selectin",
@@ -128,7 +132,7 @@ class ReturnItem(Base, TimestampMixin):
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), default=Decimal("0"))
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
-    remarks: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 明细备注/问题描述
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)  # 明细备注/问题描述
 
     return_order: Mapped["ReturnOrder"] = relationship("ReturnOrder", back_populates="items")
 
@@ -145,7 +149,7 @@ class ReturnAttachment(Base, TimestampMixin):
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
-    mime_type: Mapped[Optional[str]] = mapped_column(String(100))
-    description: Mapped[Optional[str]] = mapped_column(Text)
+    mime_type: Mapped[str | None] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(Text)
 
     return_order: Mapped["ReturnOrder"] = relationship("ReturnOrder", back_populates="attachments")

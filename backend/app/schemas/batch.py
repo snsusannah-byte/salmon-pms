@@ -1,6 +1,5 @@
-from datetime import datetime, date
+from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,8 +12,8 @@ class BatchInvoiceInfo(BaseModel):
     invoice_id: int
     invoice_no: str
     invoice_date: date
-    processing_plant_name: Optional[str] = None
-    exporter_name: Optional[str] = None
+    processing_plant_name: str | None = None
+    exporter_name: str | None = None
     total_amount_usd: Decimal
     total_boxes: int
     total_weight_kg: Decimal
@@ -23,25 +22,25 @@ class BatchInvoiceInfo(BaseModel):
 class BatchBase(BaseModel):
     """批次基础信息"""
     batch_name: str = Field(..., max_length=100, description="批次名称")
-    batch_date: Optional[date] = Field(None, description="批次日期")
-    notes: Optional[str] = Field(None, description="备注")
+    batch_date: date | None = Field(None, description="批次日期")
+    notes: str | None = Field(None, description="备注")
 
 
 class BatchCreate(BaseModel):
     """创建批次请求"""
-    batch_code: Optional[str] = Field(None, max_length=50, description="批次编号（留空自动生成）")
-    batch_name: Optional[str] = Field(None, max_length=100, description="批次名称（留空自动生成）")
-    batch_date: Optional[date] = Field(None, description="批次日期")
-    notes: Optional[str] = Field(None, description="备注")
-    invoice_ids: Optional[List[int]] = Field(None, description="关联发票ID列表")
+    batch_code: str | None = Field(None, max_length=50, description="批次编号（留空自动生成）")
+    batch_name: str | None = Field(None, max_length=100, description="批次名称（留空自动生成）")
+    batch_date: date | None = Field(None, description="批次日期")
+    notes: str | None = Field(None, description="备注")
+    invoice_ids: list[int] | None = Field(None, description="关联发票ID列表")
 
 
 class BatchUpdate(BaseModel):
     """更新批次请求"""
-    batch_name: Optional[str] = Field(None, max_length=100)
-    batch_date: Optional[date] = None
-    notes: Optional[str] = None
-    status: Optional[BatchStatus] = None
+    batch_name: str | None = Field(None, max_length=100)
+    batch_date: date | None = None
+    notes: str | None = None
+    status: BatchStatus | None = None
 
 
 class BatchResponse(BatchBase):
@@ -50,13 +49,13 @@ class BatchResponse(BatchBase):
     id: int
     batch_code: str
     status: BatchStatus
-    total_amount_usd: Optional[Decimal] = None
+    total_amount_usd: Decimal | None = None
     total_boxes: int = 0
-    total_weight_kg: Optional[Decimal] = None
+    total_weight_kg: Decimal | None = None
     remaining_boxes: int = 0  # 剩余可用箱数（入库 - 已售）
     invoice_nos: str = ""  # 关联发票号，如 8353&8468
     invoice_count: int = 0
-    invoices: List[BatchInvoiceInfo] = []
+    invoices: list[BatchInvoiceInfo] = []
     created_at: datetime
     updated_at: datetime
 
@@ -64,7 +63,7 @@ class BatchResponse(BatchBase):
 class BatchListResponse(BaseModel):
     """批次列表响应"""
     total: int
-    items: List[BatchResponse]
+    items: list[BatchResponse]
     skip: int
     limit: int
 

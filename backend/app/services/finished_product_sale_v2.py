@@ -6,19 +6,18 @@
 - 自动扣减包装物/配套/赠品库存
 """
 from decimal import Decimal
-from typing import List
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models import (
+    FinishedProductSale,
+    ProductBOM,
+    ProductPackaging,
+)
 from app.models.finished_product_v2 import (
     FinishedProductSaleItem,
     SaleItemType,
-)
-from app.models import (
-    ProductBOM,
-    ProductPackaging,
-    FinishedProductSale,
 )
 
 
@@ -29,7 +28,7 @@ class FinishedProductSaleServiceV2:
     async def create_sale_with_items(
         db: AsyncSession,
         sale_data: dict,
-        items: List[dict],
+        items: list[dict],
     ) -> FinishedProductSale:
         """创建销售（带子项）
         
@@ -41,8 +40,10 @@ class FinishedProductSaleServiceV2:
         5. 创建销售子项
         6. 更新宰杀记录的已售肉重
         """
-        from app.services.finished_product_sale_service import FinishedProductSaleService
         from app.services.daily_slaughter_service import DailySlaughterService
+        from app.services.finished_product_sale_service import (
+            FinishedProductSaleService,
+        )
         from app.services.warehouse_service import WarehouseService
         
         # 1. 校验宰杀日期
@@ -215,7 +216,9 @@ class FinishedProductSaleServiceV2:
             await db.delete(item)
         
         # 5. 删除销售记录（使用现有服务）
-        from app.services.finished_product_sale_service import FinishedProductSaleService
+        from app.services.finished_product_sale_service import (
+            FinishedProductSaleService,
+        )
         await FinishedProductSaleService.delete_sale(db, sale)
 
     @staticmethod
@@ -248,7 +251,7 @@ class FinishedProductSaleServiceV2:
                 pass
 
     @staticmethod
-    async def get_sale_items(db: AsyncSession, sale_id: int) -> List[FinishedProductSaleItem]:
+    async def get_sale_items(db: AsyncSession, sale_id: int) -> list[FinishedProductSaleItem]:
         """获取销售子项列表"""
         result = await db.execute(
             select(FinishedProductSaleItem)

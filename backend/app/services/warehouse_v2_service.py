@@ -3,9 +3,8 @@
 """
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional, Tuple
 
-from sqlalchemy import func, select, desc
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -30,11 +29,11 @@ class WarehouseV2Service:
     @staticmethod
     async def list_warehouses(
         db: AsyncSession,
-        type: Optional[str] = None,
-        is_active: Optional[bool] = None,
+        type: str | None = None,
+        is_active: bool | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[Warehouse], int]:
+    ) -> tuple[list[Warehouse], int]:
         query = select(Warehouse)
         if type:
             query = query.where(Warehouse.type == type)
@@ -49,12 +48,12 @@ class WarehouseV2Service:
         return list(result.scalars().all()), total
 
     @staticmethod
-    async def get_warehouse(db: AsyncSession, warehouse_id: int) -> Optional[Warehouse]:
+    async def get_warehouse(db: AsyncSession, warehouse_id: int) -> Warehouse | None:
         result = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_warehouse_by_code(db: AsyncSession, code: str) -> Optional[Warehouse]:
+    async def get_warehouse_by_code(db: AsyncSession, code: str) -> Warehouse | None:
         result = await db.execute(select(Warehouse).where(Warehouse.code == code))
         return result.scalar_one_or_none()
 
@@ -82,7 +81,7 @@ class WarehouseV2Service:
         db: AsyncSession,
         warehouse_id: int,
         product_id: int,
-        batch_id: Optional[int] = None,
+        batch_id: int | None = None,
         unit: str = "kg",
     ) -> Stock:
         result = await db.execute(
@@ -111,13 +110,13 @@ class WarehouseV2Service:
     @staticmethod
     async def list_stocks(
         db: AsyncSession,
-        warehouse_id: Optional[int] = None,
-        product_id: Optional[int] = None,
-        batch_id: Optional[int] = None,
-        is_below_warning: Optional[bool] = None,
+        warehouse_id: int | None = None,
+        product_id: int | None = None,
+        batch_id: int | None = None,
+        is_below_warning: bool | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         query = select(Stock, Warehouse, Product).join(
             Warehouse, Stock.warehouse_id == Warehouse.id
         ).join(Product, Stock.product_id == Product.id)
@@ -146,7 +145,7 @@ class WarehouseV2Service:
 
             # 查询该产品最新入库的到货周期
             lead_time = None
-            from app.models import MaterialPurchaseOrder, MaterialPurchaseItem
+            from app.models import MaterialPurchaseItem, MaterialPurchaseOrder
             mpo_result = await db.execute(
                 select(MaterialPurchaseOrder)
                 .join(MaterialPurchaseItem, MaterialPurchaseItem.purchase_order_id == MaterialPurchaseOrder.id)
@@ -189,7 +188,7 @@ class WarehouseV2Service:
         return items, total
 
     @staticmethod
-    async def stock_summary(db: AsyncSession) -> List[dict]:
+    async def stock_summary(db: AsyncSession) -> list[dict]:
         result = await db.execute(
             select(
                 Warehouse.id,
@@ -300,14 +299,14 @@ class WarehouseV2Service:
     @staticmethod
     async def list_inbounds(
         db: AsyncSession,
-        warehouse_id: Optional[int] = None,
-        product_id: Optional[int] = None,
-        status: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        warehouse_id: int | None = None,
+        product_id: int | None = None,
+        status: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         query = select(StockInbound, Warehouse, Product).join(
             Warehouse, StockInbound.warehouse_id == Warehouse.id
         ).join(Product, StockInbound.product_id == Product.id)
@@ -360,7 +359,7 @@ class WarehouseV2Service:
         return items, total
 
     @staticmethod
-    async def get_inbound(db: AsyncSession, inbound_id: int) -> Optional[StockInbound]:
+    async def get_inbound(db: AsyncSession, inbound_id: int) -> StockInbound | None:
         result = await db.execute(select(StockInbound).where(StockInbound.id == inbound_id))
         return result.scalar_one_or_none()
 
@@ -450,14 +449,14 @@ class WarehouseV2Service:
     @staticmethod
     async def list_outbounds(
         db: AsyncSession,
-        warehouse_id: Optional[int] = None,
-        product_id: Optional[int] = None,
-        status: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        warehouse_id: int | None = None,
+        product_id: int | None = None,
+        status: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         query = select(StockOutbound, Warehouse, Product).join(
             Warehouse, StockOutbound.warehouse_id == Warehouse.id
         ).join(Product, StockOutbound.product_id == Product.id)
@@ -508,7 +507,7 @@ class WarehouseV2Service:
         return items, total
 
     @staticmethod
-    async def get_outbound(db: AsyncSession, outbound_id: int) -> Optional[StockOutbound]:
+    async def get_outbound(db: AsyncSession, outbound_id: int) -> StockOutbound | None:
         result = await db.execute(select(StockOutbound).where(StockOutbound.id == outbound_id))
         return result.scalar_one_or_none()
 
@@ -548,7 +547,7 @@ class WarehouseV2Service:
         return transfer
 
     @staticmethod
-    async def confirm_transfer(db: AsyncSession, transfer: StockTransfer) -> Tuple[Stock, Stock]:
+    async def confirm_transfer(db: AsyncSession, transfer: StockTransfer) -> tuple[Stock, Stock]:
         if transfer.status != StockStatus.PENDING:
             raise ValueError("只有待确认的调拨单可以确认")
 
@@ -624,13 +623,13 @@ class WarehouseV2Service:
     @staticmethod
     async def list_transfers(
         db: AsyncSession,
-        from_warehouse_id: Optional[int] = None,
-        to_warehouse_id: Optional[int] = None,
-        product_id: Optional[int] = None,
-        status: Optional[str] = None,
+        from_warehouse_id: int | None = None,
+        to_warehouse_id: int | None = None,
+        product_id: int | None = None,
+        status: str | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         query = select(StockTransfer, Product).join(
             Product, StockTransfer.product_id == Product.id
         )
@@ -682,7 +681,7 @@ class WarehouseV2Service:
         return items, total
 
     @staticmethod
-    async def get_transfer(db: AsyncSession, transfer_id: int) -> Optional[StockTransfer]:
+    async def get_transfer(db: AsyncSession, transfer_id: int) -> StockTransfer | None:
         result = await db.execute(select(StockTransfer).where(StockTransfer.id == transfer_id))
         return result.scalar_one_or_none()
 
@@ -691,14 +690,14 @@ class WarehouseV2Service:
     @staticmethod
     async def list_movements(
         db: AsyncSession,
-        warehouse_id: Optional[int] = None,
-        product_id: Optional[int] = None,
-        movement_type: Optional[str] = None,
-        start_date: Optional[date] = None,
-        end_date: Optional[date] = None,
+        warehouse_id: int | None = None,
+        product_id: int | None = None,
+        movement_type: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[dict], int]:
+    ) -> tuple[list[dict], int]:
         query = select(StockMovement, Warehouse, Product).join(
             Warehouse, StockMovement.warehouse_id == Warehouse.id
         ).join(Product, StockMovement.product_id == Product.id)
@@ -759,8 +758,8 @@ class WarehouseV2Service:
         qty: Decimal,
         unit: str,
         unit_cost: Decimal,
-        batch_id: Optional[int] = None,
-        detail: Optional[dict] = None,
+        batch_id: int | None = None,
+        detail: dict | None = None,
     ) -> StockInbound:
         """进口发票到港 → 自动入库到 ZB-IMPORT"""
         wh = await WarehouseV2Service.get_warehouse_by_code(db, "ZB-IMPORT")
@@ -793,7 +792,7 @@ class WarehouseV2Service:
         product_id: int,
         qty: Decimal,
         unit: str,
-        batch_id: Optional[int] = None,
+        batch_id: int | None = None,
     ) -> StockOutbound:
         """销售单创建 → 自动出库"""
         outbound_data = {

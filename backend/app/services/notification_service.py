@@ -1,9 +1,12 @@
-from decimal import Decimal
 from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
+from decimal import Decimal
+
 from sqlalchemy import select
-from app.models import ImportInvoice, InvoiceProduct, Notification
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import AsyncSessionLocal
+from app.models import ImportInvoice, InvoiceProduct, Notification
+
 
 class InvoiceNotificationService:
     """进口单证通知服务"""
@@ -60,8 +63,9 @@ class InvoiceNotificationService:
     async def create_notifications(db: AsyncSession, invoice_id: int, user_id: int = 1) -> list[Notification]:
         """为新单证创建通知"""
         # 查询发票和产品明细
-        from app.models import ImportInvoice, InvoiceProduct, Company
         from sqlalchemy.orm import selectinload
+
+        from app.models import Company, ImportInvoice, InvoiceProduct
         
         invoice_result = await db.execute(
             select(ImportInvoice)

@@ -2,7 +2,6 @@
 损耗处理 API
 """
 from datetime import date
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,10 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.schemas.finished_product_v2 import (
     LossRecordCreate,
-    LossRecordUpdate,
-    LossRecordResponse,
     LossRecordListResponse,
+    LossRecordResponse,
     LossRecordSummary,
+    LossRecordUpdate,
 )
 from app.services.loss_record_service import LossRecordService
 
@@ -22,10 +21,10 @@ router = APIRouter()
 
 @router.get("/", response_model=LossRecordListResponse)
 async def list_loss_records(
-    loss_type: Optional[str] = Query(None, description="损耗类型: spoilage/inventory_diff/expired/other"),
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
-    product_id: Optional[int] = Query(None),
+    loss_type: str | None = Query(None, description="损耗类型: spoilage/inventory_diff/expired/other"),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    product_id: int | None = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -110,8 +109,8 @@ async def delete_loss_record(
 
 @router.get("/summary/stats", response_model=LossRecordSummary)
 async def get_loss_summary(
-    start_date: Optional[date] = Query(None),
-    end_date: Optional[date] = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     """损耗汇总统计"""

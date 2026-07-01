@@ -3,10 +3,8 @@
 """
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 # ==================== 仓库 ====================
 
@@ -16,7 +14,7 @@ class WarehouseBase(BaseModel):
     type: str = Field(..., max_length=20)
     business_scope: str = Field(default="all", max_length=20)
     is_active: bool = Field(default=True)
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class WarehouseCreate(WarehouseBase):
@@ -24,9 +22,9 @@ class WarehouseCreate(WarehouseBase):
 
 
 class WarehouseUpdate(BaseModel):
-    name: Optional[str] = Field(None, max_length=50)
-    is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    name: str | None = Field(None, max_length=50)
+    is_active: bool | None = None
+    notes: str | None = None
 
 
 class WarehouseResponse(WarehouseBase):
@@ -39,7 +37,7 @@ class WarehouseResponse(WarehouseBase):
 
 class WarehouseListResponse(BaseModel):
     total: int
-    items: List[WarehouseResponse]
+    items: list[WarehouseResponse]
     skip: int = 0
     limit: int = 100
 
@@ -49,36 +47,36 @@ class WarehouseListResponse(BaseModel):
 class StockBase(BaseModel):
     warehouse_id: int
     product_id: int
-    batch_id: Optional[int] = None
+    batch_id: int | None = None
     current_qty: Decimal = Field(default=Decimal("0"))
     reserved_qty: Decimal = Field(default=Decimal("0"))
     available_qty: Decimal = Field(default=Decimal("0"))
-    unit_cost: Optional[Decimal] = None
-    total_cost: Optional[Decimal] = None
+    unit_cost: Decimal | None = None
+    total_cost: Decimal | None = None
     unit: str = Field(default="kg", max_length=20)
     warning_threshold: int = Field(default=0)
     is_below_warning: bool = Field(default=False)
-    last_in_date: Optional[date] = None
-    last_out_date: Optional[date] = None
-    location: Optional[str] = Field(None, max_length=100)
-    notes: Optional[str] = None
+    last_in_date: date | None = None
+    last_out_date: date | None = None
+    location: str | None = Field(None, max_length=100)
+    notes: str | None = None
 
 
 class StockResponse(StockBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    warehouse_name: Optional[str] = None
-    product_name: Optional[str] = None
-    product_category: Optional[str] = None
-    batch_no: Optional[str] = None
+    warehouse_name: str | None = None
+    product_name: str | None = None
+    product_category: str | None = None
+    batch_no: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class StockListResponse(BaseModel):
     total: int
-    items: List[StockResponse]
+    items: list[StockResponse]
     skip: int = 0
     limit: int = 100
 
@@ -93,7 +91,7 @@ class StockSummaryItem(BaseModel):
 
 
 class StockSummaryResponse(BaseModel):
-    items: List[StockSummaryItem]
+    items: list[StockSummaryItem]
 
 
 # ==================== 入库 ====================
@@ -101,35 +99,35 @@ class StockSummaryResponse(BaseModel):
 class StockInboundBase(BaseModel):
     inbound_no: str = Field(..., max_length=50)
     source_type: str = Field(..., max_length=50)
-    source_id: Optional[int] = None
-    source_no: Optional[str] = Field(None, max_length=100)
+    source_id: int | None = None
+    source_no: str | None = Field(None, max_length=100)
     warehouse_id: int
     product_id: int
-    batch_id: Optional[int] = None
+    batch_id: int | None = None
     qty: Decimal
     unit: str = Field(..., max_length=20)
     unit_cost: Decimal
     total_cost: Decimal
-    supplier_id: Optional[int] = None
-    detail: Optional[dict] = None
+    supplier_id: int | None = None
+    detail: dict | None = None
     inbound_date: date
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class StockInboundCreate(BaseModel):
     source_type: str = Field(..., max_length=50)
-    source_id: Optional[int] = None
-    source_no: Optional[str] = Field(None, max_length=100)
+    source_id: int | None = None
+    source_no: str | None = Field(None, max_length=100)
     warehouse_id: int
     product_id: int
-    batch_id: Optional[int] = None
+    batch_id: int | None = None
     qty: Decimal = Field(..., gt=0)
     unit: str = Field(..., max_length=20)
     unit_cost: Decimal = Field(..., ge=0)
-    supplier_id: Optional[int] = None
-    detail: Optional[dict] = None
+    supplier_id: int | None = None
+    detail: dict | None = None
     inbound_date: date
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class StockInboundResponse(StockInboundBase):
@@ -137,16 +135,16 @@ class StockInboundResponse(StockInboundBase):
 
     id: int
     status: str
-    confirmed_at: Optional[datetime] = None
+    confirmed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
-    warehouse_name: Optional[str] = None
-    product_name: Optional[str] = None
+    warehouse_name: str | None = None
+    product_name: str | None = None
 
 
 class StockInboundListResponse(BaseModel):
     total: int
-    items: List[StockInboundResponse]
+    items: list[StockInboundResponse]
     skip: int = 0
     limit: int = 100
 
@@ -156,30 +154,30 @@ class StockInboundListResponse(BaseModel):
 class StockOutboundBase(BaseModel):
     outbound_no: str = Field(..., max_length=50)
     dest_type: str = Field(..., max_length=50)
-    dest_id: Optional[int] = None
-    dest_no: Optional[str] = Field(None, max_length=100)
+    dest_id: int | None = None
+    dest_no: str | None = Field(None, max_length=100)
     warehouse_id: int
     product_id: int
-    batch_id: Optional[int] = None
+    batch_id: int | None = None
     qty: Decimal
     unit: str = Field(..., max_length=20)
-    unit_cost: Optional[Decimal] = None
-    total_cost: Optional[Decimal] = None
+    unit_cost: Decimal | None = None
+    total_cost: Decimal | None = None
     outbound_date: date
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class StockOutboundCreate(BaseModel):
     dest_type: str = Field(..., max_length=50)
-    dest_id: Optional[int] = None
-    dest_no: Optional[str] = Field(None, max_length=100)
+    dest_id: int | None = None
+    dest_no: str | None = Field(None, max_length=100)
     warehouse_id: int
     product_id: int
-    batch_id: Optional[int] = None
+    batch_id: int | None = None
     qty: Decimal = Field(..., gt=0)
     unit: str = Field(..., max_length=20)
     outbound_date: date
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class StockOutboundResponse(StockOutboundBase):
@@ -187,16 +185,16 @@ class StockOutboundResponse(StockOutboundBase):
 
     id: int
     status: str
-    confirmed_at: Optional[datetime] = None
+    confirmed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
-    warehouse_name: Optional[str] = None
-    product_name: Optional[str] = None
+    warehouse_name: str | None = None
+    product_name: str | None = None
 
 
 class StockOutboundListResponse(BaseModel):
     total: int
-    items: List[StockOutboundResponse]
+    items: list[StockOutboundResponse]
     skip: int = 0
     limit: int = 100
 
@@ -208,30 +206,30 @@ class StockTransferBase(BaseModel):
     from_warehouse_id: int
     to_warehouse_id: int
     product_id: int
-    batch_id: Optional[int] = None
+    batch_id: int | None = None
     from_qty: Decimal
     from_unit: str = Field(..., max_length=20)
     to_qty: Decimal
     to_unit: str = Field(..., max_length=20)
     conversion_ratio: Decimal
-    detail: Optional[dict] = None
+    detail: dict | None = None
     transfer_date: date
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class StockTransferCreate(BaseModel):
     from_warehouse_id: int
     to_warehouse_id: int
     product_id: int
-    batch_id: Optional[int] = None
+    batch_id: int | None = None
     from_qty: Decimal = Field(..., gt=0)
     from_unit: str = Field(..., max_length=20)
     to_qty: Decimal = Field(..., gt=0)
     to_unit: str = Field(..., max_length=20)
     conversion_ratio: Decimal = Field(..., gt=0)
-    detail: Optional[dict] = None
+    detail: dict | None = None
     transfer_date: date
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class StockTransferResponse(StockTransferBase):
@@ -239,17 +237,17 @@ class StockTransferResponse(StockTransferBase):
 
     id: int
     status: str
-    confirmed_at: Optional[datetime] = None
+    confirmed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
-    from_warehouse_name: Optional[str] = None
-    to_warehouse_name: Optional[str] = None
-    product_name: Optional[str] = None
+    from_warehouse_name: str | None = None
+    to_warehouse_name: str | None = None
+    product_name: str | None = None
 
 
 class StockTransferListResponse(BaseModel):
     total: int
-    items: List[StockTransferResponse]
+    items: list[StockTransferResponse]
     skip: int = 0
     limit: int = 100
 
@@ -259,19 +257,19 @@ class StockTransferListResponse(BaseModel):
 class StockMovementBase(BaseModel):
     warehouse_id: int
     product_id: int
-    batch_id: Optional[int] = None
+    batch_id: int | None = None
     movement_type: str = Field(..., max_length=20)
     movement_date: date
     qty_change: Decimal
     qty_before: Decimal
     qty_after: Decimal
     unit: str = Field(..., max_length=20)
-    unit_cost: Optional[Decimal] = None
-    total_cost: Optional[Decimal] = None
+    unit_cost: Decimal | None = None
+    total_cost: Decimal | None = None
     ref_type: str = Field(..., max_length=50)
     ref_id: int
-    ref_no: Optional[str] = Field(None, max_length=100)
-    notes: Optional[str] = None
+    ref_no: str | None = Field(None, max_length=100)
+    notes: str | None = None
 
 
 class StockMovementResponse(StockMovementBase):
@@ -280,13 +278,13 @@ class StockMovementResponse(StockMovementBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    warehouse_name: Optional[str] = None
-    product_name: Optional[str] = None
+    warehouse_name: str | None = None
+    product_name: str | None = None
 
 
 class StockMovementListResponse(BaseModel):
     total: int
-    items: List[StockMovementResponse]
+    items: list[StockMovementResponse]
     skip: int = 0
     limit: int = 100
 
@@ -299,7 +297,7 @@ class ProductUnitConversionBase(BaseModel):
     to_unit: str = Field(..., max_length=20)
     ratio: Decimal = Field(..., gt=0)
     is_default: bool = Field(default=True)
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class ProductUnitConversionCreate(ProductUnitConversionBase):
@@ -312,11 +310,11 @@ class ProductUnitConversionResponse(ProductUnitConversionBase):
     id: int
     created_at: datetime
     updated_at: datetime
-    product_name: Optional[str] = None
+    product_name: str | None = None
 
 
 class ProductUnitConversionListResponse(BaseModel):
     total: int
-    items: List[ProductUnitConversionResponse]
+    items: list[ProductUnitConversionResponse]
     skip: int = 0
     limit: int = 100

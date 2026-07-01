@@ -19,7 +19,7 @@
 """
 # ruff: noqa: F821
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -32,7 +32,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
-
 
 # ==================== 新增：产品系列 ====================
 
@@ -53,9 +52,9 @@ class ProductSeries(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(50), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
-    templates: Mapped[List["ProductTemplate"]] = relationship(
+    templates: Mapped[list["ProductTemplate"]] = relationship(
         "ProductTemplate", back_populates="series", lazy="raise"
     )
 
@@ -78,16 +77,16 @@ class ProductSpec(Base, TimestampMixin):
     )
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    parts_config: Mapped[Optional[str]] = mapped_column(Text)
-    total_weight_g: Mapped[Optional[int]] = mapped_column(Integer)
+    parts_config: Mapped[str | None] = mapped_column(Text)
+    total_weight_g: Mapped[int | None] = mapped_column(Integer)
     portion_count: Mapped[int] = mapped_column(Integer, default=1)
     box_count: Mapped[int] = mapped_column(Integer, default=1)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     template: Mapped["ProductTemplate"] = relationship("ProductTemplate", back_populates="specs")
-    variants: Mapped[List["ProductVariant"]] = relationship(
+    variants: Mapped[list["ProductVariant"]] = relationship(
         "ProductVariant", back_populates="spec", lazy="raise",
         cascade="all, delete-orphan"
     )
@@ -114,12 +113,12 @@ class VariantPriceTier(Base, TimestampMixin):
     tier_key: Mapped[str] = mapped_column(String(50), nullable=False)
     tier_name: Mapped[str] = mapped_column(String(100), nullable=False)
     min_qty: Mapped[int] = mapped_column(Integer, default=1)
-    max_qty: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    max_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
     price: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    valid_from: Mapped[Optional[str]] = mapped_column(String(10))
-    valid_to: Mapped[Optional[str]] = mapped_column(String(10))
+    valid_from: Mapped[str | None] = mapped_column(String(10))
+    valid_to: Mapped[str | None] = mapped_column(String(10))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     variant: Mapped["ProductVariant"] = relationship("ProductVariant", back_populates="price_tiers")
 
@@ -137,43 +136,43 @@ class ProductTemplate(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     
     # 新增：关联系列
-    series_id: Mapped[Optional[int]] = mapped_column(
+    series_id: Mapped[int | None] = mapped_column(
         ForeignKey("product_series.id"), nullable=True
     )
     
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)  # 如：三文鱼刺身
-    spec: Mapped[Optional[str]] = mapped_column(String(100))        # 规格描述（废弃，迁移到 ProductSpec）
+    spec: Mapped[str | None] = mapped_column(String(100))        # 规格描述（废弃，迁移到 ProductSpec）
     unit: Mapped[str] = mapped_column(String(20), default="kg")
-    unit_weight_kg: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 3))
-    portion_weight_g: Mapped[Optional[int]] = mapped_column(Integer)
-    portion_boxes: Mapped[Optional[int]] = mapped_column(Integer)
-    series_code: Mapped[Optional[str]] = mapped_column(String(10))  # 保留兼容
-    series_name: Mapped[Optional[str]] = mapped_column(String(100))  # 保留兼容
+    unit_weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    portion_weight_g: Mapped[int | None] = mapped_column(Integer)
+    portion_boxes: Mapped[int | None] = mapped_column(Integer)
+    series_code: Mapped[str | None] = mapped_column(String(10))  # 保留兼容
+    series_name: Mapped[str | None] = mapped_column(String(100))  # 保留兼容
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     # 关系
     series: Mapped[Optional["ProductSeries"]] = relationship(
         "ProductSeries", back_populates="templates", lazy="raise"
     )
-    specs: Mapped[List["ProductSpec"]] = relationship(
+    specs: Mapped[list["ProductSpec"]] = relationship(
         "ProductSpec", back_populates="template", lazy="raise",
         cascade="all, delete-orphan"
     )
-    parts: Mapped[List["TemplatePart"]] = relationship(
+    parts: Mapped[list["TemplatePart"]] = relationship(
         "TemplatePart", back_populates="template", lazy="raise",
         cascade="all, delete-orphan"
     )
-    boms: Mapped[List["TemplateBOM"]] = relationship(
+    boms: Mapped[list["TemplateBOM"]] = relationship(
         "TemplateBOM", back_populates="template", lazy="raise",
         cascade="all, delete-orphan"
     )
-    packagings: Mapped[List["TemplatePackaging"]] = relationship(
+    packagings: Mapped[list["TemplatePackaging"]] = relationship(
         "TemplatePackaging", back_populates="template", lazy="raise",
         cascade="all, delete-orphan"
     )
-    variants: Mapped[List["ProductVariant"]] = relationship(
+    variants: Mapped[list["ProductVariant"]] = relationship(
         "ProductVariant", back_populates="template", lazy="raise",
         cascade="all, delete-orphan"
     )
@@ -209,7 +208,7 @@ class TemplateBOM(Base, TimestampMixin):
     material_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), default="个")
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     template: Mapped["ProductTemplate"] = relationship("ProductTemplate", back_populates="boms")
     material: Mapped["Product"] = relationship("Product", foreign_keys=[material_id], lazy="raise")
@@ -225,7 +224,7 @@ class TemplatePackaging(Base, TimestampMixin):
     material_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), default="个")
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     template: Mapped["ProductTemplate"] = relationship("ProductTemplate", back_populates="packagings")
     material: Mapped["Product"] = relationship("Product", foreign_keys=[material_id], lazy="raise")
@@ -242,26 +241,26 @@ class ProductVariant(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     
     # 新增：关联规格
-    spec_id: Mapped[Optional[int]] = mapped_column(
+    spec_id: Mapped[int | None] = mapped_column(
         ForeignKey("product_specs.id", ondelete="CASCADE"), nullable=True
     )
     
     # 保留：兼容旧数据
-    template_id: Mapped[Optional[int]] = mapped_column(
+    template_id: Mapped[int | None] = mapped_column(
         ForeignKey("product_templates.id", ondelete="CASCADE"), nullable=True
     )
     
-    brand_id: Mapped[Optional[int]] = mapped_column(ForeignKey("brands.id"))
+    brand_id: Mapped[int | None] = mapped_column(ForeignKey("brands.id"))
     code: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    cost_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
-    suggested_retail_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
-    wholesale_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
-    min_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2))
-    stock_quantity: Mapped[Optional[int]] = mapped_column(Integer, default=0)
-    safety_stock: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    cost_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
+    suggested_retail_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
+    wholesale_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
+    min_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
+    stock_quantity: Mapped[int | None] = mapped_column(Integer, default=0)
+    safety_stock: Mapped[int | None] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     # 关系
     spec: Mapped[Optional["ProductSpec"]] = relationship(
@@ -269,15 +268,15 @@ class ProductVariant(Base, TimestampMixin):
     )
     template: Mapped[Optional["ProductTemplate"]] = relationship("ProductTemplate", back_populates="variants")
     brand: Mapped[Optional["Brand"]] = relationship("Brand", foreign_keys=[brand_id], lazy="raise")
-    packagings: Mapped[List["VariantPackaging"]] = relationship(
+    packagings: Mapped[list["VariantPackaging"]] = relationship(
         "VariantPackaging", back_populates="variant", lazy="raise",
         cascade="all, delete-orphan"
     )
-    accessories: Mapped[List["VariantAccessory"]] = relationship(
+    accessories: Mapped[list["VariantAccessory"]] = relationship(
         "VariantAccessory", back_populates="variant", lazy="raise",
         cascade="all, delete-orphan"
     )
-    price_tiers: Mapped[List["VariantPriceTier"]] = relationship(
+    price_tiers: Mapped[list["VariantPriceTier"]] = relationship(
         "VariantPriceTier", back_populates="variant", lazy="raise",
         cascade="all, delete-orphan"
     )
@@ -298,7 +297,7 @@ class VariantPackaging(Base, TimestampMixin):
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), default="个")
     is_override: Mapped[bool] = mapped_column(Boolean, default=False)
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     variant: Mapped["ProductVariant"] = relationship("ProductVariant", back_populates="packagings")
     material: Mapped["Product"] = relationship("Product", foreign_keys=[material_id], lazy="raise")
@@ -317,7 +316,7 @@ class VariantAccessory(Base, TimestampMixin):
     # 新增：配套类型（accessory配套/gift赠品/sample试吃）
     accessory_type: Mapped[str] = mapped_column(String(20), default="accessory")
     
-    notes: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
 
     variant: Mapped["ProductVariant"] = relationship("ProductVariant", back_populates="accessories")
     accessory: Mapped["Product"] = relationship("Product", foreign_keys=[accessory_id], lazy="raise")

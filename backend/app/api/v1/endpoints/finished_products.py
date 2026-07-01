@@ -3,23 +3,28 @@
 - 产品模板（SPU）：规格、部位、通用BOM/包装
 - 品牌变体（SKU）：品牌、价格、库存、专属包装/配套
 """
-from typing import List, Optional
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
 from app.core.database import get_db
-from app.core.permissions import require_warehouse, log_operation
+from app.models import Brand, Product
 from app.models.finished_products import (
-    ProductTemplate, TemplatePart, TemplateBOM, TemplatePackaging,
-    ProductVariant, VariantPackaging, VariantAccessory,
     # 重构新增
-    ProductSeries, ProductSpec, VariantPriceTier,
+    ProductSeries,
+    ProductSpec,
+    ProductTemplate,
+    ProductVariant,
+    TemplateBOM,
+    TemplatePackaging,
+    TemplatePart,
+    VariantAccessory,
+    VariantPackaging,
+    VariantPriceTier,
 )
-from app.models import Product, Brand, User
 
 router = APIRouter()
 
@@ -37,7 +42,7 @@ class TemplateBOMCreate(BaseModel):
     material_id: int
     quantity: float
     unit: str = "个"
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class TemplatePackagingCreate(BaseModel):
@@ -45,38 +50,38 @@ class TemplatePackagingCreate(BaseModel):
     material_id: int
     quantity: float
     unit: str = "个"
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class ProductTemplateCreate(BaseModel):
-    code: Optional[str] = None
+    code: str | None = None
     name: str
-    spec: Optional[str] = None
+    spec: str | None = None
     unit: str = "kg"
-    unit_weight_kg: Optional[float] = None
-    portion_weight_g: Optional[int] = None
-    portion_boxes: Optional[int] = None
-    series_id: Optional[int] = None
-    series_code: Optional[str] = None
-    series_name: Optional[str] = None
-    notes: Optional[str] = None
-    parts: List[TemplatePartCreate] = []
-    boms: List[TemplateBOMCreate] = []
-    packagings: List[TemplatePackagingCreate] = []
+    unit_weight_kg: float | None = None
+    portion_weight_g: int | None = None
+    portion_boxes: int | None = None
+    series_id: int | None = None
+    series_code: str | None = None
+    series_name: str | None = None
+    notes: str | None = None
+    parts: list[TemplatePartCreate] = []
+    boms: list[TemplateBOMCreate] = []
+    packagings: list[TemplatePackagingCreate] = []
 
 
 class ProductTemplateUpdate(BaseModel):
-    name: Optional[str] = None
-    spec: Optional[str] = None
-    unit: Optional[str] = None
-    unit_weight_kg: Optional[float] = None
-    portion_weight_g: Optional[int] = None
-    portion_boxes: Optional[int] = None
-    series_id: Optional[int] = None
-    series_code: Optional[str] = None
-    series_name: Optional[str] = None
-    is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    name: str | None = None
+    spec: str | None = None
+    unit: str | None = None
+    unit_weight_kg: float | None = None
+    portion_weight_g: int | None = None
+    portion_boxes: int | None = None
+    series_id: int | None = None
+    series_code: str | None = None
+    series_name: str | None = None
+    is_active: bool | None = None
+    notes: str | None = None
 
 
 class TemplatePartResponse(BaseModel):
@@ -92,10 +97,10 @@ class TemplateBOMResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     material_id: int
-    material_name: Optional[str] = None
+    material_name: str | None = None
     quantity: float
     unit: str
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class TemplatePackagingResponse(BaseModel):
@@ -103,10 +108,10 @@ class TemplatePackagingResponse(BaseModel):
     id: int
     level: str
     material_id: int
-    material_name: Optional[str] = None
+    material_name: str | None = None
     quantity: float
     unit: str
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class ProductTemplateResponse(BaseModel):
@@ -114,19 +119,19 @@ class ProductTemplateResponse(BaseModel):
     id: int
     code: str
     name: str
-    spec: Optional[str] = None
+    spec: str | None = None
     unit: str
-    unit_weight_kg: Optional[float] = None
-    portion_weight_g: Optional[int] = None
-    portion_boxes: Optional[int] = None
-    series_id: Optional[int] = None
-    series_code: Optional[str] = None
-    series_name: Optional[str] = None
+    unit_weight_kg: float | None = None
+    portion_weight_g: int | None = None
+    portion_boxes: int | None = None
+    series_id: int | None = None
+    series_code: str | None = None
+    series_name: str | None = None
     is_active: bool
-    notes: Optional[str] = None
-    parts: List[TemplatePartResponse] = []
-    boms: List[TemplateBOMResponse] = []
-    packagings: List[TemplatePackagingResponse] = []
+    notes: str | None = None
+    parts: list[TemplatePartResponse] = []
+    boms: list[TemplateBOMResponse] = []
+    packagings: list[TemplatePackagingResponse] = []
     variant_count: int = 0
     created_at: str
     updated_at: str
@@ -134,7 +139,7 @@ class ProductTemplateResponse(BaseModel):
 
 class TemplateListResponse(BaseModel):
     total: int
-    items: List[ProductTemplateResponse]
+    items: list[ProductTemplateResponse]
 
 
 # --- Variant Schemas ---
@@ -145,41 +150,41 @@ class VariantPackagingCreate(BaseModel):
     quantity: float
     unit: str = "个"
     is_override: bool = False
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class VariantAccessoryCreate(BaseModel):
     accessory_id: int
     quantity: float
     unit: str = "个"
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class ProductVariantCreate(BaseModel):
-    brand_id: Optional[int] = None
-    code: Optional[str] = None
-    cost_price: Optional[float] = None
-    suggested_retail_price: Optional[float] = None
-    wholesale_price: Optional[float] = None
-    min_price: Optional[float] = None
+    brand_id: int | None = None
+    code: str | None = None
+    cost_price: float | None = None
+    suggested_retail_price: float | None = None
+    wholesale_price: float | None = None
+    min_price: float | None = None
     stock_quantity: int = 0
     safety_stock: int = 0
-    notes: Optional[str] = None
-    packagings: List[VariantPackagingCreate] = []
-    accessories: List[VariantAccessoryCreate] = []
+    notes: str | None = None
+    packagings: list[VariantPackagingCreate] = []
+    accessories: list[VariantAccessoryCreate] = []
 
 
 class ProductVariantUpdate(BaseModel):
-    brand_id: Optional[int] = None
-    code: Optional[str] = None
-    cost_price: Optional[float] = None
-    suggested_retail_price: Optional[float] = None
-    wholesale_price: Optional[float] = None
-    min_price: Optional[float] = None
-    stock_quantity: Optional[int] = None
-    safety_stock: Optional[int] = None
-    is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    brand_id: int | None = None
+    code: str | None = None
+    cost_price: float | None = None
+    suggested_retail_price: float | None = None
+    wholesale_price: float | None = None
+    min_price: float | None = None
+    stock_quantity: int | None = None
+    safety_stock: int | None = None
+    is_active: bool | None = None
+    notes: str | None = None
 
 
 class VariantPackagingResponse(BaseModel):
@@ -187,21 +192,21 @@ class VariantPackagingResponse(BaseModel):
     id: int
     level: str
     material_id: int
-    material_name: Optional[str] = None
+    material_name: str | None = None
     quantity: float
     unit: str
     is_override: bool
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class VariantAccessoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     accessory_id: int
-    accessory_name: Optional[str] = None
+    accessory_name: str | None = None
     quantity: float
     unit: str
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class ProductVariantResponse(BaseModel):
@@ -209,38 +214,38 @@ class ProductVariantResponse(BaseModel):
     id: int
     template_id: int
     template_name: str
-    spec_id: Optional[int] = None
-    spec_name: Optional[str] = None
-    brand_id: Optional[int] = None
-    brand_name: Optional[str] = None
+    spec_id: int | None = None
+    spec_name: str | None = None
+    brand_id: int | None = None
+    brand_name: str | None = None
     brand_is_oem: bool = False
     code: str
     name: str
-    cost_price: Optional[float] = None
-    suggested_retail_price: Optional[float] = None
-    wholesale_price: Optional[float] = None
-    min_price: Optional[float] = None
+    cost_price: float | None = None
+    suggested_retail_price: float | None = None
+    wholesale_price: float | None = None
+    min_price: float | None = None
     stock_quantity: int
     safety_stock: int
     is_active: bool
-    notes: Optional[str] = None
-    packagings: List[VariantPackagingResponse] = []
-    accessories: List[VariantAccessoryResponse] = []
+    notes: str | None = None
+    packagings: list[VariantPackagingResponse] = []
+    accessories: list[VariantAccessoryResponse] = []
     created_at: str
     updated_at: str
 
 
 class VariantListResponse(BaseModel):
     total: int
-    items: List[ProductVariantResponse]
+    items: list[ProductVariantResponse]
 
 
 # ==================== Template APIs ====================
 
 @router.get("/templates", response_model=TemplateListResponse)
 async def list_templates(
-    search: Optional[str] = Query(None),
-    is_active: Optional[bool] = Query(True),
+    search: str | None = Query(None),
+    is_active: bool | None = Query(True),
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
@@ -596,8 +601,8 @@ async def delete_template(
 @router.get("/templates/{template_id}/variants", response_model=VariantListResponse)
 async def list_variants(
     template_id: int,
-    brand_id: Optional[int] = Query(None),
-    is_active: Optional[bool] = Query(True),
+    brand_id: int | None = Query(None),
+    is_active: bool | None = Query(True),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -942,14 +947,14 @@ class ProductSeriesCreate(BaseModel):
     code: str
     name: str
     sort_order: int = 0
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class ProductSeriesUpdate(BaseModel):
-    name: Optional[str] = None
-    sort_order: Optional[int] = None
-    is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    name: str | None = None
+    sort_order: int | None = None
+    is_active: bool | None = None
+    notes: str | None = None
 
 
 class ProductSeriesResponse(BaseModel):
@@ -959,31 +964,31 @@ class ProductSeriesResponse(BaseModel):
     name: str
     sort_order: int
     is_active: bool
-    notes: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    notes: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class ProductSpecCreate(BaseModel):
     code: str
     name: str
-    parts_config: Optional[str] = None
-    total_weight_g: Optional[int] = None
+    parts_config: str | None = None
+    total_weight_g: int | None = None
     portion_count: int = 1
     box_count: int = 1
     sort_order: int = 0
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class ProductSpecUpdate(BaseModel):
-    name: Optional[str] = None
-    parts_config: Optional[str] = None
-    total_weight_g: Optional[int] = None
-    portion_count: Optional[int] = None
-    box_count: Optional[int] = None
-    sort_order: Optional[int] = None
-    is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    name: str | None = None
+    parts_config: str | None = None
+    total_weight_g: int | None = None
+    portion_count: int | None = None
+    box_count: int | None = None
+    sort_order: int | None = None
+    is_active: bool | None = None
+    notes: str | None = None
 
 
 class ProductSpecResponse(BaseModel):
@@ -992,15 +997,15 @@ class ProductSpecResponse(BaseModel):
     template_id: int
     code: str
     name: str
-    parts_config: Optional[str] = None
-    total_weight_g: Optional[int] = None
-    portion_count: Optional[int] = 1
-    box_count: Optional[int] = 1
-    sort_order: Optional[int] = 0
-    is_active: Optional[bool] = True
-    notes: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    parts_config: str | None = None
+    total_weight_g: int | None = None
+    portion_count: int | None = 1
+    box_count: int | None = 1
+    sort_order: int | None = 0
+    is_active: bool | None = True
+    notes: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class VariantPriceTierCreate(BaseModel):
@@ -1008,24 +1013,24 @@ class VariantPriceTierCreate(BaseModel):
     tier_key: str
     tier_name: str
     min_qty: int = 1
-    max_qty: Optional[int] = None
+    max_qty: int | None = None
     price: float
-    valid_from: Optional[str] = None
-    valid_to: Optional[str] = None
-    notes: Optional[str] = None
+    valid_from: str | None = None
+    valid_to: str | None = None
+    notes: str | None = None
 
 
 class VariantPriceTierUpdate(BaseModel):
-    tier_type: Optional[str] = None
-    tier_key: Optional[str] = None
-    tier_name: Optional[str] = None
-    min_qty: Optional[int] = None
-    max_qty: Optional[int] = None
-    price: Optional[float] = None
-    valid_from: Optional[str] = None
-    valid_to: Optional[str] = None
-    is_active: Optional[bool] = None
-    notes: Optional[str] = None
+    tier_type: str | None = None
+    tier_key: str | None = None
+    tier_name: str | None = None
+    min_qty: int | None = None
+    max_qty: int | None = None
+    price: float | None = None
+    valid_from: str | None = None
+    valid_to: str | None = None
+    is_active: bool | None = None
+    notes: str | None = None
 
 
 class VariantPriceTierResponse(BaseModel):
@@ -1036,19 +1041,19 @@ class VariantPriceTierResponse(BaseModel):
     tier_key: str
     tier_name: str
     min_qty: int
-    max_qty: Optional[int] = None
+    max_qty: int | None = None
     price: float
-    valid_from: Optional[str] = None
-    valid_to: Optional[str] = None
+    valid_from: str | None = None
+    valid_to: str | None = None
     is_active: bool
-    notes: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    notes: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 # ==================== 重构新增：系列 API ====================
 
-@router.get("/series", response_model=List[ProductSeriesResponse])
+@router.get("/series", response_model=list[ProductSeriesResponse])
 async def list_series(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -1158,7 +1163,7 @@ async def delete_series(
 
 # ==================== 重构新增：规格 API ====================
 
-@router.get("/templates/{template_id}/specs", response_model=List[ProductSpecResponse])
+@router.get("/templates/{template_id}/specs", response_model=list[ProductSpecResponse])
 async def list_specs(
     template_id: int,
     db: AsyncSession = Depends(get_db),
@@ -1330,7 +1335,7 @@ async def list_all_variants(
     return {"items": items, "total": total}
 
 
-@router.get("/variants/{variant_id}/price-tiers", response_model=List[VariantPriceTierResponse])
+@router.get("/variants/{variant_id}/price-tiers", response_model=list[VariantPriceTierResponse])
 async def list_price_tiers(
     variant_id: int,
     db: AsyncSession = Depends(get_db),

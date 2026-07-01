@@ -1,16 +1,15 @@
-from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user
 from app.core.database import get_db
-from app.core.security import verify_password, get_password_hash, create_access_token
+from app.core.deps import get_current_user
+from app.core.permissions import UserRole, require_admin
+from app.core.security import create_access_token, get_password_hash, verify_password
 from app.models import User
-from app.schemas.auth import Token, RegisterRequest, UserInfo
-
-from app.core.permissions import require_admin, UserRole
+from app.schemas.auth import RegisterRequest, Token, UserInfo
 
 router = APIRouter()
 
@@ -86,7 +85,7 @@ async def get_current_user_info(
     return UserInfo.model_validate(user)
 
 
-@router.get("/users", response_model=List[UserInfo])
+@router.get("/users", response_model=list[UserInfo])
 async def list_users(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),  # type: ignore

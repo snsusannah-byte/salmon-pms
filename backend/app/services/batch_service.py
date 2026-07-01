@@ -1,19 +1,18 @@
-from typing import List, Optional, Tuple
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select, func, and_, exists
-from sqlalchemy.orm import selectinload
+from sqlalchemy import and_, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.models import Batch, BatchInvoice, ImportInvoice, BatchStatus, ExchangeStatus
+from app.models import Batch, BatchInvoice, BatchStatus, ExchangeStatus, ImportInvoice
 
 
 class BatchService:
     """批次管理服务"""
 
     @staticmethod
-    async def get_by_id(db: AsyncSession, batch_id: int) -> Optional[Batch]:
+    async def get_by_id(db: AsyncSession, batch_id: int) -> Batch | None:
         result = await db.execute(
             select(Batch)
             .options(selectinload(Batch.batch_invoices))
@@ -24,12 +23,12 @@ class BatchService:
     @staticmethod
     async def list_batches(
         db: AsyncSession,
-        status: Optional[BatchStatus] = None,
-        search: Optional[str] = None,
+        status: BatchStatus | None = None,
+        search: str | None = None,
         exclude_fully_exchanged: bool = False,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[Batch], int]:
+    ) -> tuple[list[Batch], int]:
         query = select(Batch)
         count_query = select(func.count(Batch.id))
 
@@ -127,7 +126,7 @@ class BatchService:
         return f"{prefix}{new_num:03d}"
 
     @staticmethod
-    async def create(db: AsyncSession, data: dict, invoice_ids: Optional[List[int]] = None) -> Batch:
+    async def create(db: AsyncSession, data: dict, invoice_ids: list[int] | None = None) -> Batch:
         # 如果提供了 batch_code，直接使用；否则根据发票日期或当前日期生成
         batch_code = data.get("batch_code")
         batch_date = None
@@ -135,8 +134,9 @@ class BatchService:
         if not batch_code:
             # 没有提供批号，根据关联发票的日期生成
             if invoice_ids:
-                from app.models import ImportInvoice
                 from sqlalchemy import select
+
+                from app.models import ImportInvoice
                 result = await db.execute(
                     select(ImportInvoice.invoice_date)
                     .where(ImportInvoice.id.in_(invoice_ids))
@@ -161,8 +161,9 @@ class BatchService:
         # 获取关联的发票号（用于自动生成批次名称）
         invoice_nos = []
         if invoice_ids:
-            from app.models import ImportInvoice
             from sqlalchemy import select
+
+            from app.models import ImportInvoice
             result = await db.execute(
                 select(ImportInvoice.invoice_no).where(ImportInvoice.id.in_(invoice_ids)).order_by(ImportInvoice.id)
             )
@@ -220,7 +221,7 @@ class BatchService:
         await db.commit()
 
     @staticmethod
-    async def add_invoice(db: AsyncSession, batch_id: int, invoice_id: int) -> Optional[BatchInvoice]:
+    async def add_invoice(db: AsyncSession, batch_id: int, invoice_id: int) -> BatchInvoice | None:
         # 检查发票是否已存在于其他批次
         existing = await db.execute(
             select(BatchInvoice).where(BatchInvoice.invoice_id == invoice_id)

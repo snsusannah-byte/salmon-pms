@@ -1,21 +1,20 @@
-from typing import List, Optional, Tuple
 from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy import select, func, and_
-from sqlalchemy.orm import selectinload
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models import (
-    FinishedProductSale,
-    FinishedProductReceipt,
-    FinishedProductAftersales,
-    SalesStatus,
     Company,
+    FinishedProductAftersales,
+    FinishedProductReceipt,
+    FinishedProductSale,
     Product,
     ProductPackaging,
     ReturnOrder,
+    SalesStatus,
 )
 
 
@@ -23,7 +22,7 @@ class FinishedProductSaleService:
     """成品销售管理服务"""
 
     @staticmethod
-    async def get_by_id(db: AsyncSession, sale_id: int) -> Optional[FinishedProductSale]:
+    async def get_by_id(db: AsyncSession, sale_id: int) -> FinishedProductSale | None:
         result = await db.execute(
             select(FinishedProductSale)
             .options(
@@ -39,12 +38,12 @@ class FinishedProductSaleService:
     @staticmethod
     async def list_sales(
         db: AsyncSession,
-        customer_id: Optional[int] = None,
-        product_id: Optional[int] = None,
-        status: Optional[SalesStatus] = None,
+        customer_id: int | None = None,
+        product_id: int | None = None,
+        status: SalesStatus | None = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[FinishedProductSale], int]:
+    ) -> tuple[list[FinishedProductSale], int]:
         query = select(FinishedProductSale).options(
             selectinload(FinishedProductSale.receipts),
             selectinload(FinishedProductSale.aftersales_records),
@@ -161,6 +160,7 @@ class FinishedProductSaleService:
         3. 包装物料：根据 product_packagings 配置扣减
         """
         from sqlalchemy.orm import selectinload
+
         from app.models import ProductAccessory
         
         quantity = Decimal(str(sale.quantity))
@@ -246,6 +246,7 @@ class FinishedProductSaleService:
     async def _restore_stock(db: AsyncSession, sale: FinishedProductSale) -> None:
         """删除销售时恢复库存"""
         from sqlalchemy.orm import selectinload
+
         from app.models import ProductAccessory
         
         quantity = Decimal(str(sale.quantity))
@@ -441,7 +442,7 @@ class FinishedProductSaleService:
     @staticmethod
     async def check_customer_credit(
         db: AsyncSession, customer_id: int, new_sale_amount: Decimal
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """检查客户信用额度
 
         Returns:

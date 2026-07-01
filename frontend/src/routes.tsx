@@ -40,6 +40,8 @@ import { NotFoundPage } from "@/pages/NotFoundPage";
 import { PurchaseOrderEntry } from "@/pages/PurchaseOrderEntry";
 import { FinishedProductSales } from "@/pages/FinishedProductSales";
 
+import { PurchaseReturnPage } from "@/components/purchase-returns/PurchaseReturnPage";
+
 const router = createBrowserRouter([
   {
     path: "/login",
@@ -66,6 +68,7 @@ const router = createBrowserRouter([
       { path: "production", element: <ProductionManagementPage /> },
       { path: "materials", element: <MaterialManagementPage /> },
       { path: "material-purchases", element: <MaterialPurchasePage /> },
+      { path: "purchase-returns", element: <PurchaseReturnPage /> },
       { path: "warehouse", element: <Navigate to="/warehouse-v2" replace /> },
       { path: "warehouse-v2", element: <WarehouseV2Page /> },
       { path: "purchase-orders", element: <PurchaseOrderEntry /> },

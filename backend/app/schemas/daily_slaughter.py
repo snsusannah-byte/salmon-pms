@@ -1,13 +1,13 @@
-from typing import List, Optional
 from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.schemas.daily_slaughter import (
     DailySlaughterRecordCreate,
-    DailySlaughterRecordUpdate,
     DailySlaughterRecordResponse,
+    DailySlaughterRecordUpdate,
     DailySlaughterSummary,
 )
 from app.services.daily_slaughter_service import DailySlaughterService
@@ -15,10 +15,10 @@ from app.services.daily_slaughter_service import DailySlaughterService
 router = APIRouter()
 
 
-@router.get("/", response_model=List[DailySlaughterRecordResponse])
+@router.get("/", response_model=list[DailySlaughterRecordResponse])
 async def list_daily_slaughter_records(
-    start_date: Optional[date] = Query(None, description="开始日期"),
-    end_date: Optional[date] = Query(None, description="结束日期"),
+    start_date: date | None = Query(None, description="开始日期"),
+    end_date: date | None = Query(None, description="结束日期"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -89,8 +89,8 @@ async def delete_daily_slaughter_record(
 
 @router.get("/summary/stats", response_model=DailySlaughterSummary)
 async def get_daily_slaughter_summary(
-    start_date: Optional[date] = Query(None, description="开始日期"),
-    end_date: Optional[date] = Query(None, description="结束日期"),
+    start_date: date | None = Query(None, description="开始日期"),
+    end_date: date | None = Query(None, description="结束日期"),
     db: AsyncSession = Depends(get_db),
 ):
     """汇总统计"""

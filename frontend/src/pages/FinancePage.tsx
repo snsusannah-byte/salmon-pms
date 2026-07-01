@@ -127,6 +127,7 @@ const transactionCategoryMap: Record<string, string> = {
   // 支出-成本支出
   goods_payment: "货款支付",
   tax_payment: "税费支付",
+  import_tax: "进口税费",
   clearance_payment: "清关费支付",
   international_freight: "国际运费支付",
 
@@ -154,6 +155,8 @@ interface ExchangeRecord {
   exchange_no?: string;
   invoice_id?: number;
   batch_id?: number;
+  importer_id?: number;
+  importer_name?: string;
   related_invoice_ids?: number[];
   related_invoice_nos?: string[];
   exchange_date: string;
@@ -176,6 +179,7 @@ interface Transaction {
   counterparty_name: string | null;
   counterparty_id: number | null;
   reference_no: string | null;
+  related_invoice_no: string | null;
   description: string | null;
   is_locked: boolean;
   related_sale_ids: number[];
@@ -190,12 +194,15 @@ interface ImportFeeItem {
   customs_broker_name: string | null;
   import_duty: number;
   import_vat: number;
+  bank_account_id?: number | null;
+  bank_account_name?: string | null;
   tax_total: number;
   pickup_fee: number;
   freight: number;
   yard_fee: number;
   cold_storage_fee: number;
   clearance_service_fee: number;
+  payment_type?: string;
   clearance_total: number;
   grand_total: number;
 }
@@ -351,6 +358,7 @@ function ImportFeesTab() {
   const [grossWeight, setGrossWeight] = useState("");
   const [importDuty, setImportDuty] = useState("");
   const [importVat, setImportVat] = useState("");
+  const [bankAccountId, setBankAccountId] = useState<number | null>(null);
   const [pickupFee, setPickupFee] = useState("");
   const [freight, setFreight] = useState(String(RATES.freight));
   const [yardFee, setYardFee] = useState("");
@@ -358,6 +366,7 @@ function ImportFeesTab() {
   const [clearanceServiceFee, setClearanceServiceFee] = useState(String(RATES.customs));
   const [hasYard, setHasYard] = useState(false);
   const [hasCold, setHasCold] = useState(false);
+  const [paymentType, setPaymentType] = useState("monthly"); // monthly=月结, cash=现付
 
   // Reset on open (only for new record, not edit)
   useEffect(() => {
@@ -368,6 +377,7 @@ function ImportFeesTab() {
       setGrossWeight("");
       setImportDuty("");
       setImportVat("");
+      setBankAccountId(null);
       setPickupFee("");
       setFreight(String(RATES.freight));
       setYardFee("");
@@ -375,6 +385,7 @@ function ImportFeesTab() {
       setClearanceServiceFee(String(RATES.customs));
       setHasYard(false);
       setHasCold(false);
+      setPaymentType("monthly");
     }
   }, [formOpen]);
 
@@ -400,6 +411,25 @@ function ImportFeesTab() {
 
   const brokers = companiesData?.items || [];
 
+  // Fetch bank accounts (公账类型，用于海关税费扣款银行)
+  const { data: bankAccountsData } = useQuery<{
+    id: number;
+    code: string;
+    account_name: string;
+    bank_name: string;
+    account_number: string;
+    type: string;
+    current_balance: string;
+  }[]>({
+    queryKey: ["bank-accounts"],
+    queryFn: async () => {
+      const res = await api.get("/v1/finance/bank-accounts");
+      return res.data || [];
+    },
+  });
+
+  const publicAccounts = (bankAccountsData || []).filter((a) => a.type === "public");
+
   // Fetch import fees list
   const { data: importFeesData, isLoading } = useQuery<{ items: ImportFeeItem[]; total: number }>({
     queryKey: ["import-fees"],
@@ -410,16 +440,6 @@ function ImportFeesTab() {
   });
 
   const importFees = importFeesData?.items || [];
-
-  const onSelectInvoice = (id: string) => {
-    setInvoiceId(id);
-    const inv = invoices.find((i) => String(i.id) === id);
-    if (inv?.gross_weight_kg) {
-      setGrossWeight(String(inv.gross_weight_kg));
-    } else {
-      setGrossWeight("");
-    }
-  };
 
   const autoCalc = () => {
     const gw = parseFloat(grossWeight) || 0;
@@ -463,13 +483,16 @@ function ImportFeesTab() {
         invoice_id: Number(invoiceId),
         expense_date: expenseDate,
         customs_broker_id: customsBrokerId,
+        gross_weight_kg: Number(grossWeight) || 0,
         import_duty: Number(importDuty) || 0,
         import_vat: Number(importVat) || 0,
+        bank_account_id: bankAccountId,
         pickup_fee: Number(pickupFee) || 0,
         freight: Number(freight) || 0,
         yard_fee: Number(yardFee) || 0,
         cold_storage_fee: Number(coldStorageFee) || 0,
         clearance_service_fee: Number(clearanceServiceFee) || 0,
+        payment_type: paymentType,
       });
       toast.success("进口费用保存成功");
       queryClient.invalidateQueries({ queryKey: ["import-fees"] });
@@ -519,11 +542,13 @@ function ImportFeesTab() {
     setCustomsBrokerId(item.customs_broker_id || 15);
     setImportDuty(String(item.import_duty ?? ""));
     setImportVat(String(item.import_vat ?? ""));
+    setBankAccountId(item.bank_account_id || null);
     setPickupFee(String(item.pickup_fee ?? ""));
     setFreight(String(item.freight ?? ""));
     setYardFee(String(item.yard_fee ?? ""));
     setColdStorageFee(String(item.cold_storage_fee ?? ""));
     setClearanceServiceFee(String(item.clearance_service_fee ?? ""));
+    setPaymentType(item.payment_type || "monthly");
     setHasYard(!!item.yard_fee);
     setHasCold(!!item.cold_storage_fee);
     setFormOpen(true);
@@ -538,12 +563,14 @@ function ImportFeesTab() {
         customs_broker_id: customsBrokerId,
         import_duty: Number(importDuty) || 0,
         import_vat: Number(importVat) || 0,
+        bank_account_id: bankAccountId,
         pickup_fee: Number(pickupFee) || 0,
         freight: Number(freight) || 0,
         yard_fee: Number(yardFee) || 0,
         cold_storage_fee: Number(coldStorageFee) || 0,
         clearance_service_fee: Number(clearanceServiceFee) || 0,
         gross_weight_kg: Number(grossWeight) || undefined,
+        payment_type: paymentType,
       });
       toast.success("进口费用更新成功");
       queryClient.invalidateQueries({ queryKey: ["import-fees"] });
@@ -594,31 +621,23 @@ function ImportFeesTab() {
                   {editingItem.invoice_no || "-"}
                 </div>
               ) : (
-                <Select value={invoiceId} onValueChange={(v) => onSelectInvoice(v ?? "")}>
+                <Select value={invoiceId} onValueChange={(v) => setInvoiceId(v ?? "")}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="请选择发票">
                       {(() => {
                         const selected = invoices.find((i) => String(i.id) === invoiceId);
                         if (!selected) return "请选择发票";
-                        return (
-                          <span className="flex items-center gap-2">
-                            <span className="font-mono">{selected.invoice_no}</span>
-                            {selected.processing_plant_name && <span className="text-muted-foreground">{selected.processing_plant_name}</span>}
-                            {selected.gross_weight_kg && <span className="text-blue-600">毛重{selected.gross_weight_kg}kg</span>}
-                          </span>
-                        );
+                        return <span className="font-mono">{selected.invoice_no}</span>;
                       })()}
                     </SelectValue>
                   </SelectTrigger>
-                  <SelectContent className="min-w-[480px]">
+                  <SelectContent>
                     {invoices.length === 0 && (
                       <div className="px-3 py-2 text-sm text-muted-foreground">暂无可选发票</div>
                     )}
                     {invoices.map((i) => (
                       <SelectItem key={i.id} value={String(i.id)}>
                         <span className="font-mono">{i.invoice_no}</span>
-                        {i.processing_plant_name ? <span className="ml-2 text-muted-foreground">{i.processing_plant_name}</span> : ""}
-                        {i.gross_weight_kg ? <span className="ml-2 text-blue-600">毛重{i.gross_weight_kg}kg</span> : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -651,14 +670,36 @@ function ImportFeesTab() {
                   />
                 </div>
               </div>
+              <div className="grid gap-2">
+                <Label>扣款银行（海关税费直接从公账扣除）</Label>
+                <Select value={bankAccountId ? String(bankAccountId) : ""} onValueChange={(v) => setBankAccountId(v ? Number(v) : null)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="请选择扣款银行">
+                      {(() => {
+                        const selected = publicAccounts.find((a) => a.id === bankAccountId);
+                        if (!selected) return bankAccountId ? `未找到(ID:${bankAccountId})` : "请选择扣款银行";
+                        return `${selected.bank_name} (${selected.account_number})`;
+                      })()}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">不指定</SelectItem>
+                    {publicAccounts.map((account) => (
+                      <SelectItem key={account.id} value={String(account.id)}>
+                        {account.bank_name} ({account.account_number}) - {account.current_balance}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="bg-muted p-2 rounded text-sm flex justify-between font-semibold">
                 <span>税费合计</span>
                 <span>{fmt(taxTotal)}</span>
               </div>
             </div>
 
-            {/* 费用日期 + 报关行 */}
-            <div className="grid grid-cols-2 gap-4">
+            {/* 费用日期 + 报关行 + 付款方式 */}
+            <div className="grid grid-cols-3 gap-4">
               <div className="grid gap-2">
                 <Label>费用日期 <span className="text-red-500">*</span></Label>
                 <Input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} />
@@ -684,6 +725,20 @@ function ImportFeesTab() {
                         {c.company_full_name || c.name}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label>付款方式</Label>
+                <Select value={paymentType} onValueChange={(v) => setPaymentType(v ?? "monthly")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue>
+                      {paymentType === "monthly" ? "月结" : paymentType === "cash" ? "现付" : "月结"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="monthly">月结</SelectItem>
+                    <SelectItem value="cash">现付</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1552,6 +1607,7 @@ function ExchangeTab() {
             <TableRow>
               <TableHead>购汇单号</TableHead>
               <TableHead>关联发票</TableHead>
+              <TableHead>进口商</TableHead>
               <TableHead>日期</TableHead>
               <TableHead>USD</TableHead>
               <TableHead>汇率</TableHead>
@@ -1564,13 +1620,13 @@ function ExchangeTab() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8">
+                <TableCell colSpan={10} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : !pagedExchanges.length ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -1596,6 +1652,7 @@ function ExchangeTab() {
                       return b.invoice_nos?.replace(/&/g, ", ") || "-";
                     })()}
                   </TableCell>
+                  <TableCell className="text-xs">{r.importer_name || "-"}</TableCell>
                   <TableCell>{r.exchange_date}</TableCell>
                   <TableCell>{fmtUSD(r.amount_usd)}</TableCell>
                   <TableCell>{r.exchange_rate}</TableCell>
@@ -1638,7 +1695,7 @@ function ExchangeTab() {
               {/* 页汇总行 */}
               {pagedExchanges.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">
-                  <TableCell colSpan={3} className="text-right">本页合计:</TableCell>
+                  <TableCell colSpan={4} className="text-right">本页合计:</TableCell>
                   <TableCell className="font-bold">{fmtUSD(reduceSum(pagedExchanges, (r) => r.amount_usd))}</TableCell>
                   <TableCell />
                   <TableCell className="font-bold">{fmt(reduceSum(pagedExchanges, (r) => r.amount_cny))}</TableCell>
@@ -1708,6 +1765,7 @@ function TransactionsTab() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>("");
   const [description, setDescription] = useState("");
   const [referenceNo, setReferenceNo] = useState("");
+  const [relatedInvoiceNo, setRelatedInvoiceNo] = useState("");
   const [currency, setCurrency] = useState("CNY");
   const [bankAccountId, setBankAccountId] = useState("");
   const [selectedSaleIds, setSelectedSaleIds] = useState<number[]>([]);
@@ -1967,6 +2025,9 @@ function TransactionsTab() {
         reference_no: referenceNo || undefined,
         description: description || undefined,
       };
+      if (relatedInvoiceNo.trim()) {
+        payload.related_invoice_no = relatedInvoiceNo.trim();
+      }
       if (type === "income" && bankAccountId) {
         payload.to_account_id = Number(bankAccountId);
       } else if (type === "expense" && bankAccountId) {
@@ -2009,6 +2070,7 @@ function TransactionsTab() {
       setCustomerSearch("");
       setSelectedCompanyId("");
       setCompanySearch("");
+      setRelatedInvoiceNo("");
     } catch (error: any) {
       console.error("创建交易记录失败:", error);
       console.error("Response data:", error.response?.data);
@@ -2040,6 +2102,7 @@ function TransactionsTab() {
     setCurrency(transaction.currency || "CNY");
     setCounterparty(transaction.counterparty_name || "");
     setReferenceNo(transaction.reference_no || "");
+    setRelatedInvoiceNo(transaction.related_invoice_no || "");
     setDescription(transaction.description || "");
     setBankAccountId(transaction.from_account_id ? String(transaction.from_account_id) : transaction.to_account_id ? String(transaction.to_account_id) : "");
     setSelectedCustomerId(transaction.counterparty_id ? String(transaction.counterparty_id) : "");
@@ -2169,11 +2232,12 @@ function TransactionsTab() {
                   { header: "日期", key: "transaction_date" },
                   { header: "类型", key: "type", format: (v) => transactionTypeMap[v] || v },
                   { header: "分类", key: "category", format: (v) => transactionCategoryMap[v] || v },
-                  { header: "金额", key: "amount" },
+                  { header: "金额", key: "amount", format: (v) => fmt(v) },
                   { header: "币种", key: "currency" },
-                  { header: "银行账户", key: "from_account_id", format: (v) => getBankAccountName(v || transactions.find((r: any) => r.from_account_id === v)?.to_account_id) },
+                  { header: "银行账户", key: "from_account_id", format: (v, row) => getBankAccountName(row.type === "income" ? row.to_account_id : row.from_account_id) },
                   { header: "对方", key: "counterparty_name" },
                   { header: "描述", key: "description" },
+                  { header: "关联发票号", key: "related_invoice_no" },
                   { header: "关联销售单", key: "related_sale_ids", format: (v) => v?.length > 0 ? Array.from(new Set(v as number[])).map((id) => allSalesMap[id]).filter(Boolean).join(", ") : "-" },
                 ],
                 "交易流水"
@@ -2234,13 +2298,14 @@ function TransactionsTab() {
           )}
           <Button size="sm" onClick={() => {
             setEditingTransaction(null);
-            setDate(new Date().toISOString().split("T")[0]);  // 默认今天，避免空字符串
+            setDate(new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-'));
             setType("expense");
             setCategory("");
             setAmount("");
             setCounterparty("");
             setDescription("");
             setReferenceNo("");
+            setRelatedInvoiceNo("");
             setCurrency("CNY");
             setBankAccountId("");
             setSelectedSaleIds([]);
@@ -2448,7 +2513,7 @@ function TransactionsTab() {
             <div>
               <Label>对方名称</Label>
               {type === "income" ? (
-                <Input value={counterparty} onChange={(e) => setCounterparty(e.target.value)} placeholder="选择销售单后自动填充" disabled />
+                <Input value={counterparty} readOnly placeholder="选择客户后自动填充" className="bg-muted" />
               ) : (
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -2501,6 +2566,12 @@ function TransactionsTab() {
               <Label>参考号</Label>
               <Input value={referenceNo} onChange={(e) => setReferenceNo(e.target.value)} placeholder="可选" />
             </div>
+            {type === "expense" && (
+              <div>
+                <Label>关联发票号</Label>
+                <Input value={relatedInvoiceNo} onChange={(e) => setRelatedInvoiceNo(e.target.value)} placeholder="如：8353" />
+              </div>
+            )}
             <div>
               <Label>描述</Label>
               <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="可选" />
@@ -2573,6 +2644,7 @@ function TransactionsTab() {
               <TableHead>银行账户</TableHead>
               <TableHead>对方</TableHead>
               <TableHead>描述</TableHead>
+              <TableHead>关联发票号</TableHead>
               <TableHead>关联单据</TableHead>
               <TableHead className="w-[60px]"></TableHead>
             </TableRow>
@@ -2580,13 +2652,13 @@ function TransactionsTab() {
           <TableBody>
             {transactionsLoading ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8">
+                <TableCell colSpan={12} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : !transactions?.length ? (
               <TableRow>
-                <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -2632,10 +2704,11 @@ function TransactionsTab() {
                   <TableCell className="text-xs text-muted-foreground max-w-[150px] truncate">
                     {r.description ?? "-"}
                   </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {r.related_invoice_no ?? "-"}
+                  </TableCell>
                   <TableCell className="text-xs">
-                    {r.reference_no
-                      ? r.reference_no
-                      : r.related_sale_ids?.length > 0
+                    {r.related_sale_ids?.length > 0
                       ? [...new Set(r.related_sale_ids)].map(id => allSalesMap[id]).filter(Boolean).join(", ")
                       : "-"}
                   </TableCell>
@@ -2699,7 +2772,7 @@ function TransactionsTab() {
                   <TableCell className="text-right font-bold">
                     {fmt(reduceSum(transactions, (r) => r.type === "income" ? r.amount : -r.amount))}
                   </TableCell>
-                  <TableCell colSpan={5} />
+                  <TableCell colSpan={6} />
                 </TableRow>
               )}
             </>

@@ -1,18 +1,17 @@
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
 
 from app.core.database import get_db
-from app.core.permissions import require_warehouse, require_admin, log_operation
-from app.models import BatchStatus, User
+from app.models import BatchStatus
 from app.schemas.batch import (
-    BatchCreate,
-    BatchUpdate,
-    BatchResponse,
-    BatchListResponse,
-    BatchInvoiceInfo,
     AddInvoiceToBatch,
+    BatchCreate,
+    BatchInvoiceInfo,
+    BatchListResponse,
+    BatchResponse,
     BatchSummary,
+    BatchUpdate,
 )
 from app.services.batch_service import BatchService
 from app.services.invoice_service import InvoiceService
@@ -23,7 +22,8 @@ router = APIRouter()
 async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
     """构建批次响应（含关联发票详情）"""
     from sqlalchemy import select
-    from app.models import BatchInvoice, ImportInvoice, Company
+
+    from app.models import BatchInvoice, Company, ImportInvoice
 
     bi_result = await db.execute(
         select(BatchInvoice, ImportInvoice)
@@ -58,8 +58,9 @@ async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
         ))
 
     # 计算已售箱数
-    from app.models import WholeFishSale
     from sqlalchemy import func as sa_func
+
+    from app.models import WholeFishSale
     sold_result = await db.execute(
         select(sa_func.coalesce(sa_func.sum(WholeFishSale.box_count), 0))
         .where(WholeFishSale.batch_id == batch.id)
@@ -88,8 +89,8 @@ async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
 
 @router.get("/", response_model=BatchListResponse)
 async def list_batches(
-    status: Optional[BatchStatus] = Query(None, description="批次状态"),
-    search: Optional[str] = Query(None, description="搜索批次名称"),
+    status: BatchStatus | None = Query(None, description="批次状态"),
+    search: str | None = Query(None, description="搜索批次名称"),
     exclude_fully_exchanged: bool = Query(False, description="排除已全部购汇的批次"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -177,8 +178,9 @@ async def lock_batch(
     
     **前置检查：** 批次下所有销售单必须已结清（状态为 fully_paid 或已锁定），否则不能锁定
     """
-    from app.models import WholeFishSale, SalesStatus
-    from sqlalchemy import select as sa_select, func
+    from sqlalchemy import select as sa_select
+
+    from app.models import SalesStatus, WholeFishSale
     
     batch = await BatchService.get_by_id(db, batch_id)
     if not batch:
@@ -206,7 +208,7 @@ async def lock_batch(
     batch.is_locked = True
     
     # 级联锁定关联的发票
-    from app.models import ImportInvoice, BatchInvoice
+    from app.models import BatchInvoice, ImportInvoice
     batch_invoice_result = await db.execute(
         sa_select(ImportInvoice)
         .join(BatchInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
@@ -233,8 +235,9 @@ async def unlock_batch(
     batch.is_locked = False
     
     # 级联解锁关联的发票
-    from app.models import ImportInvoice, BatchInvoice
     from sqlalchemy import select as sa_select
+
+    from app.models import BatchInvoice, ImportInvoice
     batch_invoice_result = await db.execute(
         sa_select(ImportInvoice)
         .join(BatchInvoice, BatchInvoice.invoice_id == ImportInvoice.id)

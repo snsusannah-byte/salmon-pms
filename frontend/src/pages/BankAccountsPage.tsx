@@ -304,7 +304,7 @@ export function BankAccountsPage() {
               <div className="space-y-1">
                 <Label className="text-xs">类型</Label>
                 <Select value={formType} onValueChange={(v) => setFormType(v ?? "public")}>
-                  <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue>{typeMap[formType] || formType}</SelectValue></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="public">公账</SelectItem>
                     <SelectItem value="private">私账</SelectItem>
@@ -342,7 +342,11 @@ export function BankAccountsPage() {
             <div className="space-y-1">
               <Label className="text-xs">关联公司</Label>
               <Select value={formCompanyId} onValueChange={(v) => setFormCompanyId(v ?? "")}>
-                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="选择公司（可选）" /></SelectTrigger>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="选择公司（可选）">
+                    {formCompanyId ? companies.find((c: any) => String(c.id) === formCompanyId)?.name || formCompanyId : "选择公司（可选）"}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {companies.map((c: any) => (
                     <SelectItem key={c.id} value={String(c.id)} className="text-xs">{c.name}</SelectItem>

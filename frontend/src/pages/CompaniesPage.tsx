@@ -30,6 +30,7 @@ const typeMap: Record<string, { label: string; icon: React.ElementType; color: s
   fish_farm: { label: "渔场", icon: Fish, color: "bg-cyan-100 text-cyan-800", role: "upstream" },
   exporter: { label: "出口商", icon: Ship, color: "bg-green-100 text-green-800", role: "upstream" },
   supplier: { label: "供应商", icon: Store, color: "bg-purple-100 text-purple-800", role: "business_partner" },
+  customer: { label: "客户", icon: User, color: "bg-pink-100 text-pink-800", role: "business_partner" },
   customs_broker: { label: "报关行", icon: HardHat, color: "bg-gray-100 text-gray-800", role: "business_partner" },
   logistics: { label: "物流", icon: Truck, color: "bg-yellow-100 text-yellow-800", role: "business_partner" },
   internal: { label: "内部", icon: Home, color: "bg-red-100 text-red-800", role: "business_partner" },
@@ -85,12 +86,11 @@ export function CompaniesPage() {
   const { isAdmin } = useAuth();
 
   const { data, isLoading } = useQuery<CompanyListResponse>({
-    queryKey: ["companies", search, type, page, "business_partner"],
+    queryKey: ["companies", search, type, page],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.append("search", search);
       if (type && type !== "all") params.append("type", type);
-      params.append("business_role", "business_partner");
       params.append("skip", String((page - 1) * PAGE_SIZE));
       params.append("limit", String(PAGE_SIZE));
       const res = await api.get(`/v1/companies/?${params.toString()}`);
@@ -229,13 +229,13 @@ export function CompaniesPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
-                <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
                   暂无数据，点击右上角新增主体
                 </TableCell>
               </TableRow>
@@ -297,7 +297,7 @@ export function CompaniesPage() {
                     </TableCell>
                     <TableCell className="text-sm">
                       {company.cooperation_date
-                        ? new Date(company.cooperation_date).toLocaleDateString("zh-CN")
+                        ? new Date(company.cooperation_date + 'T00:00:00').toLocaleDateString('zh-CN')
                         : "-"}
                     </TableCell>
                     <TableCell>¥{Number(company.credit_limit).toLocaleString()}</TableCell>

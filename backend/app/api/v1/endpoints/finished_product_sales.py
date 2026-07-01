@@ -1,6 +1,5 @@
-from decimal import Decimal
 from datetime import date, datetime
-from typing import List, Optional
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -8,26 +7,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models import (
-    SalesStatus,
-    FinishedProductSale,
-    FinishedProductAftersales,
     Company,
+    FinishedProductAftersales,
+    FinishedProductSale,
     Product,
     ProductCategory,
+    SalesStatus,
     User,
 )
 from app.schemas.finished_product_sales import (
-    FinishedProductSaleCreate,
-    FinishedProductSaleUpdate,
-    FinishedProductSaleResponse,
-    FinishedProductSaleListResponse,
-    FinishedProductSaleSummary,
+    FinishedProductAftersalesCreate,
+    FinishedProductAftersalesResponse,
+    FinishedProductAftersalesUpdate,
     FinishedProductReceiptCreate,
     FinishedProductReceiptResponse,
-    FinishedProductAftersalesCreate,
-    FinishedProductAftersalesUpdate,
-    FinishedProductAftersalesResponse,
+    FinishedProductSaleCreate,
     FinishedProductSaleItemResponse,
+    FinishedProductSaleListResponse,
+    FinishedProductSaleResponse,
+    FinishedProductSaleSummary,
+    FinishedProductSaleUpdate,
 )
 from app.services.finished_product_sale_service import FinishedProductSaleService
 
@@ -72,8 +71,8 @@ async def _build_sale_response(
     ]
 
     # 合并退货单数据到售后统计
-    from app.schemas.returns import ReturnOrderSummary
     from app.models import ReturnStatus
+    from app.schemas.returns import ReturnOrderSummary
     return_orders = []
     total_return_amount = Decimal("0")
     for ro in (sale.return_orders or []):
@@ -83,7 +82,7 @@ async def _build_sale_response(
 
     # 合并售后金额 = 旧 aftersales + 新退货单
     old_aftersales_amount = sum(a.amount for a in (sale.aftersales_records or []))
-    combined_aftersales = old_aftersales_amount + total_return_amount
+    old_aftersales_amount + total_return_amount
     combined_aftersales_count = len(sale.aftersales_records or []) + len(sale.return_orders or [])
 
     return FinishedProductSaleResponse(
@@ -126,9 +125,9 @@ async def _build_sale_response(
 
 @router.get("/", response_model=FinishedProductSaleListResponse)
 async def list_finished_product_sales(
-    customer_id: Optional[int] = Query(None, description="客户ID"),
-    product_id: Optional[int] = Query(None, description="产品ID"),
-    status: Optional[SalesStatus] = Query(None, description="收款状态"),
+    customer_id: int | None = Query(None, description="客户ID"),
+    product_id: int | None = Query(None, description="产品ID"),
+    status: SalesStatus | None = Query(None, description="收款状态"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -219,7 +218,7 @@ async def delete_finished_product_sale(
 
 
 @router.get(
-    "/{sale_id}/receipts", response_model=List[FinishedProductReceiptResponse]
+    "/{sale_id}/receipts", response_model=list[FinishedProductReceiptResponse]
 )
 async def list_finished_product_receipts(
     sale_id: int,
@@ -268,7 +267,7 @@ async def delete_finished_product_receipt(
 
 
 @router.get(
-    "/{sale_id}/aftersales", response_model=List[FinishedProductAftersalesResponse]
+    "/{sale_id}/aftersales", response_model=list[FinishedProductAftersalesResponse]
 )
 async def list_finished_product_aftersales(
     sale_id: int,
@@ -362,7 +361,7 @@ async def get_finished_product_sales_summary(
 
 @router.post("/batch-import", status_code=status.HTTP_201_CREATED)
 async def batch_import_finished_product_sales(
-    records: List[dict],
+    records: list[dict],
     db: AsyncSession = Depends(get_db),
 ):
     """批量导入成品销售记录
