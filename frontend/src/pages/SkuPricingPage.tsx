@@ -347,3 +347,5 @@ export function SkuPricingPage() {
     </div>
   );
 }
+
+export default SkuPricingPage;

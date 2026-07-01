@@ -513,3 +513,5 @@ export function SuppliersPage() {
     </div>
   );
 }
+
+export default SuppliersPage;

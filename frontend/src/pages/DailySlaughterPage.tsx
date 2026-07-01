@@ -692,3 +692,5 @@ export function DailySlaughterPage() {
     </div>
   );
 }
+
+export default DailySlaughterPage;

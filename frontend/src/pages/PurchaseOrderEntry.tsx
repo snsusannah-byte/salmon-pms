@@ -1257,3 +1257,5 @@ export function PurchaseOrderEntry() {
     </div>
   );
 }
+
+export default PurchaseOrderEntry;

@@ -128,3 +128,5 @@ export function ProductionManagementPage() {
     </div>
   );
 }
+
+export default ProductionManagementPage;

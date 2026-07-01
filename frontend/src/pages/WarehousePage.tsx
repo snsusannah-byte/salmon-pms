@@ -909,3 +909,5 @@ function EditableStock({
     </div>
   );
 }
+
+export default WarehousePage;

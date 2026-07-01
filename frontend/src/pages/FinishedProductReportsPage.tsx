@@ -470,3 +470,5 @@ export function FinishedProductReportsPage() {
     </div>
   );
 }
+
+export default FinishedProductReportsPage;

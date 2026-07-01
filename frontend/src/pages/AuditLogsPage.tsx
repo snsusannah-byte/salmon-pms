@@ -194,3 +194,5 @@ export function AuditLogsPage() {
     </div>
   );
 }
+
+export default AuditLogsPage;

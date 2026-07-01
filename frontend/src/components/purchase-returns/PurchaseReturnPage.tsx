@@ -265,3 +265,5 @@ export function PurchaseReturnPage() {
     </div>
   );
 }
+
+export default PurchaseReturnPage;

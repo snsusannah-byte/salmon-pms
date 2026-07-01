@@ -654,3 +654,5 @@ function BatchFormDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
     </Dialog>
   );
 }
+
+export default BatchesPage;

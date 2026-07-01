@@ -899,3 +899,5 @@ export function FinishedProductsPage() {
     </div>
   );
 }
+
+export default FinishedProductsPage;

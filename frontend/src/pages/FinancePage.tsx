@@ -2825,3 +2825,5 @@ function TransactionsTab() {
   );
 }
 
+
+export default FinancePage;

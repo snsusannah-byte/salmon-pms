@@ -374,3 +374,5 @@ export function CompaniesPage() {
     </div>
   );
 }
+
+export default CompaniesPage;

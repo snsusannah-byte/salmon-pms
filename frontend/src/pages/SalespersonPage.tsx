@@ -283,3 +283,5 @@ export function SalespersonPage() {
     </div>
   );
 }
+
+export default SalespersonPage;

@@ -452,3 +452,5 @@ export function CommissionPage() {
     </div>
   );
 }
+
+export default CommissionPage;

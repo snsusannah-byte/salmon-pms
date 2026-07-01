@@ -241,3 +241,5 @@ export function ProductSeriesPage() {
     </div>
   );
 }
+
+export default ProductSeriesPage;

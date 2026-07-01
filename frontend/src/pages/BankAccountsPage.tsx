@@ -386,3 +386,5 @@ export function BankAccountsPage() {
     </div>
   );
 }
+
+export default BankAccountsPage;

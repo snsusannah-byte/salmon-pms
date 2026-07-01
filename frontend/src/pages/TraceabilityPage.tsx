@@ -375,3 +375,5 @@ export function TraceabilityPage() {
     </div>
   );
 }
+
+export default TraceabilityPage;

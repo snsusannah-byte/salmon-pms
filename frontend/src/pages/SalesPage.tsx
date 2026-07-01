@@ -1946,3 +1946,5 @@ function SaleDetailDialog({ sale, onClose, onCreateReturn }: { sale: Sale; onClo
   );
 }
 
+
+export default SalesPage;

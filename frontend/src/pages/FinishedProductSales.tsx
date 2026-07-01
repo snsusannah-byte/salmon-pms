@@ -1450,3 +1450,5 @@ function FinishedSaleDetailDialog({ sale, onClose }: { sale: FinishedSale; onClo
 interface FinishedSaleWithReturns extends FinishedSale {
   return_orders?: any[];
 }
+
+export default FinishedProductSales;

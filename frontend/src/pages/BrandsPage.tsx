@@ -298,3 +298,5 @@ export function BrandsPage() {
     </div>
   );
 }
+
+export default BrandsPage;

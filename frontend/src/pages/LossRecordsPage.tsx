@@ -417,3 +417,5 @@ export function LossRecordsPage() {
     </div>
   );
 }
+
+export default LossRecordsPage;

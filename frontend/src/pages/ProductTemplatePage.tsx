@@ -696,3 +696,5 @@ export function ProductTemplatePage() {
     </div>
   );
 }
+
+export default ProductTemplatePage;

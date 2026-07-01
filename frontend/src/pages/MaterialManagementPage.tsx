@@ -537,3 +537,5 @@ export function MaterialManagementPage() {
     </div>
   );
 }
+
+export default MaterialManagementPage;

@@ -889,3 +889,5 @@ function DomesticStockList() {
     </div>
   );
 }
+
+export default WarehouseV2Page;
