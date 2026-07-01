@@ -141,6 +141,8 @@ interface InvoiceOpt {
   processing_plant_name?: string;
   gross_weight_kg?: number | string;
   total_amount_usd?: number | string;
+  importer_id?: number;
+  importer_name?: string;
 }
 
 interface BatchOpt {
@@ -411,7 +413,7 @@ function ImportFeesTab() {
 
   const brokers = companiesData?.items || [];
 
-  // Fetch bank accounts (公账类型，用于海关税费扣款银行)
+  // Fetch bank accounts
   const { data: bankAccountsData } = useQuery<{
     id: number;
     code: string;
@@ -420,6 +422,8 @@ function ImportFeesTab() {
     account_number: string;
     type: string;
     current_balance: string;
+    company_id: number | null;
+    company_name: string | null;
   }[]>({
     queryKey: ["bank-accounts"],
     queryFn: async () => {
@@ -428,7 +432,12 @@ function ImportFeesTab() {
     },
   });
 
-  const publicAccounts = (bankAccountsData || []).filter((a) => a.type === "public");
+  // 根据选中的发票的进口商筛选银行账户
+  const selectedInvoice = invoices.find((i) => String(i.id) === invoiceId);
+  const importerAccounts = (bankAccountsData || []).filter((a) => {
+    if (!selectedInvoice?.importer_id) return false;
+    return a.company_id === selectedInvoice.importer_id;
+  });
 
   // Fetch import fees list
   const { data: importFeesData, isLoading } = useQuery<{ items: ImportFeeItem[]; total: number }>({
@@ -671,12 +680,17 @@ function ImportFeesTab() {
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label>扣款银行（海关税费直接从公账扣除）</Label>
+                <Label>
+                  扣款银行
+                  {selectedInvoice?.importer_name && (
+                    <span className="text-muted-foreground font-normal">（{selectedInvoice.importer_name}）</span>
+                  )}
+                </Label>
                 <Select value={bankAccountId ? String(bankAccountId) : ""} onValueChange={(v) => setBankAccountId(v ? Number(v) : null)}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="请选择扣款银行">
                       {(() => {
-                        const selected = publicAccounts.find((a) => a.id === bankAccountId);
+                        const selected = importerAccounts.find((a) => a.id === bankAccountId);
                         if (!selected) return bankAccountId ? `未找到(ID:${bankAccountId})` : "请选择扣款银行";
                         return `${selected.bank_name} (${selected.account_number})`;
                       })()}
@@ -684,7 +698,17 @@ function ImportFeesTab() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">不指定</SelectItem>
-                    {publicAccounts.map((account) => (
+                    {importerAccounts.length === 0 && selectedInvoice?.importer_name && (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        {selectedInvoice.importer_name} 暂无关联银行账户
+                      </div>
+                    )}
+                    {importerAccounts.length === 0 && !selectedInvoice?.importer_name && (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        请先选择发票
+                      </div>
+                    )}
+                    {importerAccounts.map((account) => (
                       <SelectItem key={account.id} value={String(account.id)}>
                         {account.bank_name} ({account.account_number}) - {account.current_balance}
                       </SelectItem>

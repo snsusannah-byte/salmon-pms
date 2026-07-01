@@ -135,10 +135,10 @@ export function InvoicesPage() {
 
   // 获取进口商列表
   const { data: importersData } = useQuery({
-    queryKey: ["importers-list"],
+    queryKey: ["invoices-importers"],
     queryFn: async () => {
-      const res = await api.get("/v1/companies/?type=importer&limit=100");
-      return res.data?.items || [];
+      const res = await api.get("/v1/invoices/importers");
+      return res.data || [];
     },
   });
 

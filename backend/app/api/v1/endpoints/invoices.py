@@ -242,6 +242,31 @@ async def get_invoice_summary(
     return InvoiceSummary(**summary)
 
 
+@router.get("/importers", response_model=list[dict])
+async def list_importers(
+    db: AsyncSession = Depends(get_db),
+):
+    """获取所有进口商列表（从发票的 importer_id 关联的公司中查询，去重）"""
+    from sqlalchemy import distinct
+    from app.models import Company, ImportInvoice
+
+    # 查询所有作为 importer_id 出现的公司 ID
+    result = await db.execute(
+        select(distinct(ImportInvoice.importer_id)).where(ImportInvoice.importer_id.isnot(None))
+    )
+    importer_ids = [r[0] for r in result.all() if r[0]]
+
+    if not importer_ids:
+        return []
+
+    # 查询这些公司信息
+    result = await db.execute(
+        select(Company.id, Company.name, Company.code).where(Company.id.in_(importer_ids)).order_by(Company.name)
+    )
+
+    return [{"id": r[0], "name": r[1], "code": r[2]} for r in result.all()]
+
+
 @router.post("/", response_model=InvoiceResponse, status_code=status.HTTP_201_CREATED)
 async def create_invoice(
     data: InvoiceCreate,
