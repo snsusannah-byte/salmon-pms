@@ -54,6 +54,7 @@ class InvoiceService:
         customs_status: InvoiceStatus | None = None,
         exchange_status: str | None = None,
         processing_plant_id: int | None = None,
+        importer_id: int | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
         search: str | None = None,
@@ -79,6 +80,8 @@ class InvoiceService:
                 filters.append(ImportInvoice.exchange_status.in_(status_list))
         if processing_plant_id:
             filters.append(ImportInvoice.processing_plant_id == processing_plant_id)
+        if importer_id:
+            filters.append(ImportInvoice.importer_id == importer_id)
         if start_date:
             filters.append(ImportInvoice.invoice_date >= start_date)
         if end_date:

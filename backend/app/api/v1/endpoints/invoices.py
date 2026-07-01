@@ -27,6 +27,7 @@ async def list_invoices(
     customs_status: InvoiceStatus | None = Query(None, description="报关状态"),
     exchange_status: str | None = Query(None, description="购汇状态(支持逗号分隔多选: not_exchanged,partial,completed)"),
     processing_plant_id: int | None = Query(None, description="加工厂ID"),
+    importer_id: int | None = Query(None, description="进口商ID"),
     start_date: date | None = Query(None, description="开始日期"),
     end_date: date | None = Query(None, description="结束日期"),
     search: str | None = Query(None, description="搜索发票编号"),
@@ -41,6 +42,7 @@ async def list_invoices(
     - **customs_status**: 按报关状态筛选
     - **exchange_status**: 按购汇状态筛选
     - **processing_plant_id**: 按加工厂筛选
+    - **importer_id**: 按进口商筛选
     - **start_date/end_date**: 按日期范围筛选
     - **search**: 按发票编号搜索
     - **exclude_assigned**: 排除已关联批次的发票（用于批次创建时选择）
@@ -51,6 +53,7 @@ async def list_invoices(
         customs_status=customs_status,
         exchange_status=exchange_status,
         processing_plant_id=processing_plant_id,
+        importer_id=importer_id,
         start_date=start_date,
         end_date=end_date,
         search=search,

@@ -124,6 +124,7 @@ export function InvoicesPage() {
   const [search, setSearch] = useState("");
   const [customsStatus, setCustomsStatus] = useState<string>("all");
   const [exchangeStatus, setExchangeStatus] = useState<string>("all");
+  const [importerId, setImporterId] = useState<string>("all");
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
@@ -132,13 +133,23 @@ export function InvoicesPage() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const queryClient = useQueryClient();
 
+  // 获取进口商列表
+  const { data: importersData } = useQuery({
+    queryKey: ["importers-list"],
+    queryFn: async () => {
+      const res = await api.get("/v1/companies/?type=importer&limit=100");
+      return res.data?.items || [];
+    },
+  });
+
   const { data, isLoading } = useQuery<InvoiceListResponse>({
-    queryKey: ["invoices", search, customsStatus, exchangeStatus, page],
+    queryKey: ["invoices", search, customsStatus, exchangeStatus, importerId, page],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.append("search", search);
       if (customsStatus && customsStatus !== "all") params.append("customs_status", customsStatus);
       if (exchangeStatus && exchangeStatus !== "all") params.append("exchange_status", exchangeStatus);
+      if (importerId && importerId !== "all") params.append("importer_id", importerId);
       params.append("skip", String((page - 1) * PAGE_SIZE));
       params.append("limit", String(PAGE_SIZE));
       const res = await api.get(`/v1/invoices/?${params.toString()}`);
@@ -147,12 +158,13 @@ export function InvoicesPage() {
   });
 
   const { data: allData } = useQuery<InvoiceListResponse>({
-    queryKey: ["invoices", search, customsStatus, exchangeStatus, "all"],
+    queryKey: ["invoices", search, customsStatus, exchangeStatus, importerId, "all"],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.append("search", search);
       if (customsStatus && customsStatus !== "all") params.append("customs_status", customsStatus);
       if (exchangeStatus && exchangeStatus !== "all") params.append("exchange_status", exchangeStatus);
+      if (importerId && importerId !== "all") params.append("importer_id", importerId);
       params.append("skip", "0");
       params.append("limit", "500");
       const res = await api.get(`/v1/invoices/?${params.toString()}`);
@@ -305,6 +317,21 @@ export function InvoicesPage() {
                   <SelectItem value="all">全部购汇</SelectItem>
                   <SelectItem value="not_exchanged">未购汇</SelectItem>
                   <SelectItem value="completed">已购汇</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={importerId} onValueChange={(v) => { setImporterId(v ?? "all"); setPage(1); }}>
+                <SelectTrigger className="w-[130px]">
+                  <SelectValue>
+                    {importerId === "all" ? "全部进口商" : importersData?.find((c: any) => String(c.id) === importerId)?.name || "全部进口商"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部进口商</SelectItem>
+                  {(importersData || []).map((importer: any) => (
+                    <SelectItem key={importer.id} value={String(importer.id)}>
+                      {importer.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
