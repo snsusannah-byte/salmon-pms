@@ -48,6 +48,14 @@ backend/migrate_*.py
 backend/fix_*.py
 backend/update_*.py
 backend/revert_*.py
+backend/debug_*.py
+backend/test_*.py
+backend/refactor_*.py
+backend/scripts/*.py
+frontend/src/pages/*.py
+frontend/src/pages/*.备份*
+*.备份*
+*.bak
 
 # Database files - 生产环境使用 PostgreSQL，不提交 SQLite
 *.db
@@ -58,3 +66,6 @@ backend/revert_*.py
 # 但是保留 backups 目录
 !backups/
 *.db
+
+# Docker data volumes
+docker/data/
