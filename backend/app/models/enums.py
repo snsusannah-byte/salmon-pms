@@ -188,6 +188,7 @@ class SupplierCategory(StrEnum):
     MATERIAL_SUPPLY = "material_supply"    # 物料供应
     CUSTOMS_BROKER = "customs_broker"      # 报关行
     SERVICE_PROVIDER = "service_provider"  # 服务商
+    IMPORTER = "importer"                  # 进口商
 
 
 

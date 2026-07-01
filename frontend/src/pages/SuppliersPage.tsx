@@ -84,6 +84,7 @@ const supplierCategoryMap: Record<string, { label: string; color: string }> = {
   material_supply: { label: "物料供应", color: "bg-green-100 text-green-700" },
   customs_broker: { label: "报关行", color: "bg-purple-100 text-purple-700" },
   service_provider: { label: "服务商", color: "bg-orange-100 text-orange-700" },
+  importer: { label: "进口商", color: "bg-cyan-100 text-cyan-700" },
 };
 
 const PAGE_SIZE = 10;

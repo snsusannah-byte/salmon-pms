@@ -16,6 +16,7 @@ const SUPPLIER_CATEGORIES = [
   { value: "material_supply", label: "物料供应" },
   { value: "customs_broker", label: "报关行" },
   { value: "service_provider", label: "服务商" },
+  { value: "importer", label: "进口商" },
 ];
 
 const formSchema = z.object({

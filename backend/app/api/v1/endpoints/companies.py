@@ -75,7 +75,7 @@ async def list_companies(
     type: CompanyType | None = Query(None, description="主体类型"),
     exclude_type: list[CompanyType] = Query([], description="排除类型（可传多个，如 customer,supplier）"),
     business_role: str | None = Query(None, description="业务角色筛选：upstream(上游溯源) / business_partner(业务往来)"),
-    supplier_category: SupplierCategory | None = Query(None, description="供应商分类筛选：raw_material/material_supply/customs_broker/service_provider"),
+    supplier_category: SupplierCategory | None = Query(None, description="供应商分类筛选：raw_material/material_supply/customs_broker/service_provider/importer"),
     customer_category: CustomerCategory | None = Query(None, description="客户分类筛选：wholesaler/distributor/retailer/platform/group_buying"),
     search: str | None = Query(None, description="搜索关键词"),
     is_active: bool | None = Query(True, description="是否启用"),
@@ -88,7 +88,7 @@ async def list_companies(
     - **type**: 按类型筛选（加工厂/渔场/出口商/供应商/客户等）
     - **exclude_type**: 排除指定类型列表（如排除 customer,supplier）
     - **business_role**: 按业务角色筛选（upstream=上游溯源，business_partner=业务往来）
-    - **supplier_category**: 按供应商分类筛选（raw_material/material_supply/customs_broker/service_provider）
+    - **supplier_category**: 按供应商分类筛选（raw_material/material_supply/customs_broker/service_provider/importer）
     - **customer_category**: 按客户分类筛选（wholesaler/distributor/retailer/platform/group_buying）
     - **search**: 按名称/编码/联系人搜索
     - **is_active**: 是否只显示启用中的主体
