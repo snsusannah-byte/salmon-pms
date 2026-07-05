@@ -332,6 +332,8 @@ class ReceivableSaleItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     date: date
     sale_no: str
+    product_name: str | None = None  # 产品名称
+    batch_no: str | None = None      # 批次号
     spec: str | None = None
     quantity: int | None = None
     weight_kg: Decimal | None = None
@@ -449,6 +451,12 @@ class PayablePurchaseItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     date: date
     invoice_no: str
+    product_name: str | None = None  # 产品名称
+    spec: str | None = None          # 规格
+    batch_no: str | None = None      # 批次号
+    quantity: int | None = None      # 数量
+    weight_kg: Decimal | None = None # 重量(kg)
+    unit_price: Decimal | None = None # 单价
     amount_usd: Decimal = Decimal("0")
     exchange_rate: Decimal | None = None
     amount_cny: Decimal = Decimal("0")
@@ -460,6 +468,16 @@ class PayablePurchaseItem(BaseModel):
     exchange_date: date | None = None  # 购汇日期
     exchange_rate_actual: Decimal | None = None  # 实际购汇汇率
     amount_usd_exchanged: Decimal | None = None  # 已购汇 USD 金额
+
+
+class NettingPaymentItem(BaseModel):
+    """往来对账 - 收支明细"""
+    model_config = ConfigDict(from_attributes=True)
+    date: date
+    description: str | None = None
+    amount: Decimal = Decimal("0")
+    type: str | None = None  # "receipt" / "payment"
+    notes: str | None = None
 
 
 class PayableExchangeItem(BaseModel):
@@ -657,8 +675,8 @@ class NettingStatementItem(BaseModel):
     aftersales_details: list[ReceivableAftersalesItem] = []
     receipt_details: list[ReceivableReceiptItem] = []
     purchase_details: list[PayablePurchaseItem] = []
+    payment_details: list[NettingPaymentItem] = []  # 收支明细
     expense_details: list[PayableExpenseItem] = []
-    payment_details: list[PayablePaymentItem] = []
 
 
 class NettingStatementResponse(BaseModel):
@@ -689,6 +707,55 @@ class FinancialStatementsRequest(BaseModel):
     end_date: str | None = None
     retail_revenue: Decimal = Decimal("0")
     retail_cost: Decimal = Decimal("0")
+
+
+# ==================== 报关行应付对账单 ====================
+
+class CustomsBrokerFeeItem(BaseModel):
+    """报关行费用明细"""
+    model_config = ConfigDict(from_attributes=True)
+    date: date
+    invoice_no: str
+    gross_weight_kg: Decimal = Decimal("0")
+    clearance_fee: Decimal = Decimal("0")  # 提货费
+    freight_fee: Decimal = Decimal("0")  # 运费
+    inspection_fee: Decimal = Decimal("0")  # 目的地查验费
+    quarantine_fee: Decimal = Decimal("0")  # 冷藏费
+    other_costs: Decimal = Decimal("0")  # 报关服务费
+    grand_total: Decimal = Decimal("0")  # 清关费合计
+    payment_type: str | None = None
+
+
+class CustomsBrokerPaymentItem(BaseModel):
+    """报关行付款明细"""
+    model_config = ConfigDict(from_attributes=True)
+    date: date
+    amount: Decimal = Decimal("0")
+    reference_no: str | None = None
+    description: str | None = None
+    from_account_name: str | None = None
+
+
+class CustomsBrokerStatementItem(BaseModel):
+    """报关行应付对账单项"""
+    model_config = ConfigDict(from_attributes=True)
+    broker_id: int
+    broker_name: str
+    opening_balance: Decimal = Decimal("0")
+    current_fees: Decimal = Decimal("0")
+    current_payments: Decimal = Decimal("0")
+    closing_balance: Decimal = Decimal("0")
+    fee_details: list[CustomsBrokerFeeItem] = []
+    payment_details: list[CustomsBrokerPaymentItem] = []
+
+
+class CustomsBrokerStatementResponse(BaseModel):
+    """报关行应付对账单响应"""
+    total: int
+    items: list[CustomsBrokerStatementItem]
+    start_date: str | None = None
+    end_date: str | None = None
+    total_payable: Decimal = Decimal("0")
 
 
 # ==================== 通用分页参数 ====================

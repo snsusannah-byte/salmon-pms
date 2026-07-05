@@ -8,6 +8,7 @@ from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    Batch,
     Company,
     Product,
     PurchaseOrder,
@@ -235,6 +236,11 @@ class PurchaseOrderService:
 
             # 创建入库单（复用 warehouse_v2_service）
             warehouse_id = inbound_data.get("warehouse_id", order_item.warehouse_id or order.main_warehouse_id)
+            # 查询批次号
+            batch_no = None
+            if order_item.batch_id:
+                batch_result = await db.execute(select(Batch.batch_code).where(Batch.id == order_item.batch_id))
+                batch_no = batch_result.scalar()
             inbound = await WarehouseV2Service.create_inbound(db, {
                 "source_type": "purchase_order",
                 "source_id": order.id,
@@ -242,6 +248,7 @@ class PurchaseOrderService:
                 "warehouse_id": warehouse_id,
                 "product_id": order_item.product_id,
                 "batch_id": order_item.batch_id,
+                "batch_no": batch_no,
                 "qty": inbound_qty,
                 "unit": order_item.unit,
                 "unit_cost": order_item.unit_price,

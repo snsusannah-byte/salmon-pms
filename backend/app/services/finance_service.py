@@ -12,7 +12,10 @@ from app.models import (
     ExchangeRecord,
     ImportInvoice,
     ImportTax,
+    InvoiceProduct,
+    Product,
     SalesStatus,
+    StockInbound,
     TransactionCategory,
     TransactionRecord,
     TransactionType,
@@ -97,6 +100,84 @@ class FinanceService:
                 invoice_id=data.get("invoice_id"), 
                 batch_id=data.get("batch_id")
             )
+        
+        # 如果指定了扣款银行，自动创建交易流水（购汇金额 + 手续费各一条）
+        bank_account_id = data.get("bank_account_id")
+        if bank_account_id:
+            amount_cny = Decimal(str(data.get("amount_cny", 0)))
+            fee_cny = Decimal(str(data.get("fee_cny", 0)))
+            exchange_date = data.get("exchange_date")
+            exchange_no = data.get("exchange_no") or record.exchange_no
+            
+            # 解析关联发票：invoice_id -> related_invoice_ids -> batch_id
+            invoice_id = data.get("invoice_id")
+            related_invoice_ids = data.get("related_invoice_ids")
+            batch_id = data.get("batch_id")
+            related_invoice_no = None
+            
+            if not invoice_id and related_invoice_ids:
+                # 合并购汇：取第一张用于外键，全部拼接用于展示
+                invoice_id = related_invoice_ids[0]
+                from app.models import ImportInvoice
+                inv_result = await db.execute(
+                    select(ImportInvoice).where(ImportInvoice.id.in_(related_invoice_ids))
+                )
+                invs = list(inv_result.scalars().all())
+                related_invoice_no = ", ".join([inv.invoice_no for inv in invs]) if invs else None
+            elif not invoice_id and batch_id:
+                # 全批次购汇：取批次下第一张发票
+                from app.models import BatchInvoice, ImportInvoice
+                bi_result = await db.execute(
+                    select(BatchInvoice.invoice_id)
+                    .where(BatchInvoice.batch_id == batch_id)
+                    .order_by(BatchInvoice.id.asc())
+                    .limit(1)
+                )
+                row = bi_result.first()
+                if row:
+                    invoice_id = row[0]
+                    inv_result = await db.execute(
+                        select(ImportInvoice.invoice_no).where(ImportInvoice.id == invoice_id)
+                    )
+                    related_invoice_no = inv_result.scalar()
+            
+            # 购汇金额支出
+            if amount_cny > 0:
+                tx_exchange = TransactionRecord(
+                    transaction_date=exchange_date,
+                    type="expense",
+                    category="exchange",
+                    amount=amount_cny,
+                    currency="CNY",
+                    from_account_id=bank_account_id,
+                    description="购汇",
+                    related_invoice_id=invoice_id,
+                    related_invoice_no=related_invoice_no,
+                    related_exchange_id=record.id,
+                    reference_no=exchange_no,
+                    is_confirmed=True,
+                )
+                db.add(tx_exchange)
+            
+            # 手续费支出
+            if fee_cny > 0:
+                tx_fee = TransactionRecord(
+                    transaction_date=exchange_date,
+                    type="expense",
+                    category="exchange_fee",
+                    amount=fee_cny,
+                    currency="CNY",
+                    from_account_id=bank_account_id,
+                    description="购汇手续费",
+                    related_invoice_id=invoice_id,
+                    related_invoice_no=related_invoice_no,
+                    related_exchange_id=record.id,
+                    reference_no=exchange_no,
+                    is_confirmed=True,
+                )
+                db.add(tx_fee)
+            
+            await db.commit()
         
         return record
 
@@ -243,6 +324,93 @@ class FinanceService:
                 setattr(record, field, value)
         await db.commit()
         await db.refresh(record)
+        
+        # 同步更新关联的交易流水：先删除旧的，再根据当前数据重建
+        exchange_id = record.id
+        tx_result = await db.execute(
+            select(TransactionRecord).where(TransactionRecord.related_exchange_id == exchange_id)
+        )
+        for tx in tx_result.scalars().all():
+            await db.delete(tx)
+        
+        # 使用更新后的数据重新创建交易流水
+        bank_account_id = record.bank_account_id
+        if bank_account_id:
+            amount_cny = Decimal(str(record.amount_cny or 0))
+            fee_cny = Decimal(str(record.fee_cny or 0))
+            exchange_date = record.exchange_date
+            exchange_no = record.exchange_no
+            
+            # 解析关联发票：invoice_id -> related_invoice_ids -> batch_id
+            invoice_id = record.invoice_id
+            related_invoice_ids = record.related_invoice_ids
+            batch_id = record.batch_id
+            related_invoice_no = None
+            
+            if not invoice_id and related_invoice_ids:
+                # 合并购汇：取第一张用于外键，全部拼接用于展示
+                invoice_id = related_invoice_ids[0]
+                from app.models import ImportInvoice
+                inv_result = await db.execute(
+                    select(ImportInvoice).where(ImportInvoice.id.in_(related_invoice_ids))
+                )
+                invs = list(inv_result.scalars().all())
+                related_invoice_no = ", ".join([inv.invoice_no for inv in invs]) if invs else None
+            elif not invoice_id and batch_id:
+                # 全批次购汇：取批次下第一张发票
+                from app.models import BatchInvoice, ImportInvoice
+                bi_result = await db.execute(
+                    select(BatchInvoice.invoice_id)
+                    .where(BatchInvoice.batch_id == batch_id)
+                    .order_by(BatchInvoice.id.asc())
+                    .limit(1)
+                )
+                row = bi_result.first()
+                if row:
+                    invoice_id = row[0]
+                    inv_result = await db.execute(
+                        select(ImportInvoice.invoice_no).where(ImportInvoice.id == invoice_id)
+                    )
+                    related_invoice_no = inv_result.scalar()
+            
+            # 购汇金额支出
+            if amount_cny > 0:
+                tx_exchange = TransactionRecord(
+                    transaction_date=exchange_date,
+                    type="expense",
+                    category="exchange",
+                    amount=amount_cny,
+                    currency="CNY",
+                    from_account_id=bank_account_id,
+                    description="购汇",
+                    related_invoice_id=invoice_id,
+                    related_invoice_no=related_invoice_no,
+                    related_exchange_id=record.id,
+                    reference_no=exchange_no,
+                    is_confirmed=True,
+                )
+                db.add(tx_exchange)
+            
+            # 手续费支出
+            if fee_cny > 0:
+                tx_fee = TransactionRecord(
+                    transaction_date=exchange_date,
+                    type="expense",
+                    category="exchange_fee",
+                    amount=fee_cny,
+                    currency="CNY",
+                    from_account_id=bank_account_id,
+                    description="购汇手续费",
+                    related_invoice_id=invoice_id,
+                    related_invoice_no=related_invoice_no,
+                    related_exchange_id=record.id,
+                    reference_no=exchange_no,
+                    is_confirmed=True,
+                )
+                db.add(tx_fee)
+            
+            await db.commit()
+        
         return record
 
     @staticmethod
@@ -250,6 +418,15 @@ class FinanceService:
         related_invoice_ids = record.related_invoice_ids
         invoice_id = record.invoice_id
         batch_id = record.batch_id
+        exchange_id = record.id
+        
+        # 先删除关联的交易流水
+        tx_result = await db.execute(
+            select(TransactionRecord).where(TransactionRecord.related_exchange_id == exchange_id)
+        )
+        for tx in tx_result.scalars().all():
+            await db.delete(tx)
+        
         await db.delete(record)
         await db.commit()
         
@@ -355,6 +532,7 @@ class FinanceService:
         SELECT
             i.id AS invoice_id,
             i.invoice_no,
+            i.importer_id,
             c.gross_weight_kg,
             COALESCE(t.tax_date, c.cost_date) AS expense_date,
             c.customs_broker_id,
@@ -410,6 +588,7 @@ class FinanceService:
             items.append({
                 "invoice_id": row["invoice_id"],
                 "invoice_no": row["invoice_no"],
+                "importer_id": row["importer_id"],
                 "gross_weight_kg": row["gross_weight_kg"],
                 "expense_date": row["expense_date"],
                 "customs_broker_id": row["customs_broker_id"],
@@ -532,13 +711,94 @@ class FinanceService:
                     invoice_ids_to_update.append(row[0])
         
         # 批量更新所有关联发票为"已报关"
+        status_changed_invoices = []
         for inv_id in set(invoice_ids_to_update):
             inv_result = await db.execute(select(ImportInvoice).where(ImportInvoice.id == inv_id))
             inv = inv_result.scalar_one_or_none()
             if inv and inv.customs_status == InvoiceStatus.PENDING_CUSTOMS:
                 inv.customs_status = InvoiceStatus.CUSTOMS_PROCESSING
+                status_changed_invoices.append(inv)
         
-        # 4. 如果有指定扣款银行，自动创建交易流水（进口关税 + 进口增值税各一条）
+        # 4. 为状态变为"已报关"的发票创建入库记录（按产品类型自动选择仓库，绑定批次）
+        if status_changed_invoices:
+            from app.services.warehouse_v2_service import WarehouseV2Service
+            from app.models.batch import BatchInvoice
+            
+            for inv in status_changed_invoices:
+                # 获取发票产品明细
+                products_result = await db.execute(
+                    select(InvoiceProduct).where(InvoiceProduct.invoice_id == inv.id)
+                )
+                products = products_result.scalars().all()
+                
+                # 查找该发票关联的批次
+                batch_result = await db.execute(
+                    select(BatchInvoice).where(BatchInvoice.invoice_id == inv.id)
+                )
+                batch_invoice = batch_result.scalar_one_or_none()
+                batch_id = batch_invoice.batch_id if batch_invoice else None
+                
+                # 查询批次号
+                batch_no = None
+                if batch_id:
+                    from app.models.batch import Batch
+                    batch_info = await db.execute(select(Batch).where(Batch.id == batch_id))
+                    batch = batch_info.scalar_one_or_none()
+                    if batch:
+                        batch_no = batch.batch_name  # 使用批次名称（如 8863&8862）
+                
+                for product in products:
+                    # 查找对应的产品ID（如果不存在则跳过）
+                    product_result = await db.execute(
+                        select(Product.id, Product.category, Product.name).where(Product.name == product.product_name).limit(1)
+                    )
+                    product_row = product_result.one_or_none()
+                    
+                    if not product_row or product.box_count <= 0:
+                        continue
+                    
+                    product_id = product_row.id
+                    product_category = product_row.category
+                    product_name = product_row.name
+                    
+                    # 根据产品类型自动选择仓库
+                    warehouse = await WarehouseV2Service.get_default_warehouse_for_product(
+                        db, product_id, scope="import"
+                    )
+                    if not warehouse:
+                        # 兜底：如果没有匹配的仓库，跳过
+                        continue
+                    
+                    warehouse_id = warehouse.id
+                    
+                    await WarehouseV2Service.create_inbound(db, {
+                        "source_type": "import_clearance",
+                        "source_id": inv.id,
+                        "source_no": inv.invoice_no,
+                        "warehouse_id": warehouse_id,
+                        "product_id": product_id,
+                        "batch_id": batch_id,  # 绑定批次
+                        "batch_no": batch_no or inv.invoice_no,  # 使用批次名称或发票号
+                        "qty": float(product.net_weight_kg),
+                        "unit": "kg",
+                        "unit_cost": float(inv.unit_price_usd or 0),
+                        "original_box_count": product.box_count,
+                        "inbound_date": inv.invoice_date,
+                        "notes": f"规格：{product.product_spec}",
+                    })
+                    
+                    # 自动确认入库
+                    inbound_result = await db.execute(
+                        select(StockInbound).where(
+                            StockInbound.source_type == "import_clearance",
+                            StockInbound.source_id == inv.id
+                        ).order_by(StockInbound.id.desc()).limit(1)
+                    )
+                    latest_inbound = inbound_result.scalar_one_or_none()
+                    if latest_inbound:
+                        await WarehouseV2Service.confirm_inbound(db, latest_inbound)
+        
+        # 5. 如果有指定扣款银行，自动创建交易流水（进口关税 + 进口增值税各一条）
         bank_account_id = data.get("bank_account_id")
         if bank_account_id:
             import_duty = Decimal(str(data.get("import_duty", 0)))
@@ -654,14 +914,17 @@ class FinanceService:
         if remaining_usd < 0:
             remaining_usd = Decimal("0")
         
-        # 获取每张发票明细及各自购汇情况
+        # 获取每张发票明细及各自购汇情况，同时获取批次进口商（取第一张发票的进口商）
         invoice_result = await db.execute(
-            select(ImportInvoice.id, ImportInvoice.invoice_no, ImportInvoice.total_amount_usd)
+            select(ImportInvoice.id, ImportInvoice.invoice_no, ImportInvoice.total_amount_usd, ImportInvoice.importer_id)
             .join(BatchInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
             .where(BatchInvoice.batch_id == batch_id)
         )
         invoices = []
+        batch_importer_id = None
         for r in invoice_result.all():
+            if batch_importer_id is None:
+                batch_importer_id = r.importer_id
             # 查该发票已购汇金额
             inv_ex_result = await db.execute(
                 select(func.sum(ExchangeRecord.amount_usd))
@@ -687,6 +950,7 @@ class FinanceService:
             "exchanged_usd": exchanged_usd,
             "remaining_usd": remaining_usd,
             "invoice_count": row["invoice_count"] or 0,
+            "importer_id": batch_importer_id,
             "invoices": invoices,
         }
 
@@ -699,6 +963,7 @@ class FinanceService:
         category: str | None = None,
         related_sale_id: int | None = None,
         sale_no: str | None = None,
+        invoice_no: str | None = None,
         is_locked: bool | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
@@ -738,6 +1003,9 @@ class FinanceService:
             else:
                 # 没有匹配的销售单，返回空结果
                 filters.append(TransactionRecord.id == -1)
+        if invoice_no:
+            # 模糊匹配关联发票号
+            filters.append(TransactionRecord.related_invoice_no.ilike(f"%{invoice_no}%"))
         if is_locked is not None:
             filters.append(TransactionRecord.is_locked == is_locked)
         if start_date:
@@ -838,16 +1106,21 @@ class FinanceService:
                     unique_ids.append(sale_id)
             data["related_sale_ids"] = unique_ids
         
-        # 处理关联发票号（related_invoice_no → related_invoice_id）
+        # 处理关联发票号（related_invoice_no → related_invoice_id + 保留原始字符串）
         related_invoice_no = data.pop("related_invoice_no", None)
         if related_invoice_no:
             from app.models import ImportInvoice
-            inv_result = await db.execute(
-                select(ImportInvoice).where(ImportInvoice.invoice_no == str(related_invoice_no))
-            )
-            inv = inv_result.scalar_one_or_none()
-            if inv:
-                data["related_invoice_id"] = inv.id
+            # 保留原始字符串（支持多个逗号分隔）
+            data["related_invoice_no"] = str(related_invoice_no).strip()
+            # 尝试解析第一个发票号用于外键关联
+            first_no = str(related_invoice_no).split(",")[0].strip()
+            if first_no:
+                inv_result = await db.execute(
+                    select(ImportInvoice).where(ImportInvoice.invoice_no == first_no)
+                )
+                inv = inv_result.scalar_one_or_none()
+                if inv:
+                    data["related_invoice_id"] = inv.id
         
         # 如果关联了销售单，检查是否全部已收款
         if related_sale_ids:
@@ -959,9 +1232,31 @@ class FinanceService:
 
     @staticmethod
     async def update_transaction(db: AsyncSession, record: TransactionRecord, data: dict) -> TransactionRecord:
+        from datetime import date
+
+        # 日期字符串转 date 对象
+        if isinstance(data.get("transaction_date"), str):
+            data["transaction_date"] = date.fromisoformat(data["transaction_date"])
+
         related_sale_ids = data.pop("related_sale_ids", None)
         if related_sale_ids is not None:
             record.related_sale_ids = related_sale_ids if related_sale_ids else None
+        
+        # 处理关联发票号更新
+        related_invoice_no = data.pop("related_invoice_no", None)
+        if related_invoice_no is not None:
+            record.related_invoice_no = str(related_invoice_no).strip() if str(related_invoice_no).strip() else None
+            # 尝试解析第一个发票号用于外键关联
+            first_no = str(related_invoice_no).split(",")[0].strip()
+            if first_no:
+                from app.models import ImportInvoice
+                inv_result = await db.execute(
+                    select(ImportInvoice).where(ImportInvoice.invoice_no == first_no)
+                )
+                inv = inv_result.scalar_one_or_none()
+                record.related_invoice_id = inv.id if inv else None
+            else:
+                record.related_invoice_id = None
         
         for field, value in data.items():
             if value is not None:
@@ -972,8 +1267,6 @@ class FinanceService:
         # 如果交易金额变更，同步更新关联的销售收款并重新计算销售单状态
         if "amount" in data and record.id:
             from decimal import Decimal
-
-            from sqlalchemy import select
 
             from app.models import SalesReceipt, WholeFishSale
             from app.services.sales_service import SalesService

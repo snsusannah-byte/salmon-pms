@@ -191,7 +191,7 @@ export function CustomersPage() {
   const { data: salespersonsData } = useQuery({
     queryKey: ["salespersons-dropdown"],
     queryFn: async () => {
-      const res = await api.get("/v1/salespersons?limit=500");
+      const res = await api.get("/v1/salespersons/?limit=500");
       return res.data?.items || [];
     },
   });
@@ -201,18 +201,45 @@ export function CustomersPage() {
   const { data: receivablesData } = useQuery({
     queryKey: ["customer-receivables"],
     queryFn: async () => {
-      const res = await api.get("/v1/sales/whole-fish?limit=500");
-      const sales = res.data?.items || [];
+      // 1. 进口销售（整鱼销售）
+      const wfRes = await api.get("/v1/sales/whole-fish?limit=500");
+      const wfSales = wfRes.data?.items || [];
+
+      // 2. 以销定采 V2 销售单
+      const fpRes = await api.get("/v4/finished-product-sales?limit=500");
+      const fpSales = fpRes.data?.data || [];
 
       const map: Record<number, number> = {};
-      for (const s of sales) {
+
+      // 累加进口销售未付款
+      for (const s of wfSales) {
         const net = Number(s.net_amount || 0);
         const paid = Number(s.paid_amount || 0);
         const unpaid = Math.max(0, net - paid);
-        if (unpaid > 0) {
+        if (unpaid > 0 && s.customer_id) {
           map[s.customer_id] = (map[s.customer_id] || 0) + unpaid;
         }
       }
+
+      // 累加以销定采 V2 未付款（按客户名称匹配到公司ID）
+      // 先建立客户名称 -> 公司ID 的映射
+      const nameToId: Record<string, number> = {};
+      for (const c of (customers || [])) {
+        nameToId[c.name] = c.id;
+      }
+
+      for (const s of fpSales) {
+        const net = Number(s.net_amount || 0);
+        const paid = Number(s.paid_amount || 0);
+        const unpaid = Math.max(0, net - paid);
+        if (unpaid > 0 && s.customer) {
+          const cid = nameToId[s.customer];
+          if (cid) {
+            map[cid] = (map[cid] || 0) + unpaid;
+          }
+        }
+      }
+
       return map;
     },
     enabled: !!customers?.length,

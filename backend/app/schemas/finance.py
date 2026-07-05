@@ -132,7 +132,9 @@ class TransactionRecordBase(BaseModel):
     reference_no: str | None = Field(None, max_length=100, description="参考号")
     description: str | None = Field(None, description="描述")
     related_invoice_id: int | None = Field(None, description="关联发票ID")
+    related_invoice_no: str | None = Field(None, max_length=500, description="关联发票号（支持多个用逗号分隔，如8405,8407,8412）")
     related_batch_id: int | None = Field(None, description="关联批次ID")
+    related_exchange_id: int | None = Field(None, description="关联购汇记录ID")
     is_confirmed: bool = Field(True, description="是否已确认")
     notes: str | None = Field(None, description="备注")
 
@@ -157,6 +159,7 @@ class TransactionRecordUpdate(BaseModel):
     description: str | None = None
     related_invoice_id: int | None = None
     related_batch_id: int | None = None
+    related_exchange_id: int | None = None
     related_invoice_no: str | None = Field(None, description="关联发票号（填写发票号如8353，后端自动查找对应ID）")
     related_sale_ids: list[int] | None = None
     is_confirmed: bool | None = None

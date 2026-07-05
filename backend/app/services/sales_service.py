@@ -170,8 +170,135 @@ class SalesService:
         # 自动生成提成记录
         await SalesService._sync_commission_record(db, sale)
         
+        # 5. 自动创建出库单（从进口整包仓扣减库存）- 在 commit 之前完成
+        if sale.box_count and sale.box_count > 0:
+            try:
+                from app.services.warehouse_v2_service import WarehouseV2Service
+                from app.models import Batch, BatchInvoice, ImportInvoice, InvoiceProduct, Product, Stock, StockMovement, StockMovementType, StockStatus
+                from sqlalchemy import func
+                
+                warehouse_id = 1  # ZB-IMPORT 进口整包仓
+                
+                # 获取批次关联的发票及产品
+                batch_result = await db.execute(
+                    select(Batch).where(Batch.id == sale.batch_id)
+                )
+                batch = batch_result.scalar_one_or_none()
+                
+                if batch:
+                    # 查找批次下的发票（通过 BatchInvoice 关联表）
+                    invoice_result = await db.execute(
+                        select(ImportInvoice)
+                        .join(BatchInvoice, ImportInvoice.id == BatchInvoice.invoice_id)
+                        .where(BatchInvoice.batch_id == batch.id)
+                        .limit(1)
+                    )
+                    invoice = invoice_result.scalar_one_or_none()
+                    
+                    if invoice:
+                        # 查找发票产品明细
+                        product_result = await db.execute(
+                            select(InvoiceProduct).where(
+                                InvoiceProduct.invoice_id == invoice.id
+                            ).limit(1)
+                        )
+                        inv_product = product_result.scalar_one_or_none()
+                        
+                        if inv_product:
+                            # 查找对应的产品ID
+                            db_product_result = await db.execute(
+                                select(Product.id).where(
+                                    Product.name == inv_product.product_name
+                                ).limit(1)
+                            )
+                            product_id = db_product_result.scalar()
+                            
+                            if product_id:
+                                # 创建出库单（不调用会commit的service方法，直接操作）
+                                today = sale.sale_date or date.today()
+                                prefix = f"CK{today.strftime('%Y%m%d')}"
+                                result = await db.execute(
+                                    select(func.count()).select_from(
+                                        select(StockOutbound).where(StockOutbound.outbound_no.like(f"{prefix}-%")).subquery()
+                                    )
+                                )
+                                count = result.scalar() or 0
+                                outbound_no = f"{prefix}-{count + 1:03d}"
+                                
+                                outbound = StockOutbound(
+                                    outbound_no=outbound_no,
+                                    dest_type="sale",
+                                    dest_id=sale.id,
+                                    dest_no=sale.sale_no,
+                                    warehouse_id=warehouse_id,
+                                    product_id=product_id,
+                                    batch_id=sale.batch_id,
+                                    qty=Decimal(str(sale.weight_kg)),
+                                    unit="kg",
+                                    box_count=sale.box_count or 0,
+                                    outbound_date=sale.sale_date,
+                                    status=StockStatus.PENDING,
+                                    notes=f"规格：{sale.spec}",
+                                )
+                                db.add(outbound)
+                                await db.flush()  # 获取 outbound.id
+                                
+                                # 确认出库（直接操作，不调用会commit的service方法）
+                                stock = await WarehouseV2Service.get_or_create_stock(
+                                    db, warehouse_id, product_id, sale.batch_id, "kg"
+                                )
+                                
+                                if stock.available_box_count >= outbound.box_count:
+                                    qty_before = stock.current_qty
+                                    box_count_before = stock.current_box_count
+                                    
+                                    stock.current_qty = (stock.current_qty - outbound.qty).quantize(Decimal("0.001"))
+                                    stock.available_qty = (stock.current_qty - stock.reserved_qty).quantize(Decimal("0.001"))
+                                    stock.last_out_date = outbound.outbound_date
+                                    stock.current_box_count = stock.current_box_count - outbound.box_count
+                                    stock.available_box_count = stock.current_box_count
+                                    
+                                    outbound.unit_cost = stock.unit_cost
+                                    outbound.total_cost = (outbound.qty * (stock.unit_cost or Decimal("0"))).quantize(Decimal("0.01"))
+                                    if stock.current_qty > 0:
+                                        stock.total_cost = (stock.current_qty * (stock.unit_cost or Decimal("0"))).quantize(Decimal("0.01"))
+                                    else:
+                                        stock.unit_cost = None
+                                        stock.total_cost = Decimal("0")
+                                    
+                                    outbound.status = StockStatus.COMPLETED
+                                    outbound.confirmed_at = func.now()
+                                    
+                                    movement = StockMovement(
+                                        warehouse_id=outbound.warehouse_id,
+                                        product_id=outbound.product_id,
+                                        batch_id=outbound.batch_id,
+                                        batch_no=None,
+                                        movement_type=StockMovementType.OUTBOUND,
+                                        movement_date=outbound.outbound_date,
+                                        qty_change=-outbound.qty,
+                                        qty_before=qty_before,
+                                        qty_after=stock.current_qty,
+                                        unit=outbound.unit,
+                                        unit_cost=outbound.unit_cost,
+                                        total_cost=outbound.total_cost,
+                                        ref_type="StockOutbound",
+                                        ref_id=outbound.id,
+                                        ref_no=outbound.outbound_no,
+                                        box_count_change=-outbound.box_count,
+                                        box_count_before=box_count_before,
+                                        box_count_after=stock.current_box_count,
+                                    )
+                                    db.add(movement)
+            except Exception as e:
+                # 自动出库失败不阻塞销售单创建，记录日志
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"销售单 {sale.sale_no} 自动出库失败: {e}")
+        
         await db.commit()
         await db.refresh(sale)
+        
         return sale
 
     @staticmethod
@@ -430,6 +557,20 @@ class SalesService:
             if user_notes:
                 desc = f"{desc} - {user_notes}"
             
+            # 查询关联发票号（通过 batch → batch_invoices → import_invoices）
+            related_invoice_no = None
+            if sale.batch_id:
+                from app.models import BatchInvoice, ImportInvoice
+                batch_inv_result = await db.execute(
+                    select(ImportInvoice.invoice_no)
+                    .join(BatchInvoice, ImportInvoice.id == BatchInvoice.invoice_id)
+                    .where(BatchInvoice.batch_id == sale.batch_id)
+                    .order_by(BatchInvoice.id)
+                )
+                invoice_nos = [row[0] for row in batch_inv_result.all() if row[0]]
+                if invoice_nos:
+                    related_invoice_no = ", ".join(invoice_nos)
+            
             transaction = TransactionRecord(
                 transaction_date=data.get("receipt_date"),
                 type=TransactionType.INCOME,
@@ -442,6 +583,7 @@ class SalesService:
                 reference_no=data.get("reference_no") or sale.sale_no or f"#{sale.id}",
                 description=desc,
                 notes=user_notes,
+                related_invoice_no=related_invoice_no,
                 is_confirmed=True,
             )
             # 设置关联销售单（JSON 数组）

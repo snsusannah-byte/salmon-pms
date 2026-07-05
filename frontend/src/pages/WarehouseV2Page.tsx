@@ -40,9 +40,12 @@ interface Stock {
   product_category: string;
   batch_id?: number;
   batch_no?: string;
+  batch_nos?: string[];
   current_qty: number;
+  current_box_count?: number;
   reserved_qty: number;
   available_qty: number;
+  available_box_count?: number;
   unit_cost?: number;
   total_cost?: number;
   unit: string;
@@ -72,6 +75,9 @@ interface StockMovement {
   qty_change: number;
   qty_before: number;
   qty_after: number;
+  box_count_change?: number;
+  box_count_before?: number;
+  box_count_after?: number;
   unit: string;
   ref_type: string;
   ref_no?: string;
@@ -91,6 +97,13 @@ const fetchStocks = async (params: Record<string, any>) => {
 const fetchStockSummary = async () => {
   const { data } = await api.get("/v1/warehouse-v2/stocks/summary");
   return data.items as StockSummary[];
+};
+
+const fetchBatchSpecs = async (batch_no: string, warehouse_id: number, product_id: number) => {
+  const { data } = await api.get(`/v1/warehouse-v2/batch-specs`, {
+    params: { batch_no, warehouse_id, product_id },
+  });
+  return data;
 };
 
 const fetchMovements = async (params: Record<string, any>) => {
@@ -188,13 +201,17 @@ function StockList({
     product_id: number;
     product_name: string;
     product_category: string;
+    warehouse_id: number;
+    warehouse_name: string;
+    batch_no: string;
   } | null>(null);
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
   const [movementStock, setMovementStock] = useState<{
-    warehouse_id: number;
+    warehouse_id: number | undefined;
     warehouse_name: string;
     product_id: number;
     product_name: string;
+    batch_no: string | undefined;
   } | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -204,58 +221,34 @@ function StockList({
 
   const items: Stock[] = data?.items || [];
 
-  // 按产品汇总（确保所有数值为 Number 类型，防止字符串拼接）
-  const groupedByProduct = useMemo(() => {
-    const map = new Map<number, { product_id: number; product_name: string; product_category: string; unit: string; total_current: number; total_available: number; total_cost: number; avg_unit_cost: number; details: Stock[]; is_below_warning: boolean; warehouse_names: string[]; lead_time?: number }>();
-    items.forEach((s) => {
-      const qty = Number(s.current_qty) || 0;
-      const avail = Number(s.available_qty) || 0;
-      const cost = Number(s.total_cost) || 0;
-      const uCost = Number(s.unit_cost) || 0;
-      const existing = map.get(s.product_id);
-      if (existing) {
-        existing.total_current += qty;
-        existing.total_available += avail;
-        existing.total_cost += cost;
-        existing.details.push(s);
-        if (!existing.warehouse_names.includes(s.warehouse_name)) {
-          existing.warehouse_names.push(s.warehouse_name);
-        }
-        if (s.is_below_warning) existing.is_below_warning = true;
-        // 如果有更新的 lead_time，更新它
-        if (s.lead_time !== undefined && s.lead_time !== null) {
-          existing.lead_time = s.lead_time;
-        }
-      } else {
-        map.set(s.product_id, {
-          product_id: s.product_id,
-          product_name: s.product_name,
-          product_category: s.product_category,
-          unit: s.unit,
-          total_current: qty,
-          total_available: avail,
-          total_cost: cost,
-          avg_unit_cost: uCost,
-          details: [s],
-          is_below_warning: s.is_below_warning,
-          warehouse_names: [s.warehouse_name],
-          lead_time: s.lead_time,
-        });
-      }
-    });
-    // 重新计算平均成本
-    map.forEach((g) => {
-      if (g.total_current > 0) {
-        g.avg_unit_cost = g.total_cost / g.total_current;
-      }
-    });
-    return Array.from(map.values());
+  // 按产品+仓库+批次展开（一个批次一行）
+  const groupedByProductWarehouseBatch = useMemo(() => {
+    // 直接返回 items，每个 stock 记录一行（按 batch_no 区分）
+    return items.map((s) => ({
+      product_id: s.product_id,
+      product_name: s.product_name,
+      product_category: s.product_category,
+      unit: s.unit,
+      total_current: Number(s.current_qty) || 0,
+      total_available: Number(s.available_qty) || 0,
+      total_box_count: Number(s.current_box_count) || 0,
+      total_cost: Number(s.total_cost) || 0,
+      avg_unit_cost: Number(s.unit_cost) || 0,
+      details: [s],
+      is_below_warning: s.is_below_warning,
+      warehouse_id: s.warehouse_id,
+      warehouse_name: s.warehouse_name,
+      batch_no: s.batch_no || "(无批次)",
+      batch_nos: s.batch_nos || [],
+      lead_time: s.lead_time,
+    }));
   }, [items]);
 
-  const filtered = groupedByProduct.filter((g) => {
+  const filtered = groupedByProductWarehouseBatch.filter((g) => {
     const matchSearch = g.product_name?.toLowerCase().includes(search.toLowerCase()) ||
-      g.product_category?.toLowerCase().includes(search.toLowerCase());
-    const matchWarehouse = !selectedWarehouse || g.warehouse_names.includes(selectedWarehouse);
+      g.product_category?.toLowerCase().includes(search.toLowerCase()) ||
+      g.batch_no?.toLowerCase().includes(search.toLowerCase());
+    const matchWarehouse = !selectedWarehouse || g.warehouse_name === selectedWarehouse;
     return matchSearch && matchWarehouse;
   });
 
@@ -287,7 +280,7 @@ function StockList({
             })()}
           </SelectContent>
         </Select>
-        <span className="text-sm text-gray-500">共 {filtered.length} 种产品</span>
+        <span className="text-sm text-gray-500">共 {filtered.length} 条记录</span>
       </div>
 
       {/* 上部：产品汇总列表 */}
@@ -299,7 +292,9 @@ function StockList({
                 <TableHead className="sticky top-0 bg-background z-10">产品名称</TableHead>
                 <TableHead className="sticky top-0 bg-background z-10">分类</TableHead>
                 <TableHead className="sticky top-0 bg-background z-10">仓库</TableHead>
-                <TableHead className="sticky top-0 bg-background z-10 text-right">总库存数量</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10">批次</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10 text-right">箱数</TableHead>
+                <TableHead className="sticky top-0 bg-background z-10 text-right">库存数量</TableHead>
                 <TableHead className="sticky top-0 bg-background z-10 text-right">可用数量</TableHead>
                 <TableHead className="sticky top-0 bg-background z-10 text-right">平均成本</TableHead>
                 <TableHead className="sticky top-0 bg-background z-10 text-right">总成本</TableHead>
@@ -311,25 +306,32 @@ function StockList({
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8">加载中...</TableCell>
+                  <TableCell colSpan={12} className="text-center py-8">加载中...</TableCell>
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center py-8 text-gray-500">暂无库存记录</TableCell>
+                  <TableCell colSpan={12} className="text-center py-8 text-gray-500">暂无库存记录</TableCell>
                 </TableRow>
               ) : (
                 filtered.map((g) => (
                   <TableRow
-                    key={g.product_id}
+                    key={`${g.product_id}-${g.warehouse_name}-${g.batch_no}`}
                     className={cn(
                       "cursor-pointer transition-colors",
-                      selectedProduct?.product_id === g.product_id && "bg-primary/10 hover:bg-primary/15"
+                      selectedProduct?.product_id === g.product_id &&
+                      selectedProduct?.warehouse_name === g.warehouse_name &&
+                      selectedProduct?.batch_no === g.batch_no && "bg-primary/10 hover:bg-primary/15"
                     )}
                     onClick={() => setSelectedProduct(
-                      selectedProduct?.product_id === g.product_id ? null : {
+                      selectedProduct?.product_id === g.product_id &&
+                      selectedProduct?.warehouse_name === g.warehouse_name &&
+                      selectedProduct?.batch_no === g.batch_no ? null : {
                         product_id: g.product_id,
                         product_name: g.product_name,
                         product_category: g.product_category,
+                        warehouse_id: g.warehouse_id,
+                        warehouse_name: g.warehouse_name,
+                        batch_no: g.batch_no,
                       }
                     )}
                   >
@@ -338,11 +340,15 @@ function StockList({
                       <Badge variant="outline">{getProductCategoryLabel(g.product_category)}</Badge>
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {g.warehouse_names.map((name) => (
-                          <Badge key={name} variant="secondary" className="text-xs">{name}</Badge>
-                        ))}
-                      </div>
+                      <Badge variant="secondary" className="text-xs">{g.warehouse_name}</Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{g.batch_no}</TableCell>
+                    <TableCell className="text-right">
+                      {g.total_box_count > 0 ? (
+                        <span>{fmt(g.total_box_count)} 箱</span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <span className={g.is_below_warning ? "text-red-600 font-semibold" : ""}>
@@ -372,7 +378,7 @@ function StockList({
                       )}
                     </TableCell>
                     <TableCell className="text-center">
-                      <Button variant="ghost" size="sm" className="h-6 px-2 text-blue-600" onClick={(e) => { e.stopPropagation(); setMovementStock({ warehouse_id: undefined, warehouse_name: '全部仓库', product_id: g.product_id, product_name: g.product_name }); setMovementDialogOpen(true); }}>
+                      <Button variant="ghost" size="sm" className="h-6 px-2 text-blue-600" onClick={(e) => { e.stopPropagation(); setMovementStock({ warehouse_id: undefined, warehouse_name: '全部仓库', product_id: g.product_id, product_name: g.product_name, batch_no: g.batch_no }); setMovementDialogOpen(true); }}>
                         查看
                       </Button>
                     </TableCell>
@@ -384,94 +390,26 @@ function StockList({
         </div>
       </div>
 
-      {/* 下部：选中产品的库存明细 */}
+      {/* 下部：选中批次的规格明细 */}
       {selectedProduct && (
         <div className="flex-none border rounded-lg bg-background">
           <div className="p-3 space-y-2">
             {/* 详情头部 */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <h3 className="font-semibold text-base">{selectedProduct.product_name} — 库存明细</h3>
-                <Badge variant="outline">{getProductCategoryLabel(selectedProduct.product_category)}</Badge>
+                <h3 className="font-semibold text-base">{selectedProduct.product_name} — 批次规格明细</h3>
+                <Badge variant="outline">{selectedProduct.batch_no}</Badge>
               </div>
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedProduct(null)}>
                 <X className="h-4 w-4" />
               </Button>
             </div>
-
-            <div className="border rounded-md overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/30">
-                    <TableHead className="text-xs h-7">仓库</TableHead>
-                    <TableHead className="text-xs h-7">批次号</TableHead>
-                    <TableHead className="text-xs h-7 text-right">当前数量</TableHead>
-                    <TableHead className="text-xs h-7 text-right">可用数量</TableHead>
-                    <TableHead className="text-xs h-7 text-right">单位成本</TableHead>
-                    <TableHead className="text-xs h-7 text-right">总成本</TableHead>
-                    <TableHead className="text-xs h-7">最后入库</TableHead>
-                    <TableHead className="text-xs h-7">最后出库</TableHead>
-                    <TableHead className="text-xs h-7">状态</TableHead>
-                  <TableHead className="text-xs h-7 text-center">操作记录</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(() => {
-                    const details = groupedByProduct.find(g => g.product_id === selectedProduct.product_id)?.details || [];
-                    return details.map((s) => (
-                      <TableRow key={s.id} className="h-7">
-                        <TableCell className="text-sm py-0.5">
-                          <div className="flex items-center gap-1">
-                            {getWarehouseIcon("")}
-                            <span>{s.warehouse_name}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm py-0.5 font-mono text-xs">{s.batch_no || "-"}</TableCell>
-                        <TableCell className="text-sm py-0.5 text-right">
-                          <span className={s.is_below_warning ? "text-red-600 font-semibold" : ""}>
-                            {fmt(s.current_qty)} {s.unit}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-sm py-0.5 text-right">{fmt(s.available_qty)} {s.unit}</TableCell>
-                        <TableCell className="text-sm py-0.5 text-right">¥{fmt(s.unit_cost)}</TableCell>
-                        <TableCell className="text-sm py-0.5 text-right">¥{fmt(s.total_cost)}</TableCell>
-                        <TableCell className="text-sm py-0.5">{s.last_in_date || "-"}</TableCell>
-                        <TableCell className="text-sm py-0.5">{s.last_out_date || "-"}</TableCell>
-                        <TableCell className="text-sm py-0.5">
-                          {s.is_below_warning ? (
-                            <Badge className="bg-red-100 text-red-800 text-xs">
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                              预警
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-green-100 text-green-800 text-xs">正常</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm py-0.5 text-center">
-                          <Button variant="ghost" size="sm" className="h-6 px-2 text-blue-600" onClick={(e) => { e.stopPropagation(); setMovementStock({ warehouse_id: s.warehouse_id, warehouse_name: s.warehouse_name, product_id: s.product_id, product_name: s.product_name }); setMovementDialogOpen(true); }}>
-                            查看
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ));
-                  })()}
-                  <TableRow className="bg-muted/20 font-medium h-7">
-                    <TableCell className="text-sm py-0.5" colSpan={2}>合计</TableCell>
-                    <TableCell className="text-sm py-0.5 text-right">
-                      {fmt(groupedByProduct.find(g => g.product_id === selectedProduct.product_id)?.total_current || 0)}
-                    </TableCell>
-                    <TableCell className="text-sm py-0.5 text-right">
-                      {fmt(groupedByProduct.find(g => g.product_id === selectedProduct.product_id)?.total_available || 0)}
-                    </TableCell>
-                    <TableCell className="text-sm py-0.5 text-right">-</TableCell>
-                    <TableCell className="text-sm py-0.5 text-right">
-                      ¥{fmt(groupedByProduct.find(g => g.product_id === selectedProduct.product_id)?.total_cost || 0)}
-                    </TableCell>
-                    <TableCell colSpan={4} />
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </div>
+            <BatchSpecDetail
+              batchNo={selectedProduct.batch_no}
+              warehouseId={selectedProduct.warehouse_id}
+              productId={selectedProduct.product_id}
+              productName={selectedProduct.product_name}
+            />
           </div>
         </div>
       )}
@@ -479,9 +417,13 @@ function StockList({
       <Dialog open={movementDialogOpen} onOpenChange={setMovementDialogOpen}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
-            <DialogTitle>操作记录 — {movementStock?.product_name}（{movementStock?.warehouse_name}）</DialogTitle>
+            <DialogTitle>操作记录 — {movementStock?.product_name}（{movementStock?.warehouse_name}）{movementStock?.batch_no && movementStock.batch_no !== "(无批次)" ? `批次：${movementStock.batch_no}` : ""}</DialogTitle>
           </DialogHeader>
-          <StockMovementDialogContent warehouseId={movementStock?.warehouse_id} productId={movementStock?.product_id} />
+          <StockMovementDialogContent 
+            warehouseId={movementStock?.warehouse_id} 
+            productId={movementStock?.product_id} 
+            batchNo={movementStock?.batch_no}
+          />
           <DialogFooter>
             <Button variant="outline" onClick={() => setMovementDialogOpen(false)}>关闭</Button>
           </DialogFooter>
@@ -492,11 +434,11 @@ function StockList({
 }
 
 // ==================== 操作记录弹窗内容 ====================
-function StockMovementDialogContent({ warehouseId, productId }: { warehouseId?: number; productId?: number }) {
+function StockMovementDialogContent({ warehouseId, productId, batchNo }: { warehouseId?: number; productId?: number; batchNo?: string }) {
   const { data, isLoading } = useQuery({
-    queryKey: ["warehouse-v2-movements-dialog", warehouseId, productId],
+    queryKey: ["warehouse-v2-movements-dialog", warehouseId, productId, batchNo],
     queryFn: () =>
-      fetchMovements({ warehouse_id: warehouseId, product_id: productId, limit: 500 }),
+      fetchMovements({ warehouse_id: warehouseId, product_id: productId, batch_no: batchNo, limit: 500 }),
     enabled: !!productId,
   });
 
@@ -509,17 +451,20 @@ function StockMovementDialogContent({ warehouseId, productId }: { warehouseId?: 
           <TableRow>
             <TableHead className="text-xs whitespace-nowrap">日期</TableHead>
             <TableHead className="text-xs whitespace-nowrap">类型</TableHead>
-            <TableHead className="text-xs whitespace-nowrap text-right">变动数量</TableHead>
-            <TableHead className="text-xs whitespace-nowrap text-right">变动前</TableHead>
-            <TableHead className="text-xs whitespace-nowrap text-right">变动后</TableHead>
+            <TableHead className="text-xs whitespace-nowrap text-right">变动箱数</TableHead>
+            <TableHead className="text-xs whitespace-nowrap text-right">箱数变动前</TableHead>
+            <TableHead className="text-xs whitespace-nowrap text-right">箱数变动后</TableHead>
+            <TableHead className="text-xs whitespace-nowrap text-right">变动重量</TableHead>
+            <TableHead className="text-xs whitespace-nowrap text-right">重量变动前</TableHead>
+            <TableHead className="text-xs whitespace-nowrap text-right">重量变动后</TableHead>
             <TableHead className="text-xs whitespace-nowrap">关联单据</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {isLoading ? (
-            <TableRow><TableCell colSpan={6} className="text-center py-4">加载中...</TableCell></TableRow>
+            <TableRow><TableCell colSpan={9} className="text-center py-4">加载中...</TableCell></TableRow>
           ) : items.length === 0 ? (
-            <TableRow><TableCell colSpan={6} className="text-center py-4 text-gray-400">暂无操作记录</TableCell></TableRow>
+            <TableRow><TableCell colSpan={9} className="text-center py-4 text-gray-400">暂无操作记录</TableCell></TableRow>
           ) : (
             items.map((m) => (
               <TableRow key={m.id}>
@@ -529,7 +474,12 @@ function StockMovementDialogContent({ warehouseId, productId }: { warehouseId?: 
                     {getMovementTypeLabel(m.movement_type)}
                   </Badge>
                 </TableCell>
-                <TableCell className={`text-sm whitespace-nowrap text-right font-medium ${m.qty_change > 0 ? "text-green-600" : "text-red-600"}`}>
+                <TableCell className={`text-sm whitespace-nowrap text-right font-medium ${(m.box_count_change || 0) > 0 ? "text-green-600" : (m.box_count_change || 0) < 0 ? "text-red-600" : ""}`}>
+                  {(m.box_count_change || 0) > 0 ? "+" : ""}{fmt(m.box_count_change || 0)} 箱
+                </TableCell>
+                <TableCell className="text-sm whitespace-nowrap text-right text-gray-500">{fmt(m.box_count_before || 0)}</TableCell>
+                <TableCell className="text-sm whitespace-nowrap text-right">{fmt(m.box_count_after || 0)}</TableCell>
+                <TableCell className={`text-sm whitespace-nowrap text-right font-medium ${m.qty_change > 0 ? "text-green-600" : m.qty_change < 0 ? "text-red-600" : ""}`}>
                   {m.qty_change > 0 ? "+" : ""}{fmt(m.qty_change)} {m.unit}
                 </TableCell>
                 <TableCell className="text-sm whitespace-nowrap text-right text-gray-500">{fmt(m.qty_before)}</TableCell>
@@ -540,6 +490,118 @@ function StockMovementDialogContent({ warehouseId, productId }: { warehouseId?: 
           )}
         </TableBody>
       </Table>
+    </div>
+  );
+}
+
+// ==================== 批次规格明细 ====================
+interface BatchSpecItem {
+  spec: string;
+  box_count: number;
+  weight_kg: number;
+  unit_cost: number | null;
+  total_cost: number | null;
+}
+
+interface BatchSpecData {
+  batch_no: string;
+  invoice_no: string | null;
+  inbound_date: string | null;
+  product_name: string;
+  warehouse_name: string;
+  total_boxes: number;
+  total_weight_kg: number;
+  specs: BatchSpecItem[];
+}
+
+function BatchSpecDetail({ batchNo, warehouseId, productId, productName }: {
+  batchNo: string;
+  warehouseId: number;
+  productId: number;
+  productName: string;
+}) {
+  const { data: specs, isLoading } = useQuery({
+    queryKey: ["warehouse-v2-batch-specs", batchNo, warehouseId, productId],
+    queryFn: () => fetchBatchSpecs(batchNo, warehouseId, productId),
+    enabled: batchNo !== "(无批次)" && warehouseId > 0,
+  });
+
+  if (batchNo === "(无批次)") {
+    return (
+      <div className="text-sm text-gray-500 py-4 text-center">
+        该批次无规格明细
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return <div className="text-sm text-gray-500 py-4 text-center">加载规格明细...</div>;
+  }
+
+  if (!specs || specs.specs.length === 0) {
+    return (
+      <div className="text-sm text-gray-500 py-4 text-center">
+        暂无规格明细数据
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* 批次概览 */}
+      <div className="grid grid-cols-4 gap-4 text-sm">
+        <div>
+          <span className="text-gray-500">发票号：</span>
+          <span className="font-medium">{specs.invoice_no || batchNo}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">入库日期：</span>
+          <span className="font-medium">{specs.inbound_date || "-"}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">总箱数：</span>
+          <span className="font-medium">{fmt(specs.total_boxes)} 箱</span>
+        </div>
+        <div>
+          <span className="text-gray-500">总重量：</span>
+          <span className="font-medium">{fmt(specs.total_weight_kg)} kg</span>
+        </div>
+      </div>
+
+      {/* 规格明细表 */}
+      <div className="border rounded-md overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-muted/30">
+              <TableHead className="text-xs h-7">规格</TableHead>
+              <TableHead className="text-xs h-7 text-right">箱数</TableHead>
+              <TableHead className="text-xs h-7 text-right">重量 (kg)</TableHead>
+              <TableHead className="text-xs h-7 text-right">单价 (USD)</TableHead>
+              <TableHead className="text-xs h-7 text-right">金额 (USD)</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {specs.specs.map((spec, idx) => (
+              <TableRow key={idx} className="h-7">
+                <TableCell className="text-sm py-0.5 font-medium">{spec.spec}</TableCell>
+                <TableCell className="text-sm py-0.5 text-right">{fmt(spec.box_count)}</TableCell>
+                <TableCell className="text-sm py-0.5 text-right">{fmt(spec.weight_kg)}</TableCell>
+                <TableCell className="text-sm py-0.5 text-right">{spec.unit_cost !== null ? `$${fmt(spec.unit_cost, 4)}` : "-"}</TableCell>
+                <TableCell className="text-sm py-0.5 text-right">{spec.total_cost !== null ? `$${fmt(spec.total_cost, 2)}` : "-"}</TableCell>
+              </TableRow>
+            ))}
+            <TableRow className="bg-muted/20 font-medium h-7">
+              <TableCell className="text-sm py-0.5">合计</TableCell>
+              <TableCell className="text-sm py-0.5 text-right">{fmt(specs.total_boxes)}</TableCell>
+              <TableCell className="text-sm py-0.5 text-right">{fmt(specs.total_weight_kg)}</TableCell>
+              <TableCell className="text-sm py-0.5 text-right">-</TableCell>
+              <TableCell className="text-sm py-0.5 text-right">
+                ${fmt(specs.specs.reduce((sum, s) => sum + (s.total_cost || 0), 0), 2)}
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

@@ -476,6 +476,7 @@ class MaterialPurchaseService:
                 "unit_cost": order_item.actual_unit_price,
                 "supplier_id": order.supplier_id,
                 "inbound_date": inbound_date,
+                "batch_no": batch_no,
                 "notes": f"物料采购入库：{batch_no}",
             })
             await WarehouseV2Service.confirm_inbound(db, warehouse_inbound)

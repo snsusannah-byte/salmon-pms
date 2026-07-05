@@ -7,7 +7,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Product
+from app.models import Batch, Product
 from app.models.finished_product_v2 import (
     DailySlaughterRecord,
     SlaughterType,
@@ -250,6 +250,12 @@ class DailySlaughterService:
         )
         fb_wh = fb_result.scalar_one_or_none()
         if fb_wh:
+            # 查询批次号
+            batch_no = None
+            if record.source_batch_id:
+                batch_result = await db.execute(select(Batch.batch_code).where(Batch.id == record.source_batch_id))
+                batch_no = batch_result.scalar()
+            
             # 成品肉
             if record.meat_weight_kg and record.meat_weight_kg > 0:
                 meat_prod_result = await db.execute(
@@ -265,6 +271,7 @@ class DailySlaughterService:
                             "warehouse_id": fb_wh.id,
                             "product_id": meat_product.id,
                             "batch_id": record.source_batch_id,
+                            "batch_no": batch_no,
                             "qty": record.meat_weight_kg,
                             "unit": "kg",
                             "unit_cost": record.cost_price_per_kg or Decimal("0"),
@@ -290,6 +297,7 @@ class DailySlaughterService:
                             "warehouse_id": fb_wh.id,
                             "product_id": trim_product.id,
                             "batch_id": record.source_batch_id,
+                            "batch_no": batch_no,
                             "qty": record.byproduct_trim_weight_kg,
                             "unit": "kg",
                             "unit_cost": Decimal("0"),

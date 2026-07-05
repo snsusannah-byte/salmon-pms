@@ -43,6 +43,7 @@ const AuditLogsPage = lazy(() => import("@/pages/AuditLogsPage"));
 const PurchaseOrderEntry = lazy(() => import("@/pages/PurchaseOrderEntry"));
 const FinishedProductSales = lazy(() => import("@/pages/FinishedProductSales"));
 const PurchaseReturnPage = lazy(() => import("@/components/purchase-returns/PurchaseReturnPage"));
+const InboundRecordsPage = lazy(() => import("@/pages/InboundRecordsPage"));
 
 // ========== 加载状态组件 ==========
 function PageLoader() {
@@ -83,6 +84,7 @@ const router = createBrowserRouter([
       { path: "purchase-returns", element: <Suspense fallback={<PageLoader />}><PurchaseReturnPage /></Suspense> },
       { path: "warehouse", element: <Navigate to="/warehouse-v2" replace /> },
       { path: "warehouse-v2", element: <Suspense fallback={<PageLoader />}><WarehouseV2Page /></Suspense> },
+      { path: "inbound-records", element: <Suspense fallback={<PageLoader />}><InboundRecordsPage /></Suspense> },
       { path: "purchase-orders", element: <Suspense fallback={<PageLoader />}><PurchaseOrderEntry /></Suspense> },
       { path: "finished-product-reports", element: <Suspense fallback={<PageLoader />}><FinishedProductReportsPage /></Suspense> },
       { path: "finance", element: <Suspense fallback={<PageLoader />}><FinancePage /></Suspense> },

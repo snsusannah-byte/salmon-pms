@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -131,6 +131,10 @@ const transactionCategoryMap: Record<string, string> = {
   clearance_payment: "清关费支付",
   international_freight: "国际运费支付",
 
+  // 购汇
+  exchange: "购汇费用",
+  exchange_fee: "购汇手续费",
+
   // 售后退款
   sales_refund: "售后退款",
 };
@@ -166,6 +170,7 @@ interface ExchangeRecord {
   exchange_rate: string;
   amount_cny: string;
   fee_cny: string;
+  bank_account_id?: number | null;
   status: string;
 }
 
@@ -182,6 +187,7 @@ interface Transaction {
   counterparty_id: number | null;
   reference_no: string | null;
   related_invoice_no: string | null;
+  related_exchange_no?: string | null;
   description: string | null;
   is_locked: boolean;
   related_sale_ids: number[];
@@ -190,6 +196,7 @@ interface Transaction {
 interface ImportFeeItem {
   invoice_id: number;
   invoice_no: string;
+  importer_id?: number | null;
   gross_weight_kg?: number | string;
   expense_date: string;
   customs_broker_id: number | null;
@@ -253,66 +260,6 @@ export function FinancePage() {
                   : "进口清关、关税、运费等费用登记"}
           </p>
         </div>
-      </div>
-
-      {/* 汇总卡片 - 根据当前Tab只显示相关数据 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* 进口费用 - 只在进口费用页或总览页显示 */}
-        {(!tabFromUrl || tabFromUrl === "import") && (
-          <>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-amber-700">税费合计</CardTitle>
-                <Receipt className="h-4 w-4 text-amber-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-amber-700">
-                  {fmt(Number(summary?.total_tax || 0))}
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium text-blue-700">清关费合计</CardTitle>
-                <Truck className="h-4 w-4 text-blue-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-blue-700">
-                  {fmt(Number(summary?.total_clearance_cost || 0))}
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-
-        {/* 购汇 - 只在购汇登记页或总览页显示 */}
-        {(!tabFromUrl || tabFromUrl === "exchange") && (
-          <>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">购汇总额(USD)</CardTitle>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {fmtUSD(Number(summary?.total_exchange_usd || 0))}
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">购汇总(CNY)</CardTitle>
-                <Receipt className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {fmt(Number(summary?.total_exchange_cny || 0))}
-                </div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -432,13 +379,6 @@ function ImportFeesTab() {
     },
   });
 
-  // 根据选中的发票的进口商筛选银行账户
-  const selectedInvoice = invoices.find((i) => String(i.id) === invoiceId);
-  const importerAccounts = (bankAccountsData || []).filter((a) => {
-    if (!selectedInvoice?.importer_id) return false;
-    return a.company_id === selectedInvoice.importer_id;
-  });
-
   // Fetch import fees list
   const { data: importFeesData, isLoading } = useQuery<{ items: ImportFeeItem[]; total: number }>({
     queryKey: ["import-fees"],
@@ -449,6 +389,28 @@ function ImportFeesTab() {
   });
 
   const importFees = importFeesData?.items || [];
+
+  // 筛选和搜索状态
+  const [searchInvoice, setSearchInvoice] = useState("");
+  const [filterBrokerId, setFilterBrokerId] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterMinAmount, setFilterMinAmount] = useState("");
+  const [filterMaxAmount, setFilterMaxAmount] = useState("");
+
+  // 筛选后的进口费用
+  const filteredFees = useMemo(() => {
+    return importFees.filter(f => {
+      if (searchInvoice && !f.invoice_no?.toLowerCase().includes(searchInvoice.toLowerCase())) return false;
+      if (filterBrokerId && String(f.customs_broker_id) !== filterBrokerId) return false;
+      if (filterDateFrom && f.expense_date && f.expense_date < filterDateFrom) return false;
+      if (filterDateTo && f.expense_date && f.expense_date > filterDateTo) return false;
+      const grand = Number(f.grand_total) || 0;
+      if (filterMinAmount && grand < Number(filterMinAmount)) return false;
+      if (filterMaxAmount && grand > Number(filterMaxAmount)) return false;
+      return true;
+    });
+  }, [importFees, searchInvoice, filterBrokerId, filterDateFrom, filterDateTo, filterMinAmount, filterMaxAmount]);
 
   const autoCalc = () => {
     const gw = parseFloat(grossWeight) || 0;
@@ -535,7 +497,17 @@ function ImportFeesTab() {
   };
 
   const [editingItem, setEditingItem] = useState<ImportFeeItem | null>(null);
-  
+
+  // 根据选中的发票（新建）或编辑记录（编辑）的进口商筛选银行账户
+  const selectedInvoice = invoices.find((i) => String(i.id) === invoiceId);
+  const importerAccounts = React.useMemo(() => {
+    const currentImporterId = editingItem ? editingItem.importer_id : selectedInvoice?.importer_id;
+    return (bankAccountsData || []).filter((a: any) => {
+      if (!currentImporterId) return false;
+      return a.company_id === currentImporterId;
+    });
+  }, [bankAccountsData, editingItem, selectedInvoice]);
+
   // 当 brokers 加载后，自动设置默认值（取第一个报关行）
   useEffect(() => {
     if (brokers.length > 0 && !customsBrokerId && !editingItem) {
@@ -602,11 +574,75 @@ function ImportFeesTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => { setEditingItem(null); setFormOpen(true); }}>
-          <Plus className="h-4 w-4 mr-1" />
-          新增进口费用
-        </Button>
+      {/* 筛选搜索栏 */}
+      <div className="bg-white border rounded-lg p-3 mb-3 space-y-3">
+        <div className="flex flex-wrap justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex-1 min-w-[200px]">
+              <Input
+                placeholder="搜索发票号..."
+                value={searchInvoice}
+                onChange={(e) => setSearchInvoice(e.target.value)}
+                className="h-9"
+              />
+            </div>
+            <Select value={filterBrokerId} onValueChange={(v) => setFilterBrokerId(v)}>
+              <SelectTrigger className="w-[180px] h-9">
+                <SelectValue placeholder="全部报关行">
+                  {(() => {
+                    if (!filterBrokerId) return "全部报关行";
+                    const b = brokers.find((x) => String(x.id) === filterBrokerId);
+                    return b?.company_full_name || b?.name || filterBrokerId;
+                  })()}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">全部报关行</SelectItem>
+                {brokers.map((b) => (
+                  <SelectItem key={b.id} value={String(b.id)}>
+                    {b.company_full_name || b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                value={filterDateFrom}
+                onChange={(e) => setFilterDateFrom(e.target.value)}
+                className="h-9 w-[140px]"
+                placeholder="开始日期"
+              />
+              <span className="text-muted-foreground">~</span>
+              <Input
+                type="date"
+                value={filterDateTo}
+                onChange={(e) => setFilterDateTo(e.target.value)}
+                className="h-9 w-[140px]"
+                placeholder="结束日期"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                setSearchInvoice("");
+                setFilterBrokerId("");
+                setFilterDateFrom("");
+                setFilterDateTo("");
+              }}
+            >
+              重置
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => { setEditingItem(null); setFormOpen(true); }}>
+              <Plus className="h-4 w-4 mr-1" />
+              新增进口费用
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* 新增/编辑弹窗 */}
@@ -682,15 +718,22 @@ function ImportFeesTab() {
               <div className="grid gap-2">
                 <Label>
                   扣款银行
-                  {selectedInvoice?.importer_name && (
-                    <span className="text-muted-foreground font-normal">（{selectedInvoice.importer_name}）</span>
-                  )}
+                  {(() => {
+                    if (editingItem && editingItem.importer_id) {
+                      const importer = (bankAccountsData || []).find((a: any) => a.company_id === editingItem.importer_id)?.company_name;
+                      if (importer) return <span className="text-muted-foreground font-normal">（{importer}）</span>;
+                    }
+                    if (selectedInvoice?.importer_name) {
+                      return <span className="text-muted-foreground font-normal">（{selectedInvoice.importer_name}）</span>;
+                    }
+                    return null;
+                  })()}
                 </Label>
                 <Select value={bankAccountId ? String(bankAccountId) : ""} onValueChange={(v) => setBankAccountId(v ? Number(v) : null)}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="请选择扣款银行">
                       {(() => {
-                        const selected = importerAccounts.find((a) => a.id === bankAccountId);
+                        const selected = importerAccounts.find((a: any) => a.id === bankAccountId);
                         if (!selected) return bankAccountId ? `未找到(ID:${bankAccountId})` : "请选择扣款银行";
                         return `${selected.bank_name} (${selected.account_number})`;
                       })()}
@@ -698,17 +741,14 @@ function ImportFeesTab() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">不指定</SelectItem>
-                    {importerAccounts.length === 0 && selectedInvoice?.importer_name && (
+                    {importerAccounts.length === 0 && (
                       <div className="px-3 py-2 text-sm text-muted-foreground">
-                        {selectedInvoice.importer_name} 暂无关联银行账户
+                        {editingItem
+                          ? (editingItem.importer_id ? "该进口商暂无银行账户" : "未知进口商")
+                          : "请先选择发票"}
                       </div>
                     )}
-                    {importerAccounts.length === 0 && !selectedInvoice?.importer_name && (
-                      <div className="px-3 py-2 text-sm text-muted-foreground">
-                        请先选择发票
-                      </div>
-                    )}
-                    {importerAccounts.map((account) => (
+                    {importerAccounts.map((account: any) => (
                       <SelectItem key={account.id} value={String(account.id)}>
                         {account.bank_name} ({account.account_number}) - {account.current_balance}
                       </SelectItem>
@@ -1055,7 +1095,7 @@ function ImportFeesTab() {
                   加载中...
                 </TableCell>
               </TableRow>
-            ) : !importFees.length ? (
+            ) : !filteredFees.length ? (
               <TableRow>
                 <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
                   暂无数据
@@ -1063,8 +1103,8 @@ function ImportFeesTab() {
               </TableRow>
             ) : (
               <>
-                {importFees.map((f) => (
-                  <TableRow key={f.invoice_id} className="hover:bg-slate-100 cursor-default transition-colors">
+                {filteredFees.map((f) => (
+                  <TableRow key={f.invoice_id} className="hover:bg-blue-50/60 cursor-default transition-colors">
                   <TableCell className="font-medium">{f.invoice_no}</TableCell>
                   <TableCell>{f.expense_date || "-"}</TableCell>
                   <TableCell className="text-xs">{f.gross_weight_kg ?? "-"}</TableCell>
@@ -1174,13 +1214,36 @@ function ExchangeTab() {
   const [batchExchangedUSD, setBatchExchangedUSD] = useState(0);
   const [batchRemainingUSD, setBatchRemainingUSD] = useState(0);
   const [batchInvoices, setBatchInvoices] = useState<any[]>([]);
+  const [batchImporterId, setBatchImporterId] = useState<number | null>(null);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState("");
   const [exchangeDate, setExchangeDate] = useState("");
   const [amountUsd, setAmountUsd] = useState("");
   const [exchangeRate, setExchangeRate] = useState("");
   const [amountCny, setAmountCny] = useState("");
   const [feeCny, setFeeCny] = useState("");
+  const [exchangeBankAccountId, setExchangeBankAccountId] = useState<number | null>(null);
   const [multiExchangeOpen, setMultiExchangeOpen] = useState(false);
+
+  // Fetch bank accounts for exchange tab
+  const { data: exchangeBankAccountsData } = useQuery<{
+    id: number;
+    code: string;
+    account_name: string;
+    bank_name: string;
+    account_number: string;
+    type: string;
+    currency: string;
+    current_balance: string;
+    company_id: number | null;
+    company_name: string | null;
+    is_active: boolean;
+  }[]>({
+    queryKey: ["bank-accounts-exchange"],
+    queryFn: async () => {
+      const res = await api.get("/v1/finance/bank-accounts");
+      return res.data || [];
+    },
+  });
 
   // Reset on open (only for new record, not edit)
   useEffect(() => {
@@ -1191,10 +1254,12 @@ function ExchangeTab() {
       setExchangeRate("");
       setAmountCny("");
       setFeeCny("");
+      setExchangeBankAccountId(null);
       setBatchTotalUSD(0);
       setBatchExchangedUSD(0);
       setBatchRemainingUSD(0);
       setBatchInvoices([]);
+      setBatchImporterId(null);
       setSelectedInvoiceId("");
     }
   }, [formOpen]);
@@ -1238,6 +1303,7 @@ function ExchangeTab() {
     setBatchExchangedUSD(0);
     setBatchRemainingUSD(0);
     setBatchInvoices([]);
+    setBatchImporterId(null);
     setSelectedInvoiceId("");
     if (!bid) return;
     try {
@@ -1250,6 +1316,7 @@ function ExchangeTab() {
         setBatchExchangedUSD(exchanged);
         setBatchRemainingUSD(remaining);
         setBatchInvoices(res.data.data.invoices || []);
+        setBatchImporterId(res.data.data.importer_id || null);
         setSelectedInvoiceId("__batch__");
       }
     } catch (err: any) {
@@ -1276,11 +1343,12 @@ function ExchangeTab() {
         exchange_rate: Number(exchangeRate),
         amount_cny: Number(amountCny),
         fee_cny: Number(feeCny) || 0,
-        bank_account_id: null,
+        bank_account_id: exchangeBankAccountId,
       });
       toast.success("购汇记录创建成功");
       queryClient.invalidateQueries({ queryKey: ["exchange-records"] });
       queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
       setFormOpen(false);
     } catch (error: any) {
       toast.error(error.response?.data?.detail ?? "创建失败");
@@ -1297,6 +1365,7 @@ function ExchangeTab() {
       toast.success("已删除");
       queryClient.invalidateQueries({ queryKey: ["exchange-records"] });
       queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
       setDeleteOpen(false);
       setDeleteRecordId(null);
     } catch (error: any) {
@@ -1306,8 +1375,28 @@ function ExchangeTab() {
 
   const [editingRecord, setEditingRecord] = useState<ExchangeRecord | null>(null);
 
+  // 根据进口商过滤银行（CNY公账）
+  const exchangeBankAccounts = React.useMemo(() => {
+    return (exchangeBankAccountsData || []).filter((a) => {
+      if (a.currency !== "CNY" || a.type !== "public") return false;
+      // 新建模式：根据批次进口商过滤
+      if (!editingRecord && batchImporterId != null) {
+        return a.company_id === batchImporterId;
+      }
+      // 编辑模式：根据记录的进口商过滤
+      if (editingRecord && editingRecord.importer_id) {
+        return a.company_id === editingRecord.importer_id;
+      }
+      return true;
+    });
+  }, [exchangeBankAccountsData, editingRecord, batchImporterId]);
+
   // 搜索和分页状态
   const [search, setSearch] = useState("");
+  const [filterExchangeImporterId, setFilterExchangeImporterId] = useState("");
+  const [filterExchangeBankId, setFilterExchangeBankId] = useState("");
+  const [filterExchangeDateFrom, setFilterExchangeDateFrom] = useState("");
+  const [filterExchangeDateTo, setFilterExchangeDateTo] = useState("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
 
@@ -1325,8 +1414,20 @@ function ExchangeTab() {
         return no.includes(q) || date.includes(q) || invoices.includes(q) || batchInfo.includes(q);
       });
     }
+    if (filterExchangeImporterId) {
+      result = result.filter((r) => String(r.importer_id) === filterExchangeImporterId);
+    }
+    if (filterExchangeBankId) {
+      result = result.filter((r) => String(r.bank_account_id) === filterExchangeBankId);
+    }
+    if (filterExchangeDateFrom) {
+      result = result.filter((r) => r.exchange_date && r.exchange_date >= filterExchangeDateFrom);
+    }
+    if (filterExchangeDateTo) {
+      result = result.filter((r) => r.exchange_date && r.exchange_date <= filterExchangeDateTo);
+    }
     return result;
-  }, [exchanges, search, batches]);
+  }, [exchanges, search, batches, filterExchangeImporterId, filterExchangeBankId, filterExchangeDateFrom, filterExchangeDateTo]);
 
   // 分页
   const totalPages = Math.ceil(filteredExchanges.length / PAGE_SIZE) || 1;
@@ -1350,6 +1451,7 @@ function ExchangeTab() {
     setExchangeRate(String(record.exchange_rate ?? ""));
     setAmountCny(String(record.amount_cny ?? ""));
     setFeeCny(String(record.fee_cny ?? ""));
+    setExchangeBankAccountId(record.bank_account_id || null);
     setBatchTotalUSD(0);
     setBatchExchangedUSD(0);
     setBatchRemainingUSD(0);
@@ -1368,10 +1470,12 @@ function ExchangeTab() {
         exchange_rate: Number(exchangeRate),
         amount_cny: Number(amountCny),
         fee_cny: Number(feeCny) || 0,
+        bank_account_id: exchangeBankAccountId,
       });
       toast.success("购汇记录更新成功");
       queryClient.invalidateQueries({ queryKey: ["exchange-records"] });
       queryClient.invalidateQueries({ queryKey: ["finance-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
       setFormOpen(false);
       setEditingRecord(null);
     } catch (error: any) {
@@ -1381,21 +1485,97 @@ function ExchangeTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="搜索购汇单号、日期、发票号..."
-            value={search}
-            onChange={handleSearchChange}
-            className="pl-9"
-          />
+      {/* 筛选搜索栏 */}
+      <div className="bg-white border rounded-lg p-3 mb-3 space-y-3">
+        <div className="flex flex-wrap justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索购汇单号、日期、发票号..."
+                value={search}
+                onChange={handleSearchChange}
+                className="pl-9 h-9"
+              />
+            </div>
+            <Select value={filterExchangeImporterId} onValueChange={(v) => { setFilterExchangeImporterId(v); setPage(1); }}>
+              <SelectTrigger className="w-[180px] h-9">
+                <SelectValue placeholder="全部进口商">
+                  {(() => {
+                    if (!filterExchangeImporterId) return "全部进口商";
+                    const found = Array.from(new Map(exchanges.filter((r) => r.importer_id).map((r) => [r.importer_id, r.importer_name])).entries())
+                      .find(([id]) => String(id) === filterExchangeImporterId);
+                    return found?.[1] || filterExchangeImporterId;
+                  })()}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">全部进口商</SelectItem>
+                {Array.from(new Map(exchanges.filter((r) => r.importer_id).map((r) => [r.importer_id, r.importer_name])).entries())
+                  .map(([id, name]) => (
+                    <SelectItem key={id} value={String(id)}>{name || String(id)}</SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterExchangeBankId} onValueChange={(v) => { setFilterExchangeBankId(v); setPage(1); }}>
+              <SelectTrigger className="w-[180px] h-9">
+                <SelectValue placeholder="全部银行">
+                  {(() => {
+                    if (!filterExchangeBankId) return "全部银行";
+                    const a = (exchangeBankAccountsData || []).find((x) => String(x.id) === filterExchangeBankId);
+                    return a ? `${a.account_name} (${a.bank_name})` : filterExchangeBankId;
+                  })()}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">全部银行</SelectItem>
+                {(exchangeBankAccountsData || []).map((a) => (
+                  <SelectItem key={a.id} value={String(a.id)}>
+                    {a.account_name} ({a.bank_name})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                value={filterExchangeDateFrom}
+                onChange={(e) => { setFilterExchangeDateFrom(e.target.value); setPage(1); }}
+                className="h-9 w-[140px]"
+                placeholder="开始日期"
+              />
+              <span className="text-muted-foreground">~</span>
+              <Input
+                type="date"
+                value={filterExchangeDateTo}
+                onChange={(e) => { setFilterExchangeDateTo(e.target.value); setPage(1); }}
+                className="h-9 w-[140px]"
+                placeholder="结束日期"
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                setSearch("");
+                setFilterExchangeImporterId("");
+                setFilterExchangeBankId("");
+                setFilterExchangeDateFrom("");
+                setFilterExchangeDateTo("");
+                setPage(1);
+              }}
+            >
+              重置
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setMultiExchangeOpen(true)}>
+              <DollarSign className="h-4 w-4 mr-1" />
+              合并购汇
+            </Button>
+          </div>
         </div>
-        <Button size="sm" variant="outline" onClick={() => setMultiExchangeOpen(true)}>
-          <DollarSign className="h-4 w-4 mr-1" />
-          合并购汇
-        </Button>
-        
       </div>
 
       <Dialog open={formOpen} onOpenChange={(v) => { if (!v) { setFormOpen(false); setEditingRecord(null); }}}>
@@ -1408,14 +1588,24 @@ function ExchangeTab() {
           </DialogHeader>
 
           <form onSubmit={editingRecord ? handleEditSubmit : handleSubmit} className="space-y-5 py-2">
-            {/* 关联批次 */}
+            {/* 关联批次 / 购汇类型 */}
             <div className="grid gap-2">
               <Label className="text-sm font-medium">
-                关联批次 <span className="text-red-500">*</span>
+                {editingRecord?.related_invoice_ids && editingRecord.related_invoice_ids.length > 0
+                  ? "购汇类型"
+                  : "关联批次"} <span className="text-red-500">*</span>
               </Label>
               {editingRecord ? (
                 <div className="bg-muted px-3 py-2 rounded-md text-sm">
-                  {batches.find((b) => b.id === Number(editingRecord.batch_id))?.batch_code || editingRecord.batch_id || "-"}
+                  {editingRecord.related_invoice_ids && editingRecord.related_invoice_ids.length > 0 ? (
+                    <span className="text-amber-600 font-medium">🔄 合并购汇（跨批次）</span>
+                  ) : editingRecord.batch_id ? (
+                    <span>
+                      {batches.find((b) => b.id === Number(editingRecord.batch_id))?.batch_code || editingRecord.batch_id}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
                 </div>
               ) : (
                 <Select value={String(batchId)} onValueChange={(v) => onSelectBatch(v ?? "")}>
@@ -1434,6 +1624,42 @@ function ExchangeTab() {
               )}
             </div>
 
+            {/* 编辑模式：关联发票（只读） */}
+            {editingRecord && (
+              <div className="grid gap-2">
+                <Label className="text-sm font-medium">关联发票</Label>
+                <div className="bg-muted px-3 py-2 rounded-md text-sm space-y-1">
+                  {editingRecord.related_invoice_ids && editingRecord.related_invoice_ids.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {editingRecord.related_invoice_nos?.map((no, i) => (
+                        <span key={i} className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-xs border border-blue-100">
+                          {no}
+                        </span>
+                      )) || editingRecord.related_invoice_ids.map((id, i) => (
+                        <span key={i} className="inline-flex items-center px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-xs border border-blue-100">
+                          #{id}
+                        </span>
+                      ))}
+                    </div>
+                  ) : editingRecord.invoice_id ? (
+                    <span>发票 #{editingRecord.invoice_id}</span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 编辑模式：进口商（只读） */}
+            {editingRecord && editingRecord.importer_name && (
+              <div className="grid gap-2">
+                <Label className="text-sm font-medium">进口商</Label>
+                <div className="bg-muted px-3 py-2 rounded-md text-sm">
+                  {editingRecord.importer_name}
+                </div>
+              </div>
+            )}
+
             {batchTotalUSD > 0 && (
               <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg space-y-2">
                 <div className="flex justify-between text-sm">
@@ -1451,8 +1677,8 @@ function ExchangeTab() {
               </div>
             )}
 
-            {/* 发票选择 */}
-            {batchInvoices.length > 0 && (
+            {/* 发票选择 — 只在新建模式显示 */}
+            {!editingRecord && batchInvoices.length > 0 && (
               <div className="grid gap-2">
                 <Label className="text-sm font-medium">选择发票</Label>
                 <Select value={selectedInvoiceId} onValueChange={(v) => {
@@ -1544,6 +1770,31 @@ function ExchangeTab() {
                   placeholder="0"
                 />
               </div>
+            </div>
+
+            {/* 扣款银行 */}
+            <div className="grid gap-2">
+              <Label className="text-sm font-medium">扣款银行（CNY账户）</Label>
+              <Select value={exchangeBankAccountId ? String(exchangeBankAccountId) : ""} onValueChange={(v) => setExchangeBankAccountId(v ? Number(v) : null)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="请选择扣款银行">
+                    {(() => {
+                      const acc = (exchangeBankAccountsData || []).find((a) => a.id === exchangeBankAccountId);
+                      if (acc) {
+                        return `${acc.bank_name} (${acc.account_number})`;
+                      }
+                      return exchangeBankAccountId ? `银行ID: ${exchangeBankAccountId}` : "请选择扣款银行";
+                    })()}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="min-w-[400px]">
+                  {exchangeBankAccounts.map((account) => (
+                    <SelectItem key={account.id} value={String(account.id)}>
+                      {account.bank_name} ({account.account_number}) - 余额 {fmt(Number(account.current_balance || 0))}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="bg-muted p-3 rounded text-sm flex justify-between font-semibold">
@@ -1657,7 +1908,7 @@ function ExchangeTab() {
             ) : (
               <>
               {pagedExchanges.map((r) => (
-                <TableRow key={r.id}>
+                <TableRow key={r.id} className="hover:bg-blue-50/60 transition-colors">
                   <TableCell>
                     <div className="font-mono font-medium">{r.exchange_no || "-"}</div>
                   </TableCell>
@@ -1814,6 +2065,7 @@ function TransactionsTab() {
   const [filterType, setFilterType] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterSaleId, setFilterSaleId] = useState("");
+  const [filterInvoiceNo, setFilterInvoiceNo] = useState("");
   const [filterLocked, setFilterLocked] = useState("");
   const [filterBankAccountId, setFilterBankAccountId] = useState("");
 
@@ -1828,10 +2080,10 @@ function TransactionsTab() {
   // 筛选条件变化时重置页码
   useEffect(() => {
     setTransactionPage(1);
-  }, [debouncedSearch, filterType, filterCategory, filterSaleId, filterLocked, filterBankAccountId]);
+  }, [debouncedSearch, filterType, filterCategory, filterSaleId, filterInvoiceNo, filterLocked, filterBankAccountId]);
 
   const { data: transactionsData, isLoading: transactionsLoading } = useQuery<{ total: number; items: Transaction[]; skip: number; limit: number }>({
-    queryKey: ["transactions", debouncedSearch, filterType, filterCategory, filterSaleId, filterLocked, filterBankAccountId, transactionPage],
+    queryKey: ["transactions", debouncedSearch, filterType, filterCategory, filterSaleId, filterInvoiceNo, filterLocked, filterBankAccountId, transactionPage],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (debouncedSearch.trim()) params.append("search", debouncedSearch.trim());
@@ -1839,6 +2091,7 @@ function TransactionsTab() {
       if (filterCategory) params.append("category", filterCategory);
       if (filterSaleId.trim() && /^[1-9]\d*$/.test(filterSaleId.trim())) params.append("related_sale_id", filterSaleId.trim());
       else if (filterSaleId.trim()) params.append("sale_no", filterSaleId.trim());
+      if (filterInvoiceNo.trim()) params.append("invoice_no", filterInvoiceNo.trim());
       if (filterLocked === "locked") params.append("is_locked", "true");
       else if (filterLocked === "unlocked") params.append("is_locked", "false");
       if (filterBankAccountId) params.append("bank_account_id", filterBankAccountId);
@@ -2155,93 +2408,117 @@ function TransactionsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap justify-between gap-2">
-        {/* 搜索框 */}
-        <div className="flex flex-wrap gap-2 items-center">
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="搜索日期、对方名称、金额、描述、销售单号..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          <Select value={filterType} onValueChange={(v) => { setFilterType(v ?? ""); setFilterCategory(""); }}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue placeholder="类型" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">全部类型</SelectItem>
-              {Object.entries(transactionTypeMap).map(([k, v]) => (
-                <SelectItem key={k} value={k}>{v}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={filterCategory} onValueChange={(v) => setFilterCategory(v ?? "")}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="分类" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">全部分类</SelectItem>
-              {Object.entries(transactionCategoryMap)
-                .filter(([k]) => {
-                  if (!filterType) return true;
-                  const incomeKeys = ["main_business_revenue", "other_business_revenue", "non_business_revenue", "fund_pooling"];
-                  const isIncome = incomeKeys.includes(k);
-                  return filterType === "income" ? isIncome : !isIncome;
-                })
-                .map(([k, v]) => (
+      {/* 筛选搜索栏 */}
+      <div className="bg-white border rounded-lg p-3 mb-3 space-y-3">
+        <div className="flex flex-wrap justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索日期、对方名称、金额、描述、销售单号..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9"
+              />
+            </div>
+            <Select value={filterType} onValueChange={(v) => { setFilterType(v ?? ""); setFilterCategory(""); }}>
+              <SelectTrigger className="w-[120px] h-9">
+                <SelectValue placeholder="类型">
+                  {filterType ? transactionTypeMap[filterType] : "类型"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">全部类型</SelectItem>
+                {Object.entries(transactionTypeMap).map(([k, v]) => (
                   <SelectItem key={k} value={k}>{v}</SelectItem>
                 ))}
-            </SelectContent>
-          </Select>
-          <div className="relative w-[160px]">
-            <Input
-              placeholder="关联销售单号"
-              value={filterSaleId}
-              onChange={(e) => setFilterSaleId(e.target.value)}
-              className="text-sm"
-            />
-          </div>
-          <Select value={filterLocked} onValueChange={(v) => setFilterLocked(v ?? "")}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue placeholder="锁定状态" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">全部状态</SelectItem>
-              <SelectItem value="locked">已锁定</SelectItem>
-              <SelectItem value="unlocked">未锁定</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={filterBankAccountId} onValueChange={(v) => setFilterBankAccountId(v ?? "")}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder="银行账户" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">全部账户</SelectItem>
-              {bankAccounts.map((b: any) => (
-                <SelectItem key={b.id} value={String(b.id)}>
-                  {b.bank_name} {b.account_number?.slice(-4)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {(searchQuery || filterType || filterCategory || filterSaleId || filterLocked || filterBankAccountId) && (
-            <Button variant="ghost" size="sm" onClick={() => {
-              setSearchQuery("");
-              setDebouncedSearch("");
-              setFilterType("");
-              setFilterCategory("");
-              setFilterSaleId("");
-              setFilterLocked("");
-              setFilterBankAccountId("");
-            }}>
+              </SelectContent>
+            </Select>
+            <Select value={filterCategory} onValueChange={(v) => setFilterCategory(v ?? "")}>
+              <SelectTrigger className="w-[140px] h-9">
+                <SelectValue placeholder="分类">
+                  {filterCategory ? transactionCategoryMap[filterCategory] : "分类"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">全部分类</SelectItem>
+                {Object.entries(transactionCategoryMap)
+                  .filter(([k]) => {
+                    if (!filterType) return true;
+                    const incomeKeys = ["main_business_revenue", "other_business_revenue", "non_business_revenue", "fund_pooling"];
+                    const isIncome = incomeKeys.includes(k);
+                    return filterType === "income" ? isIncome : !isIncome;
+                  })
+                  .map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <div className="relative w-[160px]">
+              <Input
+                placeholder="关联销售单号"
+                value={filterSaleId}
+                onChange={(e) => setFilterSaleId(e.target.value)}
+                className="text-sm h-9"
+              />
+            </div>
+            <div className="relative w-[160px]">
+              <Input
+                placeholder="关联发票号"
+                value={filterInvoiceNo}
+                onChange={(e) => setFilterInvoiceNo(e.target.value)}
+                className="text-sm h-9"
+              />
+            </div>
+            <Select value={filterLocked} onValueChange={(v) => setFilterLocked(v ?? "")}>
+              <SelectTrigger className="w-[120px] h-9">
+                <SelectValue placeholder="锁定状态">
+                  {filterLocked === "locked" ? "已锁定" : filterLocked === "unlocked" ? "未锁定" : "锁定状态"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">全部状态</SelectItem>
+                <SelectItem value="locked">已锁定</SelectItem>
+                <SelectItem value="unlocked">未锁定</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={filterBankAccountId} onValueChange={(v) => setFilterBankAccountId(v ?? "")}>
+              <SelectTrigger className="w-[160px] h-9">
+                <SelectValue placeholder="银行账户">
+                  {(() => {
+                    if (!filterBankAccountId) return "银行账户";
+                    const b = bankAccounts.find((x: any) => String(x.id) === filterBankAccountId);
+                    return b ? `${b.bank_name} ${b.account_number?.slice(-4)}` : filterBankAccountId;
+                  })()}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">全部账户</SelectItem>
+                {bankAccounts.map((b: any) => (
+                  <SelectItem key={b.id} value={String(b.id)}>
+                    {b.bank_name} {b.account_number?.slice(-4)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                setSearchQuery("");
+                setDebouncedSearch("");
+                setFilterType("");
+                setFilterCategory("");
+                setFilterSaleId("");
+                setFilterLocked("");
+                setFilterBankAccountId("");
+              }}
+            >
               重置
             </Button>
-          )}
-        </div>
-        <div className="flex gap-2">
+          </div>
+          <div className="flex items-center gap-2">
           <Button
             size="sm"
             variant="outline"
@@ -2341,6 +2618,7 @@ function TransactionsTab() {
           </Button>
           <BatchImportButton type="transactions" />
         </div>
+      </div>
       </div>
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
@@ -2688,11 +2966,13 @@ function TransactionsTab() {
               </TableRow>
             ) : (
               <>
-                {transactions.map((r) => (
-                <TableRow key={r.id} className={r.is_locked ? "bg-muted/30" : ""}>
+                {transactions.map((r) => {
+                  const isSelected = selectedIds.includes(r.id);
+                  return (
+                <TableRow key={r.id} className={`hover:bg-blue-50/60 transition-colors ${r.is_locked ? "bg-muted/30" : ""} ${isSelected ? "bg-blue-100/50" : ""}`}>
                   <TableCell>
                     <Checkbox
-                      checked={selectedIds.includes(r.id)}
+                      checked={isSelected}
                       onCheckedChange={() => toggleSelect(r.id)}
                       disabled={r.is_locked}
                     />
@@ -2729,10 +3009,14 @@ function TransactionsTab() {
                     {r.description ?? "-"}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {r.related_invoice_no ?? "-"}
+                    {r.related_exchange_no
+                      ? (r.related_invoice_no ?? "-")
+                      : (r.related_invoice_no ?? "-")}
                   </TableCell>
                   <TableCell className="text-xs">
-                    {r.related_sale_ids?.length > 0
+                    {r.related_exchange_no
+                      ? r.related_exchange_no
+                      : r.related_sale_ids?.length > 0
                       ? [...new Set(r.related_sale_ids)].map(id => allSalesMap[id]).filter(Boolean).join(", ")
                       : "-"}
                   </TableCell>
@@ -2785,7 +3069,8 @@ function TransactionsTab() {
                     </div>
                   </TableCell>
                 </TableRow>
-              ))}
+              );
+            })}
               {/* 页汇总行 */}
               {transactions.length > 0 && (
                 <TableRow className="bg-muted/50 font-medium border-t-2">

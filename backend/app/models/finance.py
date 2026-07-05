@@ -40,7 +40,9 @@ class TransactionRecord(Base, TimestampMixin):
     reference_no: Mapped[str | None] = mapped_column(String(100))
     description: Mapped[str | None] = mapped_column(Text)
     related_invoice_id: Mapped[int | None] = mapped_column(ForeignKey("import_invoices.id"))
+    related_invoice_no: Mapped[str | None] = mapped_column(String(500))
     related_batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+    related_exchange_id: Mapped[int | None] = mapped_column(ForeignKey("exchange_records.id"), nullable=True)
     related_sale_ids: Mapped[list | None] = mapped_column(JSON)  # JSON array of sale IDs
     
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True)

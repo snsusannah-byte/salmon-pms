@@ -47,6 +47,35 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
   const [amountCny, setAmountCny] = useState("");
   const [feeCny, setFeeCny] = useState("");
   const [importerId, setImporterId] = useState<string>("");
+  const [bankAccountId, setBankAccountId] = useState<number | null>(null);
+
+  // 获取银行账户列表
+  const { data: bankAccountsData } = useQuery({
+    queryKey: ["bank-accounts-batch-exchange"],
+    queryFn: async () => {
+      const res = await api.get("/v1/finance/bank-accounts");
+      return (res.data || []) as {
+        id: number;
+        bank_name: string;
+        account_number: string;
+        currency: string;
+        type: string;
+        company_id: number | null;
+        current_balance: string;
+      }[];
+    },
+    enabled: open,
+  });
+
+  const cnyBankAccounts = useMemo(() => {
+    return (bankAccountsData || []).filter((a) => {
+      if (a.currency !== "CNY" || a.type !== "public") return false;
+      if (importerId) {
+        return a.company_id === Number(importerId);
+      }
+      return true;
+    });
+  }, [bankAccountsData, importerId]);
 
   // 获取公司列表（用于进口商选择）
   const { data: companies } = useQuery({
@@ -153,7 +182,7 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
         amount_cny: Number(amountCny),
         fee_cny: Number(feeCny) || 0,
         importer_id: Number(importerId),
-        bank_account_id: null,
+        bank_account_id: bankAccountId,
       });
       toast.success(`合并购汇成功，共 ${selectedIds.size} 张发票`);
       queryClient.invalidateQueries({ queryKey: ["exchange-records"] });
@@ -167,6 +196,7 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
       setExchangeRate("");
       setAmountCny("");
       setFeeCny("");
+      setBankAccountId(null);
       // 恢复默认进口商
       const defaultImporter = importers.find(c => c.name === "绍兴中挪食品有限责任公司") || importers[0];
       if (defaultImporter) {
@@ -336,6 +366,23 @@ export function BatchExchangeDialog({ open, onOpenChange }: BatchExchangeDialogP
                 placeholder="0"
               />
             </div>
+          </div>
+
+          {/* 扣款银行 */}
+          <div className="grid gap-2">
+            <Label className="text-sm font-medium">扣款银行（CNY账户）</Label>
+            <select
+              value={bankAccountId ? String(bankAccountId) : ""}
+              onChange={(e) => setBankAccountId(e.target.value ? Number(e.target.value) : null)}
+              className="w-full h-9 px-3 text-sm border rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">请选择扣款银行</option>
+              {cnyBankAccounts.map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {a.bank_name} ({a.account_number}) - 余额 {fmt(Number(a.current_balance || 0))}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="bg-muted p-3 rounded text-sm flex justify-between font-semibold">

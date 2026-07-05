@@ -120,6 +120,14 @@ const emptyForm = {
   products: [emptyProduct]
 };
 
+const paymentMethodMap: Record<string, string> = {
+  bank_transfer: "银行转账",
+  cash: "现金",
+  check: "支票",
+  scan: "扫码",
+  balance: "余额抵扣",
+};
+
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
@@ -175,6 +183,15 @@ export function FinishedProductSales() {
   const [receiptDate, setReceiptDate] = useState(new Date().toISOString().split('T')[0]);
   const [receiptDescription, setReceiptDescription] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
+  // 合并收款
+  const [showBatchPaymentModal, setShowBatchPaymentModal] = useState(false);
+  const [batchReceiptAmount, setBatchReceiptAmount] = useState("");
+  const [batchReceiptMethod, setBatchReceiptMethod] = useState("bank_transfer");
+  const [batchReceiptBankAccountId, setBatchReceiptBankAccountId] = useState("");
+  const [batchReceiptDate, setBatchReceiptDate] = useState(new Date().toISOString().split('T')[0]);
+  const [batchReceiptDescription, setBatchReceiptDescription] = useState("");
+  const [batchReceiptRounding, setBatchReceiptRounding] = useState("");
+  const [batchPaymentLoading, setBatchPaymentLoading] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [adjustForm, setAdjustForm] = useState({ discount: 0, scan_fee: 0, rounding: 0, after_sales_adjustment: 0 });
   const [adjustSaleId, setAdjustSaleId] = useState<number | null>(null);
@@ -442,6 +459,77 @@ export function FinishedProductSales() {
     }
   };
 
+  // 合并收款
+  const handleBatchPaymentOpen = () => {
+    if (selectedSales.length < 2) {
+      toast.error('请至少选择2个销售单进行合并收款');
+      return;
+    }
+    const totalReceivable = selectedSales.reduce((sum, s) => sum + Math.max(0, (s.net_amount || 0) - (s.paid_amount || 0)), 0);
+    setBatchReceiptAmount(totalReceivable > 0 ? totalReceivable.toFixed(2) : '');
+    setBatchReceiptRounding('0');
+    setBatchReceiptMethod('bank_transfer');
+    setBatchReceiptBankAccountId('');
+    setBatchReceiptDate(new Date().toISOString().split('T')[0]);
+    setBatchReceiptDescription('');
+    setShowBatchPaymentModal(true);
+  };
+
+  const handleBatchPaymentSave = async () => {
+    const totalAmount = Number(batchReceiptAmount);
+    if (totalAmount < 0) {
+      toast.error('收款金额不能为负数');
+      return;
+    }
+    setBatchPaymentLoading(true);
+    try {
+      // 按销售日期排序（旧的在前），优先满足旧单
+      const sortedSales = [...selectedSales].sort((a, b) => new Date(a.sale_date).getTime() - new Date(b.sale_date).getTime());
+      
+      let remainingPayment = totalAmount;
+      const saleReceipts: { sale_id: number; amount: number; rounding_adjustment: number }[] = [];
+      
+      for (let i = 0; i < sortedSales.length; i++) {
+        const s = sortedSales[i];
+        const receivable = Math.max(0, (s.net_amount || 0) - (s.paid_amount || 0));
+        
+        if (remainingPayment >= receivable) {
+          // 足够付清这一单
+          saleReceipts.push({ sale_id: s.id, amount: receivable, rounding_adjustment: 0 });
+          remainingPayment = round2(remainingPayment - receivable);
+        } else if (remainingPayment > 0) {
+          // 部分付款，剩下的作为抹零
+          const rounding = round2(receivable - remainingPayment);
+          saleReceipts.push({ sale_id: s.id, amount: remainingPayment, rounding_adjustment: rounding });
+          remainingPayment = 0;
+        } else {
+          // 没钱了，全部抹零
+          saleReceipts.push({ sale_id: s.id, amount: 0, rounding_adjustment: receivable });
+        }
+      }
+      
+      // 过滤掉 amount=0 且 rounding=0 的（理论上不会有）
+      const validReceipts = saleReceipts.filter(r => r.amount > 0 || r.rounding_adjustment > 0);
+
+      const res = await apiPost('/v4/finished-product-sales/batch-receipts', {
+        sale_receipts: validReceipts,
+        receipt_date: batchReceiptDate,
+        payment_method: batchReceiptMethod,
+        bank_account_id: batchReceiptMethod !== 'balance' ? (batchReceiptBankAccountId ? Number(batchReceiptBankAccountId) : null) : null,
+        notes: batchReceiptDescription.trim() || undefined,
+      }, '合并收款成功');
+      if (res.ok) {
+        setShowBatchPaymentModal(false);
+        setSelectedIds(new Set());
+        loadSales();
+      }
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || '合并收款失败');
+    } finally {
+      setBatchPaymentLoading(false);
+    }
+  };
+
   const handleExport = async () => {
     setExportLoading(true);
     try {
@@ -550,6 +638,7 @@ export function FinishedProductSales() {
             <Button size="sm" variant="ghost" disabled={!single} onClick={() => singleSale && handleViewDetail(singleSale)} title="查看"><Eye className="h-4 w-4 mr-1" />查看</Button>
             <Button size="sm" variant="ghost" disabled={!single} onClick={() => singleSale && handleEdit(singleSale)} title="编辑"><Pencil className="h-4 w-4 mr-1" />编辑</Button>
             <Button size="sm" variant="ghost" className="text-green-600" disabled={!single || (singleSale?.payment_status === 'fully_paid')} onClick={() => singleSale && handlePaymentOpen(singleSale)} title="收款"><Banknote className="h-4 w-4 mr-1" />收款</Button>
+            {multi && <Button size="sm" variant="ghost" className="text-green-700" onClick={handleBatchPaymentOpen} title="合并收款"><Banknote className="h-4 w-4 mr-1" />合并收款</Button>}
             <Button size="sm" variant="ghost" className="text-orange-600" disabled={!single} onClick={() => singleSale && handleAdjustOpen(singleSale)} title="调整"><SlidersHorizontal className="h-4 w-4 mr-1" />调整</Button>
             <Button size="sm" variant="ghost" className="text-purple-600" disabled={!single} onClick={() => { if (singleSale) { setReturnPrefillSale({ type: "finished_product", sale: singleSale }); setReturnFormOpen(true); } }} title="售后"><ArrowLeftRight className="h-4 w-4 mr-1" />售后</Button>
             <Button size="sm" variant="ghost" className="text-red-500" disabled={!hasSelection} onClick={multi ? handleBatchDelete : () => singleSale && handleDelete(singleSale)} title="删除"><Trash2 className="h-4 w-4 mr-1" />{multi ? '批量删除' : '删除'}</Button>
@@ -1040,7 +1129,9 @@ export function FinishedProductSales() {
                 <Label className="text-xs">收款方式</Label>
                 <Select value={receiptMethod} onValueChange={(v) => { setReceiptMethod(v ?? ''); if (v === 'balance') setReceiptBankAccountId(''); }}>
                   <SelectTrigger className="h-8 text-xs">
-                    <SelectValue />
+                    <SelectValue placeholder="选择收款方式">
+                      {paymentMethodMap[receiptMethod] || receiptMethod}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="bank_transfer">银行转账</SelectItem>
@@ -1156,6 +1247,190 @@ export function FinishedProductSales() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowPaymentModal(false)}>取消</Button>
             <Button onClick={handlePaymentSave} disabled={paymentLoading} className="bg-green-600 hover:bg-green-700">{paymentLoading ? '收款中...' : '确认收款'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 合并收款弹窗 */}
+      <Dialog open={showBatchPaymentModal} onOpenChange={setShowBatchPaymentModal}>
+        <DialogContent className="max-w-[550px] max-h-[85vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle>💰 合并收款</DialogTitle>
+            <DialogDescription>
+              共选中 {selectedSales.length} 个销售单
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* 选中销售单列表 */}
+            <div className="border rounded-md overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs">销售单号</th>
+                    <th className="px-3 py-2 text-left text-xs">日期</th>
+                    <th className="px-3 py-2 text-right text-xs">待收</th>
+                    <th className="px-3 py-2 text-right text-xs">本次分配</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const totalReceivable = selectedSales.reduce((sum, s) => sum + Math.max(0, (s.net_amount || 0) - (s.paid_amount || 0)), 0);
+                    const inputAmount = Number(batchReceiptAmount || 0);
+                    const sortedSales = [...selectedSales].sort((a, b) => new Date(a.sale_date).getTime() - new Date(b.sale_date).getTime());
+                    let remaining = inputAmount;
+                    return sortedSales.map(s => {
+                      const receivable = Math.max(0, (s.net_amount || 0) - (s.paid_amount || 0));
+                      let amount = 0;
+                      let rounding = 0;
+                      if (remaining >= receivable) {
+                        amount = receivable;
+                        remaining = round2(remaining - receivable);
+                      } else if (remaining > 0) {
+                        amount = remaining;
+                        rounding = round2(receivable - remaining);
+                        remaining = 0;
+                      } else {
+                        rounding = receivable;
+                      }
+                      return { s, amount, rounding };
+                    }).map(({ s, amount, rounding }) => (
+                      <tr key={s.id} className="border-t">
+                        <td className="px-3 py-1.5 font-mono text-xs">{s.sale_no}</td>
+                        <td className="px-3 py-1.5 text-xs">{s.sale_date}</td>
+                        <td className="px-3 py-1.5 text-right text-xs">¥{Math.max(0, Number(s.net_amount || 0) - Number(s.paid_amount || 0)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="px-3 py-1.5 text-right text-xs">
+                          {amount > 0 && <span className="text-green-600">+¥{amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                          {rounding > 0 && <span className="text-orange-500 ml-1">抹零¥{rounding.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                          {amount === 0 && rounding === 0 && <span className="text-muted-foreground">—</span>}
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                  <tr className="bg-muted/30 font-medium">
+                    <td className="px-3 py-2 text-xs" colSpan={2}>合计</td>
+                    <td className="px-3 py-2 text-right text-xs">¥{selectedSales.reduce((sum, s) => sum + Math.max(0, Number(s.net_amount || 0) - Number(s.paid_amount || 0)), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="px-3 py-2 text-right text-xs">
+                      {(() => {
+                        const totalReceivable = selectedSales.reduce((sum, s) => sum + Math.max(0, (s.net_amount || 0) - (s.paid_amount || 0)), 0);
+                        const inputAmount = Number(batchReceiptAmount || 0);
+                        const rounding = Math.max(0, round2(totalReceivable - inputAmount));
+                        return (
+                          <>
+                            <span className="text-green-600">+¥{Math.min(inputAmount, totalReceivable).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                            {rounding > 0 && <span className="text-orange-500 ml-1">抹零¥{rounding.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                          </>
+                        );
+                      })()}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="space-y-2">
+              <Label>本次总收款金额</Label>
+              <Input
+                inputMode="decimal"
+                value={batchReceiptAmount}
+                onChange={(e) => setBatchReceiptAmount(e.target.value)}
+                placeholder="输入总收款金额"
+                className="text-lg"
+              />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>待收合计：¥{selectedSales.reduce((sum, s) => sum + Math.max(0, (s.net_amount || 0) - (s.paid_amount || 0)), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span>
+                  {(() => {
+                    const totalReceivable = selectedSales.reduce((sum, s) => sum + Math.max(0, (s.net_amount || 0) - (s.paid_amount || 0)), 0);
+                    const inputAmount = Number(batchReceiptAmount || 0);
+                    const rounding = Math.max(0, round2(totalReceivable - inputAmount));
+                    return rounding > 0 ? `抹零 ¥${rounding.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '';
+                  })()}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">收款方式</Label>
+                <Select value={batchReceiptMethod} onValueChange={(v) => { setBatchReceiptMethod(v ?? ''); if (v === 'balance') setBatchReceiptBankAccountId(''); }}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="选择收款方式">
+                      {paymentMethodMap[batchReceiptMethod] || batchReceiptMethod}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bank_transfer">银行转账</SelectItem>
+                    <SelectItem value="cash">现金</SelectItem>
+                    <SelectItem value="check">支票</SelectItem>
+                    <SelectItem value="scan">扫码</SelectItem>
+                    <SelectItem value="balance">余额抵扣</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {batchReceiptMethod !== 'balance' ? (
+                <div className="space-y-1">
+                  <Label className="text-xs">收款银行</Label>
+                  <Select value={batchReceiptBankAccountId} onValueChange={(v) => setBatchReceiptBankAccountId(v ?? '')}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="选择银行">
+                        {(() => {
+                          const b = bankAccounts.find((ba: any) => String(ba.id) === batchReceiptBankAccountId);
+                          return b ? `${b.bank_name} ···${b.account_number?.slice(-4)}` : '选择银行';
+                        })()}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bankAccounts.map((b: any) => (
+                        <SelectItem key={b.id} value={String(b.id)} className="text-xs">{b.bank_name} ···{b.account_number?.slice(-4)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Label className="text-xs">客户余额</Label>
+                  <div className="h-8 flex items-center px-3 rounded-md border bg-muted/30 text-xs">
+                    {(() => {
+                      const firstCustomer = selectedSales[0]?.customer;
+                      const c = customersListV4.find((c: any) => c.name === firstCustomer);
+                      const bal = Number(c?.prepaid_balance || 0);
+                      return (
+                        <span className={bal > 0 ? 'text-green-600 font-medium' : 'text-muted-foreground'}>
+                          {c ? `¥${bal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">收款日期</Label>
+              <Input type="date" value={batchReceiptDate} onChange={(e) => setBatchReceiptDate(e.target.value)} className="h-8 text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">收款描述</Label>
+              <Input
+                value={batchReceiptDescription}
+                onChange={(e) => setBatchReceiptDescription(e.target.value)}
+                placeholder="如：张三转账/合并收款等"
+                className="h-8 text-xs"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBatchPaymentModal(false)}>取消</Button>
+            <Button onClick={handleBatchPaymentSave} disabled={batchPaymentLoading} className="bg-green-600 hover:bg-green-700">
+              {batchPaymentLoading ? '收款中...' : (() => {
+                const totalReceivable = selectedSales.reduce((sum, s) => sum + Math.max(0, (s.net_amount || 0) - (s.paid_amount || 0)), 0);
+                const inputAmount = Number(batchReceiptAmount || 0);
+                const rounding = Math.max(0, round2(totalReceivable - inputAmount));
+                if (rounding > 0) {
+                  return `确认合并收款 ¥${inputAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}（抹零 ¥${rounding.toLocaleString('en-US', { minimumFractionDigits: 2 })}）`;
+                }
+                return `确认合并收款 ¥${Number(batchReceiptAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+              })()}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -516,6 +516,7 @@ async def list_transactions(
     category: str | None = Query(None, description="分类"),
     related_sale_id: int | None = Query(None, description="关联销售单ID"),
     sale_no: str | None = Query(None, description="关联销售单号（模糊匹配，如20260106匹配XS20260106-XXX）"),
+    invoice_no: str | None = Query(None, description="关联发票号（模糊匹配）"),
     is_locked: bool | None = Query(None, description="锁定状态筛选"),
     start_date: str | None = Query(None, description="开始日期"),
     end_date: str | None = Query(None, description="结束日期"),
@@ -529,7 +530,7 @@ async def list_transactions(
     from datetime import date
     sd = date.fromisoformat(start_date) if start_date else None
     ed = date.fromisoformat(end_date) if end_date else None
-    items, total = await FinanceService.list_transactions(db, type=type, category=category, related_sale_id=related_sale_id, sale_no=sale_no, is_locked=is_locked, start_date=sd, end_date=ed, search=search, bank_account_id=bank_account_id, skip=skip, limit=limit)
+    items, total = await FinanceService.list_transactions(db, type=type, category=category, related_sale_id=related_sale_id, sale_no=sale_no, invoice_no=invoice_no, is_locked=is_locked, start_date=sd, end_date=ed, search=search, bank_account_id=bank_account_id, skip=skip, limit=limit)
     
     # 批量获取关联发票号
     invoice_ids = [r.related_invoice_id for r in items if r.related_invoice_id]
@@ -543,9 +544,45 @@ async def list_transactions(
     result_items = []
     for r in items:
         data = TransactionRecordResponse.model_validate(r).model_dump()
-        if r.related_invoice_id:
+        # 优先使用直接存储的 related_invoice_no（支持多个逗号分隔）
+        if r.related_invoice_no:
+            data["related_invoice_no"] = r.related_invoice_no
+        elif r.related_invoice_id:
             data["related_invoice_no"] = invoice_map.get(r.related_invoice_id)
         result_items.append(data)
+    
+    # 购汇交易：补充关联发票号（多张逗号间隔）和购汇单号
+    exchange_ids = [r.related_exchange_id for r in items if r.related_exchange_id]
+    if exchange_ids:
+        from app.models import ExchangeRecord
+        ex_result = await db.execute(
+            select(ExchangeRecord.id, ExchangeRecord.exchange_no, ExchangeRecord.related_invoice_ids)
+            .where(ExchangeRecord.id.in_(exchange_ids))
+        )
+        exchange_map = {row[0]: {"exchange_no": row[1], "related_invoice_ids": row[2]} for row in ex_result.all()}
+        
+        # 批量获取所有关联发票号
+        all_ex_inv_ids = set()
+        for ex in exchange_map.values():
+            if ex["related_invoice_ids"]:
+                all_ex_inv_ids.update(ex["related_invoice_ids"])
+        ex_invoice_map = {}
+        if all_ex_inv_ids:
+            ex_inv_result = await db.execute(
+                select(ImportInvoice.id, ImportInvoice.invoice_no).where(ImportInvoice.id.in_(list(all_ex_inv_ids)))
+            )
+            ex_invoice_map = {row[0]: row[1] for row in ex_inv_result.all()}
+        
+        for item in result_items:
+            ex_id = item.get("related_exchange_id")
+            if ex_id and exchange_map.get(ex_id):
+                ex_data = exchange_map[ex_id]
+                # 关联发票号（多张逗号间隔）
+                if ex_data["related_invoice_ids"]:
+                    nos = [ex_invoice_map.get(iid, str(iid)) for iid in ex_data["related_invoice_ids"]]
+                    item["related_invoice_no"] = ", ".join(nos)
+                # 关联单据 = 购汇单号
+                item["related_exchange_no"] = ex_data["exchange_no"]
     
     return {
         "total": total,

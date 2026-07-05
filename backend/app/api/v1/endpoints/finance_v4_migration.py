@@ -395,7 +395,7 @@ async def api_get_customers(
     return {
         "success": True,
         "data": [
-            {"id": c.id, "name": c.name, "code": c.code, "contact_person": c.contact_person, "phone": c.phone, "address": c.address, "logistics_info": c.logistics_info, "customer_level": c.customer_level}
+            {"id": c.id, "name": c.name, "code": c.code, "contact_person": c.contact_person, "phone": c.phone, "address": c.address, "logistics_info": c.logistics_info, "customer_level": c.customer_level, "prepaid_balance": float(c.prepaid_balance or 0)}
             for c in customers
         ]
     }
@@ -1755,6 +1755,163 @@ async def api_delete_finished_sale_receipt(sale_id: int, receipt_id: int, db: As
 
     await db.commit()
     return {"success": True}
+
+
+@router.post("/finished-product-sales/batch-receipts")
+async def api_batch_create_finished_sale_receipts(data: dict, db: AsyncSession = Depends(get_db)):
+    """合并收款：多个销售单一次性收款（创建多条收款记录，共享一条交易流水）"""
+    from app.models.enums import TransactionCategory, TransactionType
+
+    sale_receipts = data.get("sale_receipts", [])
+    if not sale_receipts:
+        raise HTTPException(status_code=400, detail="未提供收款明细")
+
+    # 校验所有金额 > 0
+    for item in sale_receipts:
+        amount = Decimal(str(item.get("amount", 0)))
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="每笔收款金额必须大于0")
+
+    # 查询所有销售单
+    sale_ids = [item["sale_id"] for item in sale_receipts]
+    sale_result = await db.execute(
+        select(FinishedProductSaleV2).where(FinishedProductSaleV2.id.in_(sale_ids))
+    )
+    sales = {s.id: s for s in sale_result.scalars().all()}
+
+    for sid in sale_ids:
+        if sid not in sales:
+            raise HTTPException(status_code=404, detail=f"销售记录 #{sid} 不存在")
+
+    # 校验同一客户（可选但建议）
+    customers = list(set(s.customer for s in sales.values() if s.customer))
+    if len(customers) > 1:
+        raise HTTPException(status_code=400, detail=f"合并收款只能针对同一客户，当前涉及客户: {', '.join(customers)}")
+
+    customer_name = customers[0] if customers else None
+    total_amount = sum(Decimal(str(item["amount"])) for item in sale_receipts)
+
+    # 余额抵扣：校验客户总余额
+    is_balance_payment = data.get("payment_method") == "balance"
+    company = None
+    if is_balance_payment and customer_name:
+        company_result = await db.execute(
+            select(Company).where(
+                Company.name == customer_name,
+                Company.type == CompanyType.CUSTOMER
+            )
+        )
+        company = company_result.scalar_one_or_none()
+        if not company:
+            raise HTTPException(status_code=404, detail="客户不存在，无法使用余额抵扣")
+        available_balance = Decimal(str(company.prepaid_balance or 0))
+        if available_balance < total_amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"客户预付款余额不足（当前余额 ¥{available_balance}，需扣款 ¥{total_amount}）"
+            )
+
+    receipt_date = _parse_date(data.get("receipt_date"))
+    payment_method = data.get("payment_method", "bank_transfer")
+    bank_account_id = data.get("bank_account_id")
+    reference_no = data.get("reference_no")
+    notes = data.get("notes")
+
+    # 非余额抵扣：创建一条共享交易流水
+    transaction_id = None
+    if not is_balance_payment and total_amount > 0:
+        user_notes = notes
+        desc = "销售合并收款"
+        sale_nos = ", ".join([f"#{sid}" for sid in sale_ids[:3]])
+        if len(sale_ids) > 3:
+            sale_nos += f" 等共{len(sale_ids)}单"
+        desc = f"{desc} {sale_nos}"
+        if user_notes:
+            desc = f"{desc} - {user_notes}"
+
+        transaction = TransactionRecord(
+            transaction_date=receipt_date,
+            type=TransactionType.INCOME,
+            category=TransactionCategory.MAIN_BUSINESS_REVENUE,
+            amount=total_amount,
+            currency="CNY",
+            to_account_id=bank_account_id,
+            counterparty_name=customer_name,
+            reference_no=reference_no or sale_nos,
+            description=desc,
+            notes=user_notes,
+            is_confirmed=True,
+        )
+        transaction.related_sale_ids = sale_ids
+        db.add(transaction)
+        await db.flush()
+        transaction_id = transaction.id
+
+    # 为每个销售单创建收款记录 + 处理抹零
+    created_receipts = []
+    for item in sale_receipts:
+        sale_id = item["sale_id"]
+        amount = Decimal(str(item["amount"]))
+        rounding_adj = Decimal(str(item.get("rounding_adjustment", 0) or 0))
+        sale = sales[sale_id]
+
+        # 抹零处理：更新销售单的 rounding 并重算 net_amount
+        if rounding_adj > 0:
+            sale.rounding = (sale.rounding or Decimal("0")) + rounding_adj
+            sale.actual_amount = sale.total_amount - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - (sale.rounding or Decimal("0"))
+            sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
+            await db.flush()
+
+        # 只创建 amount > 0 的收款记录
+        if amount > 0:
+            receipt = FinishedProductReceipt(
+                sale_v2_id=sale_id,
+                receipt_date=receipt_date,
+                amount=amount,
+                payment_method=payment_method,
+                bank_account_id=bank_account_id if not is_balance_payment else None,
+                reference_no=reference_no,
+                notes=notes,
+                transaction_id=transaction_id,
+            )
+            db.add(receipt)
+            created_receipts.append({"sale_id": sale_id, "amount": float(amount), "rounding": float(rounding_adj)})
+
+    # 余额抵扣：扣减客户预付余额（包含抹零）
+    total_rounding = sum(Decimal(str(item.get("rounding_adjustment", 0) or 0)) for item in sale_receipts)
+    if is_balance_payment and company:
+        company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) - total_amount - total_rounding
+
+    await db.flush()
+
+    # 更新每个销售单的已收金额和状态
+    for sale_id in sale_ids:
+        receipt_result = await db.execute(
+            select(func.sum(FinishedProductReceipt.amount))
+            .where(FinishedProductReceipt.sale_v2_id == sale_id)
+        )
+        paid_amount = receipt_result.scalar() or Decimal("0")
+        sale = sales[sale_id]
+        sale.paid_amount = paid_amount
+        net_amount = sale.net_amount or Decimal("0")
+        if paid_amount >= net_amount and net_amount > 0:
+            sale.status = "paid"
+            sale.paid = 1
+        elif paid_amount > 0:
+            sale.paid = 1
+        else:
+            sale.paid = 0
+
+    await db.commit()
+    return {
+        "success": True,
+        "data": {
+            "total_amount": float(total_amount),
+            "sale_count": len(sale_receipts),
+            "receipts": created_receipts,
+            "transaction_id": transaction_id,
+        }
+    }
 
 
 # ==================== 售后记录 ====================

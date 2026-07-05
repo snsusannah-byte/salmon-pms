@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Loader2, Eye, ChevronLeft, ChevronRight, Search, Download, Printer, X, FileText, Globe, Warehouse } from "lucide-react";
+import { Loader2, Eye, ChevronLeft, ChevronRight, Search, Download, Printer, X, FileText, Globe, Warehouse, Ship } from "lucide-react";
 
 function fmt$(v: number | string | null | undefined) {
   const n = Number(v ?? 0);
@@ -34,7 +34,7 @@ const IMPORTER_NAMES = ["绍兴中挪食品有限责任公司", "浙江中挪进
 const DEFAULT_SUPPLIER_NAME = "ICE SEAFOOD AS";
 
 export function PayableStatementsTab() {
-  const [activeTab, setActiveTab] = useState<"import" | "domestic">("import");
+  const [activeTab, setActiveTab] = useState<"import" | "domestic" | "customs_broker">("import");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [importerId, setImporterId] = useState<string>("");
@@ -62,6 +62,7 @@ export function PayableStatementsTab() {
     setSelectedSupplierId("");
     setSupplierSearch("");
     setImporterId("");
+    setDoSearch(false);
   }, [activeTab]);
 
   // 公司列表（用于筛选进口商、供应商）
@@ -85,14 +86,32 @@ export function PayableStatementsTab() {
     return companies.filter(c => !IMPORTER_NAMES.includes(c.name));
   }, [companies]);
 
+  // 报关行列表
+  const { data: brokerCompanies } = useQuery({
+    queryKey: ["customs-brokers-list"],
+    queryFn: async () => {
+      const res = await api.get("/v1/companies?supplier_category=customs_broker&limit=500");
+      return (res.data?.items || []) as { id: number; name: string; code?: string; type?: string }[];
+    },
+    enabled: activeTab === "customs_broker",
+  });
+
   const filteredSuppliers = useMemo(() => {
+    if (activeTab === "customs_broker") {
+      const pool = brokerCompanies || [];
+      if (!supplierSearch.trim()) return pool;
+      return pool.filter(c =>
+        c.name.toLowerCase().includes(supplierSearch.toLowerCase()) ||
+        (c.code || "").toLowerCase().includes(supplierSearch.toLowerCase())
+      );
+    }
     if (!suppliers) return [];
     if (!supplierSearch.trim()) return suppliers;
     return suppliers.filter(c =>
       c.name.toLowerCase().includes(supplierSearch.toLowerCase()) ||
       (c.code || "").toLowerCase().includes(supplierSearch.toLowerCase())
     );
-  }, [suppliers, supplierSearch]);
+  }, [suppliers, brokerCompanies, supplierSearch, activeTab]);
 
   // 默认选中 ICE SEAFOOD AS（仅进口采购标签）
   useEffect(() => {
@@ -108,6 +127,20 @@ export function PayableStatementsTab() {
   const { data, isLoading } = useQuery({
     queryKey: ["reports-payable", startDate, endDate, doSearch, activeTab, importerId, selectedSupplierId],
     queryFn: async () => {
+      if (activeTab === "customs_broker") {
+        const params = new URLSearchParams();
+        if (startDate) params.set("start_date", startDate);
+        if (endDate) params.set("end_date", endDate);
+        if (selectedSupplierId) params.set("broker_id", selectedSupplierId);
+        const res = await api.get(`/v1/reports/customs-broker-statements?${params}`);
+        return res.data as {
+          total: number;
+          items: any[];
+          total_payable: number;
+          start_date: string;
+          end_date: string;
+        };
+      }
       const params = new URLSearchParams({ skip: "0", limit: "500" });
       if (startDate) params.set("start_date", startDate);
       if (endDate) params.set("end_date", endDate);
@@ -136,6 +169,13 @@ export function PayableStatementsTab() {
     const params = new URLSearchParams();
     if (startDate) params.set("start_date", startDate);
     if (endDate) params.set("end_date", endDate);
+    if (activeTab === "customs_broker") {
+      if (selectedSupplierId) params.set("broker_id", selectedSupplierId);
+      const url = `/api/v1/reports/customs-broker-statements/export?${params}`;
+      window.open(url, "_blank");
+      toast.success("正在导出...");
+      return;
+    }
     if (selectedSupplierId) params.set("supplier_id", selectedSupplierId);
     if (importerId) params.set("importer_id", importerId);
     params.set("purchase_type", activeTab);
@@ -149,13 +189,16 @@ export function PayableStatementsTab() {
   const activeItem = useMemo(() => {
     if (!data?.items?.length) return null;
     if (selectedSupplierId) {
+      if (activeTab === "customs_broker") {
+        return data.items.find(i => String(i.broker_id) === selectedSupplierId) || null;
+      }
       return data.items.find(i => String(i.supplier_id) === selectedSupplierId) || null;
     }
     return null;
-  }, [data, selectedSupplierId]);
+  }, [data, selectedSupplierId, activeTab]);
 
-  const tabTitle = activeTab === "import" ? "进口采购应付" : "国内采购应付";
-  const tabIcon = activeTab === "import" ? <Globe className="h-5 w-5 text-blue-500" /> : <Warehouse className="h-5 w-5 text-green-500" />;
+  const tabTitle = activeTab === "import" ? "进口采购应付" : activeTab === "domestic" ? "国内采购应付" : "报关行应付";
+  const tabIcon = activeTab === "import" ? <Globe className="h-5 w-5 text-blue-500" /> : activeTab === "domestic" ? <Warehouse className="h-5 w-5 text-green-500" /> : <Ship className="h-5 w-5 text-orange-500" />;
 
   return (
     <>
@@ -175,13 +218,16 @@ export function PayableStatementsTab() {
       `}</style>
       <div className="space-y-4">
         {/* Tabs 切换 */}
-        <Tabs value={activeTab} onValueChange={(v: string) => { setActiveTab(v as "import" | "domestic"); setDoSearch(false); }}>
-          <TabsList className="grid w-full grid-cols-2">
+        <Tabs value={activeTab} onValueChange={(v: string) => { setActiveTab(v as "import" | "domestic" | "customs_broker"); setDoSearch(false); }}>
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="import" className="flex items-center gap-2">
               <Globe className="h-4 w-4" /> 进口采购应付
             </TabsTrigger>
             <TabsTrigger value="domestic" className="flex items-center gap-2">
               <Warehouse className="h-4 w-4" /> 国内采购应付
+            </TabsTrigger>
+            <TabsTrigger value="customs_broker" className="flex items-center gap-2">
+              <Ship className="h-4 w-4" /> 报关行应付
             </TabsTrigger>
           </TabsList>
 
@@ -220,12 +266,14 @@ export function PayableStatementsTab() {
                     </div>
                   )}
                   <div className="space-y-1 relative" ref={supplierDropdownRef}>
-                    <Label className="text-xs text-muted-foreground">供应商（留空=全部）</Label>
+                    <Label className="text-xs text-muted-foreground">
+                      {activeTab === "customs_broker" ? "报关行（留空=全部）" : "供应商（留空=全部）"}
+                    </Label>
                     <div className="relative">
                       <Input
                         value={supplierSearch || (selectedSupplierId && companies?.find(c => String(c.id) === selectedSupplierId)?.name || "")}
                         onChange={e => { setSupplierSearch(e.target.value); setSelectedSupplierId(""); }}
-                        placeholder="搜索供应商..."
+                        placeholder={activeTab === "customs_broker" ? "搜索报关行..." : "搜索供应商..."}
                         className="pr-8"
                       />
                       {selectedSupplierId && (
@@ -259,7 +307,7 @@ export function PayableStatementsTab() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button onClick={handleSearch} className={activeTab === "import" ? "bg-blue-600 hover:bg-blue-700" : "bg-green-600 hover:bg-green-700"}>
+                  <Button onClick={handleSearch} className={activeTab === "import" ? "bg-blue-600 hover:bg-blue-700" : activeTab === "customs_broker" ? "bg-orange-600 hover:bg-orange-700" : "bg-green-600 hover:bg-green-700"}>
                     <Search className="h-4 w-4 mr-1" /> 查询
                   </Button>
                   <Button variant="outline" onClick={exportCSV} disabled={!data?.items?.length}>
@@ -269,7 +317,7 @@ export function PayableStatementsTab() {
                     <Printer className="h-4 w-4 mr-1" /> 打印对账单
                   </Button>
                   <span className="text-xs text-muted-foreground ml-2">
-                    {activeTab === "import" ? "进口商采购 + 报关行费用" : "国内采购单 + 物料采购"}
+                    {activeTab === "import" ? "进口商采购 + 报关行费用" : activeTab === "customs_broker" ? "报关行费用 + 付款明细" : "国内采购单 + 物料采购"}
                   </span>
                 </div>
               </CardContent>
@@ -292,17 +340,29 @@ export function PayableStatementsTab() {
                       <div className="space-y-4 print-content">
                         {/* 打印标题 */}
                         <div className="hidden print:block text-center space-y-1 mb-4">
-                          <h2 className="text-xl font-bold">{activeItem.supplier_name}{activeTab === "import" ? "进口" : "国内"}对账单</h2>
+                          <h2 className="text-xl font-bold">
+                            {activeTab === "customs_broker" ? activeItem.broker_name : activeItem.supplier_name}
+                            {activeTab === "import" ? "进口" : activeTab === "domestic" ? "国内" : "报关行"}对账单
+                          </h2>
                           <p className="text-sm">对账周期：{periodText}</p>
                         </div>
 
                         {/* 屏幕汇总 */}
                         <div className="bg-muted/30 rounded-lg p-4 space-y-2 print:hidden">
                           <div className="flex items-center justify-between">
-                            <div className="text-lg font-semibold">{activeItem.supplier_name}</div>
+                            <div className="text-lg font-semibold">
+                              {activeTab === "customs_broker" ? activeItem.broker_name : activeItem.supplier_name}
+                            </div>
                             <div className="text-sm text-muted-foreground">对账周期：{periodText}</div>
                           </div>
-                          {activeItem.supplier_type === "customs_broker" ? (
+                          {activeTab === "customs_broker" ? (
+                            <div className="grid grid-cols-4 gap-4 text-sm text-center">
+                              <div><div className="text-xs text-muted-foreground">期初欠款</div><div className="font-medium">{fmt$(activeItem.opening_balance)}</div></div>
+                              <div><div className="text-xs text-muted-foreground">本期费用</div><div className="font-medium text-orange-600">{fmt$(activeItem.current_fees || 0)}</div></div>
+                              <div><div className="text-xs text-muted-foreground">本期付款</div><div className="font-medium text-green-600">{fmt$(activeItem.current_payments)}</div></div>
+                              <div><div className="text-xs text-muted-foreground">期末欠款</div><div className={cn("font-medium", Number(activeItem.closing_balance) > 0 ? "text-red-600" : "text-green-600")}>{fmt$(activeItem.closing_balance)}</div></div>
+                            </div>
+                          ) : activeItem.supplier_type === "customs_broker" ? (
                             <div className="grid grid-cols-4 gap-4 text-sm text-center">
                               <div><div className="text-xs text-muted-foreground">期初欠款</div><div className="font-medium">{fmt$(activeItem.opening_balance)}</div></div>
                               <div><div className="text-xs text-muted-foreground">本期费用</div><div className="font-medium text-orange-600">{fmt$(activeItem.current_expenses || 0)}</div></div>
@@ -331,142 +391,226 @@ export function PayableStatementsTab() {
                         </div>
 
                         {/* 采购明细 + 购汇明细（进口采购并列布局） */}
-                        {(activeItem.supplier_type || '') !== "customs_broker" && (
-                          <>
-                            {activeTab === "import" ? (
-                              /* 进口采购：采购明细 + 购汇明细 并列 */
-                              <div className="grid grid-cols-2 gap-4">
-                                {/* 左侧：采购明细 */}
-                                <div className="space-y-1">
-                                  <h4 className="text-sm font-medium">采购明细</h4>
-                                  <div className="border rounded-md">
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow className="bg-muted/20">
-                                          <TableHead className="text-xs py-1.5">采购日期</TableHead>
-                                          <TableHead className="text-xs py-1.5">发票号</TableHead>
-                                          <TableHead className="text-xs py-1.5">进口商</TableHead>
-                                          <TableHead className="text-xs py-1.5 text-right">金额(USD)</TableHead>
-                                          <TableHead className="text-xs py-1.5">购汇状态</TableHead>
-                                          <TableHead className="text-xs py-1.5">购汇单号</TableHead>
+                        {activeTab === "import" && (
+                          <div className="grid grid-cols-2 gap-4">
+                            {/* 左侧：采购明细 */}
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium">采购明细</h4>
+                              <div className="border rounded-md">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/20">
+                                      <TableHead className="text-xs py-1.5">采购日期</TableHead>
+                                      <TableHead className="text-xs py-1.5">发票号</TableHead>
+                                      <TableHead className="text-xs py-1.5">进口商</TableHead>
+                                      <TableHead className="text-xs py-1.5 text-right">金额(USD)</TableHead>
+                                      <TableHead className="text-xs py-1.5">购汇状态</TableHead>
+                                      <TableHead className="text-xs py-1.5">购汇单号</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {(activeItem.purchase_details || []).length === 0 ? (
+                                      <TableRow className="print-empty"><TableCell colSpan={6} className="text-xs text-center text-muted-foreground py-2">无采购明细</TableCell></TableRow>
+                                    ) : (
+                                      (activeItem.purchase_details || []).map((d: any, idx: number) => (
+                                        <TableRow key={idx}>
+                                          <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
+                                          <TableCell className="text-xs py-1.5">{d.invoice_no || "-"}</TableCell>
+                                          <TableCell className="text-xs py-1.5">{d.importer_name || "-"}</TableCell>
+                                          <TableCell className="text-xs py-1.5 text-right">${Number(d.amount_usd || 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
+                                          <TableCell className="text-xs py-1.5">
+                                            {d.exchange_status === "exchanged" ? "✅ 已购汇" : d.exchange_status === "partial" ? "⏳ 部分购汇" : "❌ 未购汇"}
+                                          </TableCell>
+                                          <TableCell className="text-xs py-1.5">{d.exchange_no || "-"}</TableCell>
                                         </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {(activeItem.purchase_details || []).length === 0 ? (
-                                          <TableRow className="print-empty"><TableCell colSpan={6} className="text-xs text-center text-muted-foreground py-2">无采购明细</TableCell></TableRow>
-                                        ) : (
-                                          (activeItem.purchase_details || []).map((d: any, idx: number) => (
-                                            <TableRow key={idx}>
-                                              <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
-                                              <TableCell className="text-xs py-1.5">{d.invoice_no || "-"}</TableCell>
-                                              <TableCell className="text-xs py-1.5">{d.importer_name || "-"}</TableCell>
-                                              <TableCell className="text-xs py-1.5 text-right">${Number(d.amount_usd || 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
-                                              <TableCell className="text-xs py-1.5">
-                                                {d.exchange_status === "exchanged" ? "✅ 已购汇" : d.exchange_status === "partial" ? "⏳ 部分购汇" : "❌ 未购汇"}
-                                              </TableCell>
-                                              <TableCell className="text-xs py-1.5">{d.exchange_no || "-"}</TableCell>
-                                            </TableRow>
-                                          ))
-                                        )}
-                                        <TableRow className="bg-muted/30 font-medium">
-                                          <TableCell className="text-xs py-1.5" colSpan={3}>采购合计</TableCell>
-                                          <TableCell className="text-xs py-1.5 text-right">${(activeItem.purchase_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount_usd) || 0), 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
-                                          <TableCell className="text-xs py-1.5" colSpan={2}></TableCell>
-                                        </TableRow>
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-                                </div>
+                                      ))
+                                    )}
+                                    <TableRow className="bg-muted/30 font-medium">
+                                      <TableCell className="text-xs py-1.5" colSpan={3}>采购合计</TableCell>
+                                      <TableCell className="text-xs py-1.5 text-right">${(activeItem.purchase_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount_usd) || 0), 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
+                                      <TableCell className="text-xs py-1.5" colSpan={2}></TableCell>
+                                    </TableRow>
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
 
-                                {/* 右侧：购汇明细 */}
-                                <div className="space-y-1">
-                                  <h4 className="text-sm font-medium">购汇明细</h4>
-                                  <div className="border rounded-md">
-                                    <Table>
-                                      <TableHeader>
-                                        <TableRow className="bg-muted/20">
-                                          <TableHead className="text-xs py-1.5">购汇单号</TableHead>
-                                          <TableHead className="text-xs py-1.5">购汇日期</TableHead>
-                                          <TableHead className="text-xs py-1.5 text-right">汇率</TableHead>
-                                          <TableHead className="text-xs py-1.5 text-right">购汇金额(CNY)</TableHead>
-                                          <TableHead className="text-xs py-1.5 text-right">手续费</TableHead>
-                                          <TableHead className="text-xs py-1.5 text-right">合计(CNY)</TableHead>
-                                          <TableHead className="text-xs py-1.5">关联发票</TableHead>
+                            {/* 右侧：购汇明细 */}
+                            <div className="space-y-1">
+                              <h4 className="text-sm font-medium">购汇明细</h4>
+                              <div className="border rounded-md">
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow className="bg-muted/20">
+                                      <TableHead className="text-xs py-1.5">购汇单号</TableHead>
+                                      <TableHead className="text-xs py-1.5">购汇日期</TableHead>
+                                      <TableHead className="text-xs py-1.5 text-right">汇率</TableHead>
+                                      <TableHead className="text-xs py-1.5 text-right">购汇金额(CNY)</TableHead>
+                                      <TableHead className="text-xs py-1.5 text-right">手续费</TableHead>
+                                      <TableHead className="text-xs py-1.5 text-right">合计(CNY)</TableHead>
+                                      <TableHead className="text-xs py-1.5">关联发票</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {(activeItem.exchange_details || []).length === 0 ? (
+                                      <TableRow className="print-empty"><TableCell colSpan={7} className="text-xs text-center text-muted-foreground py-2">无购汇明细</TableCell></TableRow>
+                                    ) : (
+                                      (activeItem.exchange_details || []).map((d: any, idx: number) => (
+                                        <TableRow key={idx}>
+                                          <TableCell className="text-xs py-1.5 font-mono">{d.exchange_no || "-"}</TableCell>
+                                          <TableCell className="text-xs py-1.5">{fmtDate(d.exchange_date)}</TableCell>
+                                          <TableCell className="text-xs py-1.5 text-right">{d.exchange_rate || "-"}</TableCell>
+                                          <TableCell className="text-xs py-1.5 text-right">{fmt$(d.amount_cny)}</TableCell>
+                                          <TableCell className="text-xs py-1.5 text-right">{fmt$(d.fee_cny)}</TableCell>
+                                          <TableCell className="text-xs py-1.5 text-right font-medium">{fmt$(d.total_cny)}</TableCell>
+                                          <TableCell className="text-xs py-1.5 max-w-[120px] truncate" title={d.invoice_nos || ""}>{d.invoice_nos || "-"}</TableCell>
                                         </TableRow>
-                                      </TableHeader>
-                                      <TableBody>
-                                        {(activeItem.exchange_details || []).length === 0 ? (
-                                          <TableRow className="print-empty"><TableCell colSpan={7} className="text-xs text-center text-muted-foreground py-2">无购汇明细</TableCell></TableRow>
-                                        ) : (
-                                          (activeItem.exchange_details || []).map((d: any, idx: number) => (
-                                            <TableRow key={idx}>
-                                              <TableCell className="text-xs py-1.5 font-mono">{d.exchange_no || "-"}</TableCell>
-                                              <TableCell className="text-xs py-1.5">{fmtDate(d.exchange_date)}</TableCell>
-                                              <TableCell className="text-xs py-1.5 text-right">{d.exchange_rate || "-"}</TableCell>
-                                              <TableCell className="text-xs py-1.5 text-right">{fmt$(d.amount_cny)}</TableCell>
-                                              <TableCell className="text-xs py-1.5 text-right">{fmt$(d.fee_cny)}</TableCell>
-                                              <TableCell className="text-xs py-1.5 text-right font-medium">{fmt$(d.total_cny)}</TableCell>
-                                              <TableCell className="text-xs py-1.5 max-w-[120px] truncate" title={d.invoice_nos || ""}>{d.invoice_nos || "-"}</TableCell>
-                                            </TableRow>
-                                          ))
-                                        )}
-                                        <TableRow className="bg-muted/30 font-medium">
-                                          <TableCell className="text-xs py-1.5" colSpan={3}>购汇合計</TableCell>
-                                          <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.exchange_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount_cny) || 0), 0))}</TableCell>
-                                          <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.exchange_details || []).reduce((sum: number, d: any) => sum + (Number(d.fee_cny) || 0), 0))}</TableCell>
-                                          <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.exchange_details || []).reduce((sum: number, d: any) => sum + (Number(d.total_cny) || 0), 0))}</TableCell>
-                                          <TableCell className="text-xs py-1.5"></TableCell>
-                                        </TableRow>
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-                                </div>
+                                      ))
+                                    )}
+                                    <TableRow className="bg-muted/30 font-medium">
+                                      <TableCell className="text-xs py-1.5" colSpan={3}>购汇合計</TableCell>
+                                      <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.exchange_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount_cny) || 0), 0))}</TableCell>
+                                      <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.exchange_details || []).reduce((sum: number, d: any) => sum + (Number(d.fee_cny) || 0), 0))}</TableCell>
+                                      <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.exchange_details || []).reduce((sum: number, d: any) => sum + (Number(d.total_cny) || 0), 0))}</TableCell>
+                                      <TableCell className="text-xs py-1.5"></TableCell>
+                                    </TableRow>
+                                  </TableBody>
+                                </Table>
                               </div>
-                            ) : (
-                              /* 国内采购：保持原有采购明细样式 */
-                              <div className="space-y-1">
-                                <h4 className="text-sm font-medium">采购明细</h4>
-                                <div className="border rounded-md">
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow className="bg-muted/20">
-                                        <TableHead className="text-xs py-1.5">日期</TableHead>
-                                        <TableHead className="text-xs py-1.5">发票号</TableHead>
-                                        <TableHead className="text-xs py-1.5 text-right">金额(USD)</TableHead>
-                                        <TableHead className="text-xs py-1.5 text-right">汇率</TableHead>
-                                        <TableHead className="text-xs py-1.5 text-right">金额(CNY)</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {(activeItem.purchase_details || []).length === 0 ? (
-                                        <TableRow className="print-empty"><TableCell colSpan={5} className="text-xs text-center text-muted-foreground py-2">无采购明细</TableCell></TableRow>
-                                      ) : (
-                                        (activeItem.purchase_details || []).map((d: any, idx: number) => (
-                                          <TableRow key={idx}>
-                                            <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
-                                            <TableCell className="text-xs py-1.5">{d.invoice_no || "-"}</TableCell>
-                                            <TableCell className="text-xs py-1.5 text-right">${Number(d.amount_usd || 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
-                                            <TableCell className="text-xs py-1.5 text-right">{d.exchange_rate || "-"}</TableCell>
-                                            <TableCell className="text-xs py-1.5 text-right">{fmt$(d.amount_cny)}</TableCell>
-                                          </TableRow>
-                                        ))
-                                      )}
-                                      <TableRow className="bg-muted/30 font-medium">
-                                        <TableCell className="text-xs py-1.5" colSpan={2}>采购合计</TableCell>
-                                        <TableCell className="text-xs py-1.5 text-right">${(activeItem.purchase_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount_usd) || 0), 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
-                                        <TableCell className="text-xs py-1.5"></TableCell>
-                                        <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.purchase_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount_cny) || 0), 0))}</TableCell>
-                                      </TableRow>
-                                    </TableBody>
-                                  </Table>
-                                </div>
-                              </div>
-                            )}
-                          </>
+                            </div>
+                          </div>
                         )}
 
-                        {/* 费用明细（仅报关行显示） */}
-                        {activeItem.supplier_type === "customs_broker" && (
+                        {/* 国内采购明细 */}
+                        {activeTab === "domestic" && (
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium">采购明细</h4>
+                            <div className="border rounded-md">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="bg-muted/20">
+                                    <TableHead className="text-xs py-1.5">日期</TableHead>
+                                    <TableHead className="text-xs py-1.5">发票号</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">金额(USD)</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">汇率</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">金额(CNY)</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {(activeItem.purchase_details || []).length === 0 ? (
+                                    <TableRow className="print-empty"><TableCell colSpan={5} className="text-xs text-center text-muted-foreground py-2">无采购明细</TableCell></TableRow>
+                                  ) : (
+                                    (activeItem.purchase_details || []).map((d: any, idx: number) => (
+                                      <TableRow key={idx}>
+                                        <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
+                                        <TableCell className="text-xs py-1.5">{d.invoice_no || "-"}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">${Number(d.amount_usd || 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">{d.exchange_rate || "-"}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">{fmt$(d.amount_cny)}</TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                  <TableRow className="bg-muted/30 font-medium">
+                                    <TableCell className="text-xs py-1.5" colSpan={2}>采购合计</TableCell>
+                                    <TableCell className="text-xs py-1.5 text-right">${(activeItem.purchase_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount_usd) || 0), 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</TableCell>
+                                    <TableCell className="text-xs py-1.5"></TableCell>
+                                    <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.purchase_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount_cny) || 0), 0))}</TableCell>
+                                  </TableRow>
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 清关费明细（报关行应付） */}
+                        {activeTab === "customs_broker" && (
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium">清关费明细</h4>
+                            <div className="border rounded-md">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="bg-muted/20">
+                                    <TableHead className="text-xs py-1.5">日期</TableHead>
+                                    <TableHead className="text-xs py-1.5">发票号</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">出关毛重(kg)</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">提货费</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">运费</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">报关服务费</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">目的地查验费</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">冷藏费</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">清关费合计</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {(activeItem.fee_details || []).length === 0 ? (
+                                    <TableRow className="print-empty"><TableCell colSpan={9} className="text-xs text-center text-muted-foreground py-2">无清关费明细</TableCell></TableRow>
+                                  ) : (
+                                    (activeItem.fee_details || []).map((d: any, idx: number) => (
+                                      <TableRow key={idx}>
+                                        <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
+                                        <TableCell className="text-xs py-1.5">{d.invoice_no || "-"}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">{d.gross_weight_kg != null ? Number(d.gross_weight_kg).toFixed(2) : "-"}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">{fmt$(d.clearance_fee)}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">{fmt$(d.freight_fee)}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">{fmt$(d.other_costs)}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">{fmt$(d.inspection_fee)}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">{fmt$(d.quarantine_fee)}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right font-medium">{fmt$(d.grand_total)}</TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                  <TableRow className="bg-muted/30 font-medium">
+                                    <TableCell className="text-xs py-1.5" colSpan={8}>清关费合计</TableCell>
+                                    <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.fee_details || []).reduce((sum: number, d: any) => sum + (Number(d.grand_total) || 0), 0))}</TableCell>
+                                  </TableRow>
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 付款明细（报关行应付） */}
+                        {activeTab === "customs_broker" && (
+                          <div className="space-y-1">
+                            <h4 className="text-sm font-medium">付款明细</h4>
+                            <div className="border rounded-md">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow className="bg-muted/20">
+                                    <TableHead className="text-xs py-1.5">日期</TableHead>
+                                    <TableHead className="text-xs py-1.5 text-right">付款金额</TableHead>
+                                    <TableHead className="text-xs py-1.5">参考号</TableHead>
+                                    <TableHead className="text-xs py-1.5">描述</TableHead>
+                                    <TableHead className="text-xs py-1.5">付款银行</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {(activeItem.payment_details || []).length === 0 ? (
+                                    <TableRow className="print-empty"><TableCell colSpan={5} className="text-xs text-center text-muted-foreground py-2">无付款明细</TableCell></TableRow>
+                                  ) : (
+                                    (activeItem.payment_details || []).map((d: any, idx: number) => (
+                                      <TableRow key={idx}>
+                                        <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
+                                        <TableCell className="text-xs py-1.5 text-right">{fmt$(d.amount)}</TableCell>
+                                        <TableCell className="text-xs py-1.5">{d.reference_no || "-"}</TableCell>
+                                        <TableCell className="text-xs py-1.5">{d.description || "-"}</TableCell>
+                                        <TableCell className="text-xs py-1.5">{d.from_account_name || "-"}</TableCell>
+                                      </TableRow>
+                                    ))
+                                  )}
+                                  <TableRow className="bg-muted/30 font-medium">
+                                    <TableCell className="text-xs py-1.5">付款合计</TableCell>
+                                    <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.payment_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0))}</TableCell>
+                                    <TableCell className="text-xs py-1.5" colSpan={3}></TableCell>
+                                  </TableRow>
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* 费用明细（仅原有报关行显示，兼容旧数据） */}
+                        {(activeItem.supplier_type || '') === "customs_broker" && (
                         <div className="space-y-1">
                           <h4 className="text-sm font-medium">费用明细</h4>
                           <div className="border rounded-md">
@@ -557,41 +701,41 @@ export function PayableStatementsTab() {
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-sm text-muted-foreground">
-                            周期: {data?.start_date || "全部"} ~ {data?.end_date || "全部"} · 共 {data?.items?.length || 0} 位供应商
+                            周期: {data?.start_date || "全部"} ~ {data?.end_date || "全部"} · 共 {data?.items?.length || 0} 位{activeTab === "customs_broker" ? "报关行" : "供应商"}
                           </span>
                           {data && (
                             <span className="text-sm font-medium text-red-600">
-                              总应付: {activeTab === "import" ? fmtUSD(data.total_payable) : fmt$(data.total_payable)}
+                              总应付: {fmt$(data.total_payable)}
                             </span>
                           )}
                         </div>
                         <div className="space-y-3">
                           {data.items.map((item: any) => (
-                            <Card key={item.supplier_id} className="overflow-hidden cursor-pointer hover:bg-muted/50" onClick={() => setSelectedSupplierId(String(item.supplier_id))}>
+                            <Card key={item.supplier_id || item.broker_id} className="overflow-hidden cursor-pointer hover:bg-muted/50" onClick={() => setSelectedSupplierId(String(item.supplier_id || item.broker_id))}>
                               <div className="px-4 py-2 bg-muted/30 border-b">
-                                <div className="font-medium text-sm">{item.supplier_name} {item.supplier_code ? `(${item.supplier_code})` : ""}</div>
+                                <div className="font-medium text-sm">{item.supplier_name || item.broker_name} {item.supplier_code ? `(${item.supplier_code})` : ""}</div>
                               </div>
                               <div className="grid grid-cols-5 gap-4 px-4 py-3 text-sm text-center items-center">
                                 <div>
                                   <div className="text-xs text-muted-foreground">期初欠款</div>
-                                  <div className="font-medium">{activeTab === "import" && item.supplier_type !== "customs_broker" ? fmtUSD(item.opening_balance) : fmt$(item.opening_balance)}</div>
+                                  <div className="font-medium">{fmt$(item.opening_balance)}</div>
                                 </div>
                                 <div>
-                                  <div className="text-xs text-muted-foreground">本期采购</div>
-                                  <div className="font-medium text-red-600">{activeTab === "import" && item.supplier_type !== "customs_broker" ? fmtUSD(item.current_purchase) : fmt$(item.current_purchase)}</div>
+                                  <div className="text-xs text-muted-foreground">{activeTab === "customs_broker" ? "本期费用" : "本期采购"}</div>
+                                  <div className="font-medium text-red-600">{fmt$(activeTab === "customs_broker" ? item.current_fees : item.current_purchase)}</div>
                                 </div>
                                 <div>
-                                  <div className="text-xs text-muted-foreground">本期费用</div>
-                                  <div className="font-medium text-orange-600">{activeTab === "import" && item.supplier_type !== "customs_broker" ? fmtUSD(item.current_expenses || 0) : fmt$(item.current_expenses || 0)}</div>
+                                  <div className="text-xs text-muted-foreground">{activeTab === "customs_broker" ? "" : "本期费用"}</div>
+                                  <div className="font-medium text-orange-600">{activeTab === "customs_broker" ? "" : fmt$(item.current_expenses || 0)}</div>
                                 </div>
                                 <div>
                                   <div className="text-xs text-muted-foreground">本期付款</div>
-                                  <div className="font-medium text-green-600">{activeTab === "import" && item.supplier_type !== "customs_broker" ? fmtUSD(item.current_payments) : fmt$(item.current_payments)}</div>
+                                  <div className="font-medium text-green-600">{fmt$(item.current_payments)}</div>
                                 </div>
                                 <div>
                                   <div className="text-xs text-muted-foreground">期末欠款</div>
                                   <div className={cn("font-medium", Number(item.closing_balance) > 0 ? "text-red-600" : "text-green-600")}>
-                                    {activeTab === "import" && item.supplier_type !== "customs_broker" ? fmtUSD(item.closing_balance) : fmt$(item.closing_balance)}
+                                    {fmt$(item.closing_balance)}
                                   </div>
                                 </div>
                               </div>

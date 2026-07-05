@@ -65,6 +65,7 @@ const finishedProductItems = [
   { icon: PackageCheck, label: "预包装销售", path: "/finished-product-sales" },
   { icon: Factory, label: "生产管理", path: "/production" },
   { icon: Warehouse, label: "仓库管理", path: "/warehouse-v2" },
+  { icon: ArrowDownLeft, label: "入库记录", path: "/inbound-records" },
   { icon: Package, label: "采购入库", path: "/purchase-orders" },
   { icon: Archive, label: "辅料采购", path: "/material-purchases" },
   { icon: FileSpreadsheet, label: "成品报表", path: "/finished-product-reports" },

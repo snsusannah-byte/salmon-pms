@@ -51,6 +51,8 @@ class StockBase(BaseModel):
     current_qty: Decimal = Field(default=Decimal("0"))
     reserved_qty: Decimal = Field(default=Decimal("0"))
     available_qty: Decimal = Field(default=Decimal("0"))
+    current_box_count: int = Field(default=0)
+    available_box_count: int = Field(default=0)
     unit_cost: Decimal | None = None
     total_cost: Decimal | None = None
     unit: str = Field(default="kg", max_length=20)
@@ -70,6 +72,7 @@ class StockResponse(StockBase):
     product_name: str | None = None
     product_category: str | None = None
     batch_no: str | None = None
+    batch_nos: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -258,11 +261,15 @@ class StockMovementBase(BaseModel):
     warehouse_id: int
     product_id: int
     batch_id: int | None = None
+    batch_no: str | None = None
     movement_type: str = Field(..., max_length=20)
     movement_date: date
     qty_change: Decimal
     qty_before: Decimal
     qty_after: Decimal
+    box_count_change: int = Field(default=0)
+    box_count_before: int = Field(default=0)
+    box_count_after: int = Field(default=0)
     unit: str = Field(..., max_length=20)
     unit_cost: Decimal | None = None
     total_cost: Decimal | None = None
@@ -318,3 +325,24 @@ class ProductUnitConversionListResponse(BaseModel):
     items: list[ProductUnitConversionResponse]
     skip: int = 0
     limit: int = 100
+
+
+# ==================== 批次规格明细 ====================
+
+class BatchSpecItem(BaseModel):
+    spec: str
+    box_count: int
+    weight_kg: float
+    unit_cost: float | None = None
+    total_cost: float | None = None
+
+
+class BatchSpecResponse(BaseModel):
+    batch_no: str
+    invoice_no: str | None = None
+    inbound_date: date | None = None
+    product_name: str
+    warehouse_name: str
+    total_boxes: int
+    total_weight_kg: float
+    specs: list[BatchSpecItem]

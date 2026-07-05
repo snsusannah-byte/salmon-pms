@@ -129,6 +129,7 @@ class FinishedProductSaleV2(Base, TimestampMixin):
     commission: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
     actual_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     net_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     paid: Mapped[int] = mapped_column(Integer, default=0)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 状态流转：pending(待采购) -> ordered(已下单) -> purchased(采购中) -> arrived(已到货) -> shipped(已发货) -> paid(已收款)

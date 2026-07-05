@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.permissions import require_admin, require_warehouse
-from app.models import ImportInvoice, Product, User, WholeFishSale
+from app.models import ImportInvoice, InvoiceProduct, Product, User, Warehouse, WholeFishSale
 from app.schemas.warehouse_v2 import (
+    BatchSpecResponse,
     StockInboundCreate,
     StockInboundListResponse,
     StockInboundResponse,
@@ -420,6 +421,7 @@ async def cancel_transfer(
 async def list_movements(
     warehouse_id: int | None = Query(None),
     product_id: int | None = Query(None),
+    batch_no: str | None = Query(None),
     movement_type: str | None = Query(None),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
@@ -428,8 +430,9 @@ async def list_movements(
     db: AsyncSession = Depends(get_db),
 ):
     items, total = await WarehouseV2Service.list_movements(
-        db, warehouse_id=warehouse_id, product_id=product_id, movement_type=movement_type,
-        start_date=start_date, end_date=end_date, skip=skip, limit=limit,
+        db, warehouse_id=warehouse_id, product_id=product_id, batch_no=batch_no,
+        movement_type=movement_type, start_date=start_date, end_date=end_date,
+        skip=skip, limit=limit,
     )
     return StockMovementListResponse(total=total, items=items, skip=skip, limit=limit)
 
@@ -607,3 +610,66 @@ async def list_domestic_stocks(
         })
 
     return {"total": total, "items": items, "skip": skip, "limit": limit}
+
+
+# ==================== 批次规格明细 ====================
+
+@router.get("/batch-specs", response_model=BatchSpecResponse)
+async def get_batch_specs(
+    batch_no: str = Query(..., description="批次号（发票号）"),
+    warehouse_id: int = Query(..., description="仓库ID"),
+    product_id: int = Query(..., description="产品ID"),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取某批次（发票号）的规格明细"""
+    from app.models import InvoiceProduct
+
+    # 查询发票产品规格
+    result = await db.execute(
+        select(InvoiceProduct, ImportInvoice.invoice_no, ImportInvoice.invoice_date)
+        .join(ImportInvoice, InvoiceProduct.invoice_id == ImportInvoice.id)
+        .where(
+            ImportInvoice.invoice_no == batch_no,
+            InvoiceProduct.product_name == select(Product.name).where(Product.id == product_id).scalar_subquery()
+        )
+        .order_by(InvoiceProduct.id)
+    )
+    rows = result.all()
+
+    specs = []
+    total_boxes = 0
+    total_weight = 0.0
+    invoice_date = None
+    invoice_no = None
+
+    for inv_prod, inv_no, inv_date in rows:
+        specs.append({
+            "spec": inv_prod.product_spec or "-",
+            "box_count": inv_prod.box_count or 0,
+            "weight_kg": float(inv_prod.net_weight_kg or 0),
+            "unit_cost": float(inv_prod.unit_price or 0) if inv_prod.unit_price else None,
+            "total_cost": float(inv_prod.total_amount or 0) if inv_prod.total_amount else None,
+        })
+        total_boxes += inv_prod.box_count or 0
+        total_weight += float(inv_prod.net_weight_kg or 0)
+        invoice_no = inv_no
+        invoice_date = inv_date
+
+    # 查询仓库名称
+    wh_result = await db.execute(select(Warehouse.name).where(Warehouse.id == warehouse_id))
+    warehouse_name = wh_result.scalar() or "未知仓库"
+
+    # 查询产品名称
+    prod_result = await db.execute(select(Product.name).where(Product.id == product_id))
+    product_name = prod_result.scalar() or "未知产品"
+
+    return BatchSpecResponse(
+        batch_no=batch_no,
+        invoice_no=invoice_no,
+        inbound_date=invoice_date,
+        product_name=product_name,
+        warehouse_name=warehouse_name,
+        total_boxes=total_boxes,
+        total_weight_kg=total_weight,
+        specs=specs,
+    )

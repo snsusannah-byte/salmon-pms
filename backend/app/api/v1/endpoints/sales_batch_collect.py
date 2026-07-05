@@ -144,6 +144,22 @@ async def batch_collect_sales(
     if not is_balance_payment:
         counterparty_name = ", ".join(customer_names) if customer_names else "多个客户"
         
+        # 查询关联发票号（通过所有销售单的 batch → batch_invoices → import_invoices）
+        related_invoice_no = None
+        batch_ids = list(set(s.batch_id for s in sales if s.batch_id))
+        if batch_ids:
+            from app.models import BatchInvoice, ImportInvoice
+            batch_inv_result = await db.execute(
+                select(ImportInvoice.invoice_no)
+                .join(BatchInvoice, ImportInvoice.id == BatchInvoice.invoice_id)
+                .where(BatchInvoice.batch_id.in_(batch_ids))
+                .distinct()
+                .order_by(ImportInvoice.invoice_no)
+            )
+            invoice_nos = [row[0] for row in batch_inv_result.all() if row[0]]
+            if invoice_nos:
+                related_invoice_no = ", ".join(invoice_nos)
+        
         transaction = TransactionRecord(
             type="income",
             category="main_business_revenue",
@@ -153,6 +169,7 @@ async def batch_collect_sales(
             counterparty_name=counterparty_name[:100],
             description=f"合并收款：{len(sales)} 个销售单",
             reference_no=f"HK{data.collect_date.strftime('%Y%m%d')}",
+            related_invoice_no=related_invoice_no,
         )
         db.add(transaction)
         await db.flush()

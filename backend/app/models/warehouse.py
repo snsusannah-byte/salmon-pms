@@ -56,10 +56,15 @@ class Stock(Base, TimestampMixin):
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"), nullable=True)
+    batch_no: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 批次号（字符串，兼容辅料采购等）
 
     current_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False, default=Decimal("0"))
     reserved_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"))
     available_qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False, default=Decimal("0"))
+    
+    # 箱数维度（进口整包仓专用）
+    current_box_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available_box_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     total_cost: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
@@ -78,7 +83,7 @@ class Stock(Base, TimestampMixin):
     batch: Mapped[Optional["Batch"]] = relationship("Batch")
 
     __table_args__ = (
-        UniqueConstraint("warehouse_id", "product_id", "batch_id", name="uq_stock_warehouse_product_batch"),
+        UniqueConstraint("warehouse_id", "product_id", "batch_id", "batch_no", name="uq_stock_warehouse_product_batch"),
     )
 
 
@@ -97,6 +102,7 @@ class StockInbound(Base, TimestampMixin):
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+    batch_no: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 批次号（字符串，兼容辅料采购等）
 
     qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -141,6 +147,9 @@ class StockOutbound(Base, TimestampMixin):
 
     qty: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
+    
+    # 箱数（进口整包仓出库专用）
+    box_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     total_cost: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
@@ -192,6 +201,7 @@ class StockMovement(Base, TimestampMixin):
     warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+    batch_no: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 批次号（字符串，兼容辅料采购等）
 
     movement_type: Mapped[StockMovementType] = mapped_column(Enum(StockMovementType), nullable=False)
     movement_date: Mapped[Date] = mapped_column(Date, nullable=False)
@@ -200,6 +210,11 @@ class StockMovement(Base, TimestampMixin):
     qty_before: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     qty_after: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit: Mapped[str] = mapped_column(String(20), nullable=False)
+    
+    # 箱数变动（进口整包仓专用）
+    box_count_change: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    box_count_before: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    box_count_after: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     unit_cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     total_cost: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
