@@ -16,6 +16,11 @@ function fmt$(v: number | string | null | undefined) {
   return `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function fmtDate(d: string | null | undefined) {
+  if (!d) return "-";
+  return new Date(d).toLocaleDateString("zh-CN");
+}
+
 export function NettingStatementsTab() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -244,100 +249,144 @@ export function NettingStatementsTab() {
                       </div>
                     </div>
 
-                    {/* 应收明细 */}
-                    {activeItem.sale_details?.length > 0 && (
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-medium">销售明细</h4>
-                        <div className="border rounded-md">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-muted/20">
-                                <TableHead className="text-xs py-1.5">日期</TableHead>
-                                <TableHead className="text-xs py-1.5">销售单号</TableHead>
-                                <TableHead className="text-xs py-1.5">规格</TableHead>
-                                <TableHead className="text-xs py-1.5 text-right">数量</TableHead>
-                                <TableHead className="text-xs py-1.5 text-right">重量(kg)</TableHead>
-                                <TableHead className="text-xs py-1.5 text-right">单价</TableHead>
-                                <TableHead className="text-xs py-1.5 text-right">金额</TableHead>
+                    {/* 销售明细 */}
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-medium">销售明细</h4>
+                      <div className="border rounded-md">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/20">
+                              <TableHead className="text-xs py-1.5">日期</TableHead>
+                              <TableHead className="text-xs py-1.5">销售单号</TableHead>
+                              <TableHead className="text-xs py-1.5">批次</TableHead>
+                              <TableHead className="text-xs py-1.5">规格</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">数量</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">重量(kg)</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">单价</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">净额</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {(activeItem.sale_details || []).length === 0 ? (
+                              <TableRow className="print-empty">
+                                <TableCell colSpan={8} className="text-xs text-center text-muted-foreground py-2">无销售明细</TableCell>
                               </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {activeItem.sale_details.map((d: any, idx: number) => (
+                            ) : (
+                              (activeItem.sale_details || []).map((d: any, idx: number) => (
                                 <TableRow key={idx}>
-                                  <TableCell className="text-xs py-1.5">{d.date}</TableCell>
+                                  <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
                                   <TableCell className="text-xs py-1.5">{d.sale_no}</TableCell>
+                                  <TableCell className="text-xs py-1.5">{d.batch_no || "-"}</TableCell>
                                   <TableCell className="text-xs py-1.5">{d.spec || "-"}</TableCell>
                                   <TableCell className="text-xs py-1.5 text-right">{d.quantity != null ? d.quantity : "-"}</TableCell>
                                   <TableCell className="text-xs py-1.5 text-right">{d.weight_kg ? Number(d.weight_kg).toFixed(2) : "-"}</TableCell>
                                   <TableCell className="text-xs py-1.5 text-right">{d.unit_price ? fmt$(d.unit_price) : "-"}</TableCell>
-                                  <TableCell className="text-xs py-1.5 text-right">{fmt$(d.gross_amount)}</TableCell>
+                                  <TableCell className="text-xs py-1.5 text-right">{fmt$(d.net_amount)}</TableCell>
                                 </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
+                              ))
+                            )}
+                            <TableRow className="bg-muted/30 font-medium">
+                              <TableCell className="text-xs py-1.5" colSpan={4}>销售合计</TableCell>
+                              <TableCell className="text-xs py-1.5 text-right">{(activeItem.sale_details || []).reduce((sum: number, d: any) => sum + (Number(d.quantity) || 0), 0)}</TableCell>
+                              <TableCell className="text-xs py-1.5 text-right">{(activeItem.sale_details || []).reduce((sum: number, d: any) => sum + (Number(d.weight_kg) || 0), 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-xs py-1.5"></TableCell>
+                              <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.sale_details || []).reduce((sum: number, d: any) => sum + (Number(d.net_amount) || 0), 0))}</TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
                       </div>
-                    )}
+                    </div>
 
-                    {/* 应付明细 */}
-                    {activeItem.purchase_details?.length > 0 && (
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-medium">采购明细</h4>
-                        <div className="border rounded-md">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-muted/20">
-                                <TableHead className="text-xs py-1.5">日期</TableHead>
-                                <TableHead className="text-xs py-1.5">单号</TableHead>
-                                <TableHead className="text-xs py-1.5 text-right">金额(USD)</TableHead>
-                                <TableHead className="text-xs py-1.5 text-right">汇率</TableHead>
-                                <TableHead className="text-xs py-1.5 text-right">金额(CNY)</TableHead>
+                    {/* 采购明细 */}
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-medium">采购明细</h4>
+                      <div className="border rounded-md">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/20">
+                              <TableHead className="text-xs py-1.5">日期</TableHead>
+                              <TableHead className="text-xs py-1.5">单号</TableHead>
+                              <TableHead className="text-xs py-1.5">批次</TableHead>
+                              <TableHead className="text-xs py-1.5">规格</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">数量</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">重量(kg)</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">单价</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">净额</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {(activeItem.purchase_details || []).length === 0 ? (
+                              <TableRow className="print-empty">
+                                <TableCell colSpan={8} className="text-xs text-center text-muted-foreground py-2">无采购明细</TableCell>
                               </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {activeItem.purchase_details.map((d: any, idx: number) => (
+                            ) : (
+                              (activeItem.purchase_details || []).map((d: any, idx: number) => (
                                 <TableRow key={idx}>
                                   <TableCell className="text-xs py-1.5">{d.date}</TableCell>
                                   <TableCell className="text-xs py-1.5">{d.invoice_no || "-"}</TableCell>
-                                  <TableCell className="text-xs py-1.5 text-right">{d.amount_usd ? `$${Number(d.amount_usd).toFixed(2)}` : "-"}</TableCell>
-                                  <TableCell className="text-xs py-1.5 text-right">{d.exchange_rate || "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5">{d.batch_no || "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5">{d.spec || "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5 text-right">{d.quantity != null ? d.quantity : "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5 text-right">{d.weight_kg ? Number(d.weight_kg).toFixed(2) : "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5 text-right">{d.unit_price ? fmt$(d.unit_price) : "-"}</TableCell>
                                   <TableCell className="text-xs py-1.5 text-right">{fmt$(d.amount_cny)}</TableCell>
                                 </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
+                              ))
+                            )}
+                            <TableRow className="bg-muted/30 font-medium">
+                              <TableCell className="text-xs py-1.5" colSpan={4}>采购合计</TableCell>
+                              <TableCell className="text-xs py-1.5 text-right">{(activeItem.purchase_details || []).reduce((sum: number, d: any) => sum + (Number(d.quantity) || 0), 0)}</TableCell>
+                              <TableCell className="text-xs py-1.5 text-right">{(activeItem.purchase_details || []).reduce((sum: number, d: any) => sum + (Number(d.weight_kg) || 0), 0).toFixed(2)}</TableCell>
+                              <TableCell className="text-xs py-1.5"></TableCell>
+                              <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.purchase_details || []).reduce((sum: number, d: any) => sum + (Number(d.amount_cny) || 0), 0))}</TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
                       </div>
-                    )}
+                    </div>
 
-                    {/* 付款明细 */}
-                    {activeItem.payment_details?.length > 0 && (
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-medium">付款明细</h4>
-                        <div className="border rounded-md">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-muted/20">
-                                <TableHead className="text-xs py-1.5">日期</TableHead>
-                                <TableHead className="text-xs py-1.5">付款类型</TableHead>
-                                <TableHead className="text-xs py-1.5 text-right">付款金额</TableHead>
-                                <TableHead className="text-xs py-1.5">备注</TableHead>
+                    {/* 收支明细 */}
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-medium">收支明细</h4>
+                      <div className="border rounded-md">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/20">
+                              <TableHead className="text-xs py-1.5">日期</TableHead>
+                              <TableHead className="text-xs py-1.5">描述</TableHead>
+                              <TableHead className="text-xs py-1.5">类型</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">金额</TableHead>
+                              <TableHead className="text-xs py-1.5">备注</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {(activeItem.payment_details || []).length === 0 ? (
+                              <TableRow className="print-empty">
+                                <TableCell colSpan={5} className="text-xs text-center text-muted-foreground py-2">无收支明细</TableCell>
                               </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {activeItem.payment_details.map((d: any, idx: number) => (
+                            ) : (
+                              (activeItem.payment_details || []).map((d: any, idx: number) => (
                                 <TableRow key={idx}>
                                   <TableCell className="text-xs py-1.5">{d.date}</TableCell>
-                                  <TableCell className="text-xs py-1.5">{d.payment_type || "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5">{d.description || "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5">
+                                    {d.type === "receipt" ? (
+                                      <span className="text-green-600">收款</span>
+                                    ) : d.type === "payment" ? (
+                                      <span className="text-red-600">付款</span>
+                                    ) : (
+                                      "-"
+                                    )}
+                                  </TableCell>
                                   <TableCell className="text-xs py-1.5 text-right">{fmt$(d.amount)}</TableCell>
-                                  <TableCell className="text-xs py-1.5">{d.reference_no || "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5">{d.notes || "-"}</TableCell>
                                 </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
+                              ))
+                            )}
+                          </TableBody>
+                        </Table>
                       </div>
-                    )}
+                    </div>
                   </div>
                 ) : (
                   /* 没选公司 → 显示公司汇总列表 */
