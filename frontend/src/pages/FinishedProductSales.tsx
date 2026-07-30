@@ -23,13 +23,14 @@ import {
 import {
   Factory, ShoppingCart, Plus, Search, Edit2, Trash2, Save, X,
   CreditCard, Eye, Package, DollarSign, Download, Pencil, Banknote,
-  ArrowLeftRight, SlidersHorizontal, Lock, Unlock
+  ArrowLeftRight, SlidersHorizontal, Lock, Unlock, Printer
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { api, apiFetch, apiPost, apiDelete } from '@/lib/api';
 import { toast } from 'sonner';
 import { ReturnOrderForm } from '@/components/returns/ReturnOrderForm';
 import { ProductSelectorV2 } from '@/components/ProductSelectorV2';
+import { SalePrintButton } from '@/components/SalePrintButton';
 
 interface FinishedSaleReceipt {
   id: number;
@@ -60,6 +61,7 @@ interface FinishedSale {
   sale_date: string;
   discount: number;
   scan_fee: number;
+  freight: number;
   rounding: number;
   after_sales_adjustment: number;
   commission: number;
@@ -82,13 +84,15 @@ interface FinishedSale {
 interface FinishedSaleProduct {
   id?: number;
   variant_id?: number | null;
+  product_id?: number | null;
   product_name?: string;
   product_spec: string;
   factory?: string;
   slaughter_date?: string;
-  batch?: string;          // 批次号：加工厂-月日，如 N430-0130
+  batch?: string;          // 批次号：加工厂-月日，如 N430-0130 或库存批次
   box_count: number;
   weight_kg: number;
+  sale_unit?: string;     // 单位销售模式：盘、包、盒等
   unit_price: number;
   total_amount: number;
   commission_rate?: number;
@@ -104,8 +108,8 @@ interface ProductGroup {
 }
 
 const emptyProduct: FinishedSaleProduct = {
-  variant_id: null, product_name: '', product_spec: '', factory: '', slaughter_date: '', batch: '',
-  box_count: 0, weight_kg: 0, unit_price: 0,
+  variant_id: null, product_id: null, product_name: '', product_spec: '', factory: '', slaughter_date: '', batch: '',
+  box_count: 0, weight_kg: 0, sale_unit: '', unit_price: 0,
   total_amount: 0, commission_rate: 0, commission_amount: 0, after_sales_adjustment: 0
 };
 
@@ -115,7 +119,7 @@ const emptyForm = {
   slaughter_date: '', delivery_address: '', logistics_info: '',
   quantity: 0, weight: 0, unit_price: 0, total_amount: 0,
   sale_date: new Date().toISOString().split('T')[0],
-  discount: 0, scan_fee: 0, rounding: 0, after_sales_adjustment: 0,
+  discount: 0, scan_fee: 0, freight: 0, rounding: 0, after_sales_adjustment: 0,
   commission: 0, actual_amount: 0, net_amount: 0, paid: false, remark: '',
   products: [emptyProduct]
 };
@@ -164,6 +168,7 @@ export function FinishedProductSales() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [salespeople, setSalespeople] = useState<{name: string, commission_rate: number}[]>([]);
   const [productGroups, setProductGroups] = useState<ProductGroup[]>([]);
+  const [stocks, setStocks] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'whole_fish' | 'finished_product'>(allowedSaleType);
@@ -172,6 +177,7 @@ export function FinishedProductSales() {
   const [detailSale, setDetailSale] = useState<FinishedSale | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [salesMode, setSalesMode] = useState<'weight' | 'unit'>('weight');
   const [customerSearch, setCustomerSearch] = useState('');
   const [showCustomerList, setShowCustomerList] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -250,6 +256,14 @@ export function FinishedProductSales() {
     }
   };
 
+  const loadStocks = async () => {
+    const res = await apiFetch('/v1/warehouse-v2/stocks?limit=500');
+    if (res.ok && res.data) {
+      const items = res.data.items || res.data.data || [];
+      setStocks(items);
+    }
+  };
+
   const handleCustomerSelect = (customerName: string) => {
     const customer = customers.find((c: any) => c.name === customerName);
     setForm(prev => ({
@@ -260,7 +274,19 @@ export function FinishedProductSales() {
     }));
   };
 
-  useEffect(() => { loadSales(); loadCustomers(); loadSalespeople(); loadProducts(); }, []);
+  useEffect(() => { loadSales(); loadCustomers(); loadSalespeople(); loadProducts(); loadStocks(); }, []);
+
+  // 运费/费用变化时自动重算金额
+  useEffect(() => {
+    setForm(prev => {
+      const total = prev.total_amount || 0;
+      const freight = prev.freight || 0;
+      const actual = round2(total + freight - prev.discount - prev.scan_fee - prev.rounding);
+      const net = round2(actual - prev.after_sales_adjustment - prev.commission - (prev.balance_adjustment || 0));
+      if (prev.actual_amount === actual && prev.net_amount === net) return prev;
+      return { ...prev, actual_amount: actual, net_amount: net };
+    });
+  }, [form.total_amount, form.freight, form.discount, form.scan_fee, form.rounding, form.after_sales_adjustment, form.commission, form.balance_adjustment]);
 
   const selectedProductGroup = productGroups.find(g => g.name === form.product_name);
 
@@ -268,10 +294,18 @@ export function FinishedProductSales() {
     setForm(prev => {
       const products = [...prev.products];
       products[idx] = { ...products[idx], [field]: value };
-      if (field === 'weight_kg' || field === 'unit_price') {
-        const w = parseFloat(products[idx].weight_kg as any) || 0;
-        const p = parseFloat(products[idx].unit_price as any) || 0;
-        products[idx].total_amount = round2(w * p);
+      if (salesMode === 'unit') {
+        if (field === 'box_count' || field === 'unit_price') {
+          const qty = parseInt(products[idx].box_count as any) || 0;
+          const p = parseFloat(products[idx].unit_price as any) || 0;
+          products[idx].total_amount = round2(qty * p);
+        }
+      } else {
+        if (field === 'weight_kg' || field === 'unit_price') {
+          const w = parseFloat(products[idx].weight_kg as any) || 0;
+          const p = parseFloat(products[idx].unit_price as any) || 0;
+          products[idx].total_amount = round2(w * p);
+        }
       }
       const total_amount = products.reduce((s, p) => s + (p.total_amount || 0), 0);
       const weight = products.reduce((s, p) => s + (parseFloat(p.weight_kg as any) || 0), 0);
@@ -280,11 +314,18 @@ export function FinishedProductSales() {
       const commission_rate = sp?.commission_rate || 0;
       const commission = round2(weight * commission_rate);
       const net = round2(total_amount - prev.discount - prev.scan_fee - prev.rounding - prev.after_sales_adjustment - commission);
-      return { ...prev, products, total_amount, weight, quantity, commission, net_amount: net };
+      const updates: any = { products, total_amount, weight, quantity, commission, net_amount: net };
+      if (idx === 0 && field === 'product_name') {
+        updates.product_name = value;
+      }
+      return { ...prev, ...updates };
     });
   };
 
-  const addProduct = () => setForm(prev => ({ ...prev, products: [...prev.products, { ...emptyProduct }] }));
+  const addProduct = () => setForm(prev => ({
+    ...prev,
+    products: [...prev.products, salesMode === 'unit' ? { ...emptyProduct, box_count: 1, sale_unit: '盒', weight_kg: 0 } : { ...emptyProduct }]
+  }));
   const removeProduct = (idx: number) => setForm(prev => ({ ...prev, products: prev.products.filter((_, i) => i !== idx) }));
 
   const handleSave = async () => {
@@ -320,9 +361,9 @@ export function FinishedProductSales() {
     if (res.ok && res.data) {
       const s = res.data.data || res.data;
       const products = (s.products?.length ? s.products : [emptyProduct]).map((p: any) => ({
-        product_name: p.product_name || '', product_spec: p.product_spec || '', factory: p.factory || '', slaughter_date: p.slaughter_date || '',
+        product_id: p.product_id || null, product_name: p.product_name || '', product_spec: p.product_spec || '', factory: p.factory || '', slaughter_date: p.slaughter_date || '',
         batch: p.batch || formatBatch(p.factory, p.slaughter_date), // 兼容旧数据：反向生成批次号
-        box_count: p.box_count || 0, weight_kg: p.weight_kg || 0, unit_price: p.unit_price || 0,
+        box_count: p.box_count || 0, weight_kg: p.weight_kg || 0, sale_unit: p.sale_unit || '', unit_price: p.unit_price || 0,
         total_amount: p.total_amount || 0, commission_rate: p.commission_rate || 0,
         commission_amount: p.commission_amount || 0, after_sales_adjustment: p.after_sales_adjustment || 0
       }));
@@ -334,6 +375,7 @@ export function FinishedProductSales() {
           p.total_amount = round2(p.weight_kg * p.unit_price);
         });
       }
+      setSalesMode(s.products?.some((p: any) => p.sale_unit) ? 'unit' : 'weight');
       setForm({
         sale_no: s.sale_no || '', sale_type: s.sale_type || 'whole_fish',
         customer: s.customer || '', salesperson: s.salesperson || '',
@@ -364,8 +406,12 @@ export function FinishedProductSales() {
     if (res.ok && res.data) { setDetailSale(res.data.data || res.data); setShowDetail(true); }
   };
 
-  const handleNew = (type: 'whole_fish' | 'finished_product') => {
-    setForm({ ...emptyForm, sale_type: type });
+  const handleNew = (type: 'whole_fish' | 'finished_product', mode: 'weight' | 'unit' = 'weight') => {
+    const initialProducts = mode === 'unit'
+      ? [{ ...emptyProduct, product_name: '', product_spec: '', box_count: 1, sale_unit: '盒', weight_kg: 0 }]
+      : [emptyProduct];
+    setForm({ ...emptyForm, sale_type: type, products: initialProducts });
+    setSalesMode(mode);
     setEditingId(null);
     setShowModal(true);
   };
@@ -632,7 +678,12 @@ export function FinishedProductSales() {
           {/* 操作栏 */}
           <div className="flex items-center gap-2 flex-wrap mb-4">
             {isMadeToOrder && <Button size="sm" variant="outline" onClick={() => handleNew('whole_fish')}><ShoppingCart className="h-4 w-4 mr-1" />新建销售单</Button>}
-            {!isMadeToOrder && <Button size="sm" onClick={() => handleNew('finished_product')}><Plus className="h-4 w-4 mr-1" />成品销售</Button>}
+            {!isMadeToOrder && (
+              <>
+                <Button size="sm" onClick={() => handleNew('finished_product', 'weight')}><Plus className="h-4 w-4 mr-1" />成品销售</Button>
+                <Button size="sm" variant="outline" onClick={() => handleNew('finished_product', 'unit')}><Package className="h-4 w-4 mr-1" />按单位销售</Button>
+              </>
+            )}
             <Button size="sm" variant="outline" onClick={handleExport} disabled={exportLoading}><Download className="h-4 w-4 mr-1" />{exportLoading ? '导出中...' : '导出'}</Button>
             {hasSelection && <div className="h-6 w-px bg-border" />}
             <Button size="sm" variant="ghost" disabled={!single} onClick={() => singleSale && handleViewDetail(singleSale)} title="查看"><Eye className="h-4 w-4 mr-1" />查看</Button>
@@ -686,8 +737,8 @@ export function FinishedProductSales() {
                       <td className="px-3 py-2 whitespace-nowrap">{s.sale_date}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{s.customer}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{s.salesperson || '-'}</td>
-                      <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{s.product_name || '-'}</td>
-                      <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{s.sale_type === 'whole_fish' ? '-' : (s.batch_no || s.factory || '-')}</td>
+                      <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{s.product_name || s.products?.[0]?.product_name || '-'}</td>
+                      <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{s.sale_type === 'whole_fish' ? '-' : (s.products?.[0]?.batch || s.batch_no || s.factory || '-')}</td>
                       <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{s.products && s.products.length > 0 ? s.products.map((p: any) => `${p.product_spec || '-'}(${p.box_count || 0})`).join(', ') : (s.products?.[0]?.product_spec || '-')}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">{s.quantity || '-'}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">{s.weight ? `${s.weight.toFixed(2)} kg` : '-'}</td>
@@ -751,6 +802,13 @@ export function FinishedProductSales() {
                 <Button variant="ghost" size="sm" onClick={() => { setDetailSale(selectedSale); setShowDetail(true); }}>
                   <Eye className="h-4 w-4 mr-1" />完整详情
                 </Button>
+                <SalePrintButton
+                  saleType="finished_product_v2"
+                  saleId={selectedSale.id}
+                  variant="ghost"
+                  size="sm"
+                  label="打印"
+                />
                 <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedSale(null)}>
                   <X className="h-4 w-4" />
                 </Button>
@@ -802,8 +860,8 @@ export function FinishedProductSales() {
       <Dialog open={showModal} onOpenChange={setShowModal}>
         <DialogContent className="sm:max-w-[1024px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingId ? '编辑销售单' : (isMadeToOrder ? '新建销售单' : (form.sale_type === 'whole_fish' ? '新建整鱼销售' : '新建成品销售'))}</DialogTitle>
-            <DialogDescription>{form.sale_type === 'whole_fish' ? '销售国内采购的整鱼' : '销售加工后的成品'}</DialogDescription>
+            <DialogTitle>{editingId ? '编辑销售单' : (isMadeToOrder ? '新建销售单' : (salesMode === 'unit' ? '新建成品销售（按单位）' : (form.sale_type === 'whole_fish' ? '新建整鱼销售' : '新建成品销售')))}</DialogTitle>
+            <DialogDescription>{form.sale_type === 'whole_fish' ? '销售国内采购的整鱼' : (salesMode === 'unit' ? '销售加工后的成品（按单位计价）' : '销售加工后的成品')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div className="grid grid-cols-3 gap-3">
@@ -830,8 +888,8 @@ export function FinishedProductSales() {
               </div>
             </div>
 
-            {/* 成品定义V2：级联产品选择器（仅成品销售模式） */}
-            {form.sale_type === 'finished_product' && (
+            {/* 成品定义V2：级联产品选择器（仅成品销售模式，按重量时使用） */}
+            {form.sale_type === 'finished_product' && salesMode !== 'unit' && (
               <div className="col-span-3">
                 <ProductSelectorV2
                   customerLevel={customers.find((c: any) => c.name === form.customer)?.customer_level || "normal"}
@@ -846,14 +904,27 @@ export function FinishedProductSales() {
                       setForm(prev => {
                         const newProducts = [...prev.products];
                         if (newProducts.length > 0) {
-                          newProducts[0] = {
-                            ...newProducts[0],
-                            variant_id: product.variant.id,
-                            product_name: product.template.name,
-                            product_spec: product.spec.name,
-                            unit_price: product.priceTier?.price || product.variant.cost_price || 0,
-                            total_amount: round2((newProducts[0].weight_kg || 0) * (product.priceTier?.price || product.variant.cost_price || 0)),
-                          };
+                          const price = product.priceTier?.price || product.variant.cost_price || 0;
+                          if (salesMode === 'unit') {
+                            newProducts[0] = {
+                              ...newProducts[0],
+                              variant_id: product.variant.id,
+                              product_name: product.template.name,
+                              product_spec: product.spec.name,
+                              sale_unit: (product.spec as any).unit || (product.template as any).unit || '',
+                              unit_price: price,
+                              total_amount: round2((newProducts[0].box_count || 0) * price),
+                            };
+                          } else {
+                            newProducts[0] = {
+                              ...newProducts[0],
+                              variant_id: product.variant.id,
+                              product_name: product.template.name,
+                              product_spec: product.spec.name,
+                              unit_price: price,
+                              total_amount: round2((newProducts[0].weight_kg || 0) * price),
+                            };
+                          }
                         }
                         return { ...prev, products: newProducts };
                       });
@@ -878,9 +949,13 @@ export function FinishedProductSales() {
                       <th className="px-3 py-2 text-left w-[18%]">产品名称</th>
                       <th className="px-3 py-2 text-left w-[18%]">规格</th>
                       <th className="px-3 py-2 text-left w-[14%]">批次</th>
-                      <th className="px-3 py-2 text-right w-[10%]">箱数</th>
-                      <th className="px-3 py-2 text-right w-[10%]">重量(kg)</th>
-                      <th className="px-3 py-2 text-right w-[10%]">单价(元/kg)</th>
+                      <th className="px-3 py-2 text-right w-[10%]">{salesMode === 'unit' ? '数量' : '箱数'}</th>
+                      {salesMode === 'unit' ? (
+                        <th className="px-3 py-2 text-center w-[10%]">单位</th>
+                      ) : (
+                        <th className="px-3 py-2 text-right w-[10%]">重量(kg)</th>
+                      )}
+                      <th className="px-3 py-2 text-right w-[10%]">{salesMode === 'unit' ? '单价(元/单位)' : '单价(元/kg)'}</th>
                       <th className="px-3 py-2 text-right w-[10%]">金额</th>
                       <th className="px-3 py-2 text-center w-[2%]"></th>
                     </tr>
@@ -898,64 +973,132 @@ export function FinishedProductSales() {
                         : '';
                       return (
                         <tr key={idx} className="border-t">
-                          <td className="px-3 py-2">
-                            <div className="text-xs font-medium truncate min-w-0" title={p.product_name}>
-                              {p.product_name || <span className="text-muted-foreground">产品</span>}
-                            </div>
+                          <td className="px-3 py-2 relative">
+                            {salesMode === 'unit' ? (
+                              <>
+                                <Input
+                                  list={`product-options-${idx}`}
+                                  className="h-8 text-sm"
+                                  value={p.product_name || ''}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    const matched = stocks.find((s: any) => s.product_name === val && (s.available_qty || 0) > 0);
+                                    if (matched) {
+                                      setForm(prev => {
+                                        const products = [...prev.products];
+                                        products[idx] = { 
+                                          ...products[idx], 
+                                          product_id: matched.product_id,
+                                          product_name: val, 
+                                          product_spec: matched.product_spec || '', 
+                                          batch: '' 
+                                        };
+                                        return { ...prev, products };
+                                      });
+                                    } else {
+                                      setForm(prev => {
+                                        const products = [...prev.products];
+                                        products[idx] = { ...products[idx], product_id: null, product_name: val, batch: '' };
+                                        return { ...prev, products };
+                                      });
+                                    }
+                                  }}
+                                  placeholder="搜索产品名称"
+                                />
+                                <datalist id={`product-options-${idx}`}>
+                                  {Array.from(new Set(stocks.filter((s: any) => (s.available_qty || 0) > 0).map((s: any) => s.product_name))).map((name: string) => (
+                                    <option key={name} value={name} />
+                                  ))}
+                                </datalist>
+                              </>
+                            ) : (
+                              <div className="text-xs font-medium truncate min-w-0" title={p.product_name}>
+                                {p.product_name || <span className="text-muted-foreground">产品</span>}
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-2">
-                            <Select value={currentKey} onValueChange={(v) => {
-                              const option = allSpecOptions.find((o: any) => o.key === v);
-                              if (option) {
-                                handleProductChange(idx, 'product_name', option.productName);
-                                handleProductChange(idx, 'product_spec', option.spec);
-                              }
-                            }}>
-                              <SelectTrigger className="h-8 text-xs px-2">
-                                <SelectValue placeholder="选择规格">
-                                  {currentKey && (() => {
-                                    const option = allSpecOptions.find((o: any) => o.key === currentKey);
-                                    return option ? option.spec || '选择规格' : '选择规格';
-                                  })()}
-                                </SelectValue>
-                              </SelectTrigger>
-                              <SelectContent>
-                                {allSpecOptions.map((o: any) => (
-                                  <SelectItem key={o.key} value={o.key} className="text-xs">
-                                    {o.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </td>
-                          <td className="px-3 py-2">
-                            <Input
-                              type="text"
-                              className="h-8 text-sm"
-                              value={String(p.batch || '')}
-                              onChange={e => {
-                                const batchStr = e.target.value;
-                                const year = form.sale_date ? form.sale_date.slice(0, 4) : new Date().getFullYear();
-                                const parsed = parseBatch(batchStr, year);
-                                if (parsed) {
-                                  handleProductChange(idx, 'batch', batchStr);
-                                  handleProductChange(idx, 'factory', parsed.factory);
-                                  handleProductChange(idx, 'slaughter_date', parsed.slaughter_date);
-                                } else {
-                                  handleProductChange(idx, 'batch', batchStr);
-                                  // 若格式不对，清空派生字段
-                                  if (!batchStr.includes('-')) {
-                                    handleProductChange(idx, 'factory', '');
-                                    handleProductChange(idx, 'slaughter_date', '');
-                                  }
+                            {salesMode === 'unit' ? (
+                              <Input className="h-8 text-sm" value={p.product_spec || ''} onChange={e => handleProductChange(idx, 'product_spec', e.target.value)} placeholder="如 30只/盘" />
+                            ) : (
+                              <Select value={currentKey} onValueChange={(v) => {
+                                const option = allSpecOptions.find((o: any) => o.key === v);
+                                if (option) {
+                                  handleProductChange(idx, 'product_name', option.productName);
+                                  handleProductChange(idx, 'product_spec', option.spec);
                                 }
-                              }}
-                              placeholder="如 N430-0130"
-                            />
+                              }}>
+                                <SelectTrigger className="h-8 text-xs px-2">
+                                  <SelectValue placeholder="选择规格">
+                                    {currentKey && (() => {
+                                      const option = allSpecOptions.find((o: any) => o.key === currentKey);
+                                      return option ? option.spec || '选择规格' : '选择规格';
+                                    })()}
+                                  </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {allSpecOptions.map((o: any) => (
+                                    <SelectItem key={o.key} value={o.key} className="text-xs">
+                                      {o.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
+                            {salesMode === 'unit' ? (
+                              <Select value={p.batch || ''} onValueChange={v => handleProductChange(idx, 'batch', v)}>
+                                <SelectTrigger className="h-8 text-xs px-2">
+                                  <SelectValue placeholder="选择批次">
+                                    {p.batch ? (p.batch.length > 18 ? '...' + p.batch.slice(-15) : p.batch) : '选择批次'}
+                                  </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {stocks.filter((s: any) => s.product_name === p.product_name && (s.available_qty || 0) > 0).map((s: any) => {
+                                    const batchText = s.batch_no || '无批次';
+                                    const shortBatch = batchText.length > 18 ? '...' + batchText.slice(-15) : batchText;
+                                    return (
+                                      <SelectItem key={s.id} value={s.batch_no || ''} className="text-xs" title={batchText}>
+                                        {shortBatch}（{s.available_qty}{s.unit}）
+                                      </SelectItem>
+                                    );
+                                  })}
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <Input
+                                type="text"
+                                className="h-8 text-sm"
+                                value={String(p.batch || '')}
+                                onChange={e => {
+                                  const batchStr = e.target.value;
+                                  const year = form.sale_date ? form.sale_date.slice(0, 4) : new Date().getFullYear();
+                                  const parsed = parseBatch(batchStr, year);
+                                  if (parsed) {
+                                    handleProductChange(idx, 'batch', batchStr);
+                                    handleProductChange(idx, 'factory', parsed.factory);
+                                    handleProductChange(idx, 'slaughter_date', parsed.slaughter_date);
+                                  } else {
+                                    handleProductChange(idx, 'batch', batchStr);
+                                    // 若格式不对，清空派生字段
+                                    if (!batchStr.includes('-')) {
+                                      handleProductChange(idx, 'factory', '');
+                                      handleProductChange(idx, 'slaughter_date', '');
+                                    }
+                                  }
+                                }}
+                                placeholder="如 N430-0130"
+                              />
+                            )}
                           </td>
                           <td className="px-3 py-2"><Input type="text" className="h-8 text-sm text-right" value={String(p.box_count || '')} onChange={e => handleProductChange(idx, 'box_count', parseInt(e.target.value) || 0)} placeholder="待填写" /></td>
-                          <td className="px-3 py-2"><Input type="text" className="h-8 text-sm text-right" value={String(p.weight_kg || '')} onChange={e => handleProductChange(idx, 'weight_kg', e.target.value)} onBlur={e => { const val = e.target.value.trim(); if (val.includes('+')) { const sum = val.split('+').reduce((a, b) => a + (parseFloat(b.trim()) || 0), 0); handleProductChange(idx, 'weight_kg', round2(sum)); } else { const num = parseFloat(val); if (!isNaN(num)) handleProductChange(idx, 'weight_kg', round2(num)); } }} placeholder="待填写" /></td>
-                          <td className="px-3 py-2"><Input type="number" step="0.01" className="h-8 text-sm text-right" value={String(p.unit_price || '')} onChange={e => handleProductChange(idx, 'unit_price', parseFloat(e.target.value) || 0)} placeholder="元/kg" /></td>
+                          {salesMode === 'unit' ? (
+                            <td className="px-3 py-2"><Input type="text" className="h-8 text-sm text-center" value={String(p.sale_unit || '')} onChange={e => handleProductChange(idx, 'sale_unit', e.target.value)} placeholder="如 盘" /></td>
+                          ) : (
+                            <td className="px-3 py-2"><Input type="text" className="h-8 text-sm text-right" value={String(p.weight_kg || '')} onChange={e => handleProductChange(idx, 'weight_kg', e.target.value)} onBlur={e => { const val = e.target.value.trim(); if (val.includes('+')) { const sum = val.split('+').reduce((a, b) => a + (parseFloat(b.trim()) || 0), 0); handleProductChange(idx, 'weight_kg', round2(sum)); } else { const num = parseFloat(val); if (!isNaN(num)) handleProductChange(idx, 'weight_kg', round2(num)); } }} placeholder="待填写" /></td>
+                          )}
+                          <td className="px-3 py-2"><Input type="number" step="0.01" className="h-8 text-sm text-right" value={String(p.unit_price || '')} onChange={e => handleProductChange(idx, 'unit_price', parseFloat(e.target.value) || 0)} placeholder={salesMode === 'unit' ? '元/单位' : '元/kg'} /></td>
                           <td className="px-3 py-2 text-right font-medium">{p.total_amount ? p.total_amount.toFixed(2) : '-'}</td>
                           <td className="px-3 py-2 text-center"><Button size="sm" variant="ghost" className="text-red-500 h-7 w-7 p-0" disabled={form.products.length <= 1} onClick={() => removeProduct(idx)}><X className="w-4 h-4" /></Button></td>
                         </tr>
@@ -968,9 +1111,21 @@ export function FinishedProductSales() {
             </div>
 
             <div className="grid grid-cols-3 gap-3 text-sm bg-gray-50 p-3 rounded">
-              <div>总箱数: <span className="font-bold">{form.quantity}</span></div>
-              <div>总重量: <span className="font-bold">{form.weight?.toFixed(2)} kg</span></div>
-              <div>总金额: <span className="font-bold text-blue-600">{form.total_amount?.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' })}</span></div>
+              <div>{salesMode === 'unit' ? '总数量' : '总箱数'}: <span className="font-bold">{form.quantity}</span></div>
+              <div>{salesMode === 'unit' ? '总重量' : '总重量'}: <span className="font-bold">{salesMode === 'unit' ? '-' : `${form.weight?.toFixed(2)} kg`}</span></div>
+              <div>产品总金额: <span className="font-bold text-blue-600">{form.total_amount?.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' })}</span></div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-3">
+              <div><Label>运费</Label><Input type="number" step="0.01" value={String(form.freight || '')} onChange={e => setForm({...form, freight: parseFloat(e.target.value) || 0})} placeholder="可留空" /></div>
+              <div><Label>折扣</Label><Input type="number" step="0.01" value={String(form.discount || '')} onChange={e => setForm({...form, discount: parseFloat(e.target.value) || 0})} /></div>
+              <div><Label>手续费</Label><Input type="number" step="0.01" value={String(form.scan_fee || '')} onChange={e => setForm({...form, scan_fee: parseFloat(e.target.value) || 0})} /></div>
+              <div><Label>抹零</Label><Input type="number" step="0.01" value={String(form.rounding || '')} onChange={e => setForm({...form, rounding: parseFloat(e.target.value) || 0})} /></div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm bg-gray-100 p-3 rounded">
+              <div>应付金额: <span className="font-bold text-green-600">{form.net_amount?.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' })}</span></div>
+              <div>实付金额: <span className="font-bold">{form.actual_amount?.toLocaleString('zh-CN', { style: 'currency', currency: 'CNY' })}</span></div>
             </div>
 
             <div><Label>备注</Label><Input value={form.remark} onChange={e => setForm({...form, remark: e.target.value})} /></div>
@@ -985,9 +1140,26 @@ export function FinishedProductSales() {
       {/* 详情弹窗 */}
       <Dialog open={showDetail} onOpenChange={setShowDetail}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle>销售单详情</DialogTitle>
-            <DialogDescription>{detailSale ? `${detailSale.sale_no ?? `#${detailSale.id}`} · ${detailSale.customer ?? '-'}` : ''}</DialogDescription>
+          <DialogHeader className="flex flex-row items-center justify-between">
+            <div>
+              <DialogTitle>销售单详情</DialogTitle>
+              <DialogDescription>{detailSale ? `${detailSale.sale_no ?? `#${detailSale.id}`} · ${detailSale.customer ?? '-'}` : ''}</DialogDescription>
+            </div>
+            <div className="flex items-center gap-1">
+              {detailSale && (
+                <SalePrintButton
+                  saleType="finished_product_v2"
+                  saleId={detailSale.id}
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  title="打印"
+                />
+              )}
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowDetail(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </DialogHeader>
           {detailSale && <FinishedSaleDetailDialog sale={detailSale} onClose={() => setShowDetail(false)} />}
         </DialogContent>

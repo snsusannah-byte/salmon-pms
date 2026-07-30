@@ -13,9 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Plus, Trash2 } from "lucide-react";
 
 const companyTypes = [
   { value: "processing_plant", label: "加工厂" },
@@ -94,12 +96,39 @@ interface Company {
   salesperson_id: number | null;
   customer_category: string | null;
   notes: string | null;
+  is_active: boolean;
+  bank_accounts?: BankAccountItem[];
+}
+
+interface BankAccountItem {
+  id?: number;
+  account_name: string;
+  bank_name: string;
+  account_number: string;
+  currency: string;
+  is_active: boolean;
+  notes: string;
 }
 
 export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType }: CompanyFormDialogProps) {
   const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [users, setUsers] = useState<{id: number; full_name: string}[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccountItem[]>([]);
+
+  const emptyBankAccount = (): BankAccountItem => ({
+    account_name: "",
+    bank_name: "",
+    account_number: "",
+    currency: "CNY",
+    is_active: true,
+    notes: "",
+  });
+
+  const addBankAccount = () => setBankAccounts((prev) => [...prev, emptyBankAccount()]);
+  const removeBankAccount = (idx: number) => setBankAccounts((prev) => prev.filter((_, i) => i !== idx));
+  const updateBankAccount = (idx: number, field: keyof BankAccountItem, value: any) =>
+    setBankAccounts((prev) => prev.map((item, i) => (i === idx ? { ...item, [field]: value } : item)));
 
   // 获取用户列表（用于业务员选择）
   useEffect(() => {
@@ -178,6 +207,7 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
         customer_category: initialData.customer_category ?? "",
         notes: initialData.notes ?? "",
       });
+      setBankAccounts((initialData.bank_accounts || []).map((acc) => ({ ...acc })));
     } else {
       form.reset({
         name: "",
@@ -203,6 +233,7 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
         customer_category: "",
         notes: "",
       });
+      setBankAccounts([]);
     }
   };
 
@@ -224,6 +255,16 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
         cooperation_date: data.cooperation_date || undefined,
         credit_limit: data.credit_limit ? Number(data.credit_limit) : 0,
         salesperson_id: data.salesperson_id ? Number(data.salesperson_id) : undefined,
+        bank_accounts: bankAccounts
+          .filter((acc) => acc.account_name.trim() || acc.bank_name.trim() || acc.account_number.trim())
+          .map((acc) => ({
+            ...acc,
+            id: acc.id && acc.id > 0 ? acc.id : undefined,
+            account_name: acc.account_name.trim(),
+            bank_name: acc.bank_name.trim(),
+            account_number: acc.account_number.trim(),
+            notes: acc.notes.trim(),
+          })),
       };
       
       // 移除空字符串字段
@@ -386,6 +427,87 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
               <Label htmlFor="credit_limit">信用额度</Label>
               <Input id="credit_limit" type="number" {...form.register("credit_limit")} placeholder="0.00" />
             </div>
+          </div>
+
+          {/* 收款账户（可多个） */}
+          <div className="space-y-3 border rounded-lg p-4 bg-gray-50/50">
+            <div className="flex items-center justify-between">
+              <Label className="text-base font-medium">收款账户</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addBankAccount}>
+                <Plus className="h-4 w-4 mr-1" />添加账户
+              </Button>
+            </div>
+            {bankAccounts.length === 0 && (
+              <div className="text-sm text-muted-foreground">暂无收款账户，点击上方按钮添加</div>
+            )}
+            {bankAccounts.map((acc, idx) => (
+              <div key={idx} className="border rounded-md p-3 space-y-3 bg-white">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-muted-foreground">账户 {idx + 1}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeBankAccount(idx)}>
+                    <Trash2 className="h-4 w-4 text-red-500" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">户名</Label>
+                    <Input
+                      value={acc.account_name}
+                      onChange={(e) => updateBankAccount(idx, "account_name", e.target.value)}
+                      placeholder="收款账户名/户名"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">币种</Label>
+                    <Select
+                      value={acc.currency}
+                      onValueChange={(v) => updateBankAccount(idx, "currency", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue>{acc.currency}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CNY">CNY</SelectItem>
+                        <SelectItem value="USD">USD</SelectItem>
+                        <SelectItem value="EUR">EUR</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">开户行</Label>
+                  <Input
+                    value={acc.bank_name}
+                    onChange={(e) => updateBankAccount(idx, "bank_name", e.target.value)}
+                    placeholder="开户银行"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">银行账号</Label>
+                  <Input
+                    value={acc.account_number}
+                    onChange={(e) => updateBankAccount(idx, "account_number", e.target.value)}
+                    placeholder="银行账号"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">备注</Label>
+                  <Input
+                    value={acc.notes}
+                    onChange={(e) => updateBankAccount(idx, "notes", e.target.value)}
+                    placeholder="备注"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id={`bank_active_${idx}`}
+                    checked={acc.is_active}
+                    onCheckedChange={(checked) => updateBankAccount(idx, "is_active", checked === true)}
+                  />
+                  <Label htmlFor={`bank_active_${idx}`} className="text-xs font-normal cursor-pointer">启用</Label>
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* 客户专用字段：分类、业务员、物流 */}

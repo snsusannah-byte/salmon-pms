@@ -1,12 +1,16 @@
 
+from typing import Any
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.permissions import log_operation, require_admin
-from app.models import CompanyType, CustomerCategory, SupplierCategory, User
+from app.models import BankAccount, CompanyType, CustomerCategory, Salesperson, SupplierCategory, User
 from app.schemas.company import (
+    BankAccountItem,
     CompanyCreate,
     CompanyListResponse,
     CompanyResponse,
@@ -18,11 +22,67 @@ from app.services.company_service import CompanyService
 router = APIRouter()
 
 
+async def _sync_company_bank_accounts(
+    db: AsyncSession,
+    company: Any,
+    accounts: list[BankAccountItem],
+) -> None:
+    """同步公司的收款银行账户列表
+
+    规则：以传入列表为准，无 ID 则新建，有 ID 则更新，列表中未包含的现有账户删除。
+    """
+    from sqlalchemy import select as sa_select
+
+    result = await db.execute(
+        sa_select(BankAccount).where(BankAccount.company_id == company.id)
+    )
+    existing = {acc.id: acc for acc in result.scalars().all()}
+
+    kept_ids = set()
+    for item in accounts:
+        # 过滤空账户（允许用户预留空行）
+        if not item.account_name or not item.bank_name or not item.account_number:
+            continue
+        if item.id and item.id in existing:
+            acc = existing[item.id]
+            acc.account_name = item.account_name
+            acc.bank_name = item.bank_name
+            acc.account_number = item.account_number
+            acc.currency = item.currency or acc.currency
+            acc.is_active = item.is_active if item.is_active is not None else acc.is_active
+            acc.notes = item.notes
+            kept_ids.add(item.id)
+        else:
+            new_acc = BankAccount(
+                company_id=company.id,
+                account_name=item.account_name,
+                bank_name=item.bank_name,
+                account_number=item.account_number,
+                currency=item.currency or "CNY",
+                is_active=item.is_active if item.is_active is not None else True,
+                notes=item.notes,
+                code=uuid4().hex[:12],
+                type="public",
+                opening_balance=0,
+                current_balance=0,
+            )
+            db.add(new_acc)
+            await db.flush()
+            kept_ids.add(new_acc.id)
+
+    for acc_id, acc in existing.items():
+        if acc_id not in kept_ids:
+            await db.delete(acc)
+
+    await db.commit()
+    await db.refresh(company)
+
+
 async def _build_company_response(db: AsyncSession, company, payables: dict = None) -> CompanyResponse:
     """构建主体响应（含业务员名称、应付款）"""
     salesperson_name = None
     if company.salesperson_id:
-        r = await db.execute(select(User.full_name).where(User.id == company.salesperson_id))
+        r = await db.execute(select(Salesperson.name).where(Salesperson.id == company.salesperson_id))
         salesperson_name = r.scalar()
     
     payable = payables.get(company.id) if payables else None
@@ -67,6 +127,19 @@ async def _build_company_response(db: AsyncSession, company, payables: dict = No
         "created_at": company.created_at,
         "updated_at": company.updated_at,
     }
+    if hasattr(company, "bank_accounts"):
+        data["bank_accounts"] = [
+            {
+                "id": acc.id,
+                "account_name": acc.account_name,
+                "bank_name": acc.bank_name,
+                "account_number": acc.account_number,
+                "currency": acc.currency,
+                "is_active": acc.is_active,
+                "notes": acc.notes,
+            }
+            for acc in (company.bank_accounts or [])
+        ]
     return CompanyResponse(**data)
 
 
@@ -166,6 +239,8 @@ async def create_company(
 ):
     """创建主体"""
     company = await CompanyService.create(db, data)
+    if data.bank_accounts:
+        await _sync_company_bank_accounts(db, company, data.bank_accounts)
     return await _build_company_response(db, company)
 
 
@@ -208,6 +283,8 @@ async def update_company(
             )
     
     updated = await CompanyService.update(db, company, data)
+    if data.bank_accounts is not None:
+        await _sync_company_bank_accounts(db, updated, data.bank_accounts)
     return await _build_company_response(db, updated)
 
 

@@ -20,12 +20,13 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Plus, Search, Eye, Pencil, Trash2, X, DollarSign, Receipt, AlertTriangle, Trash, Lock, Unlock, Banknote, SlidersHorizontal, ArrowLeftRight, Download,
+  Plus, Search, Eye, Pencil, Trash2, X, DollarSign, Receipt, AlertTriangle, Trash, Lock, Unlock, Banknote, SlidersHorizontal, ArrowLeftRight, Download, Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BatchCollectDialog } from "@/components/BatchCollectDialog";
 import { BatchImportButton } from "@/components/BatchImportButton";
 import { ReturnOrderForm } from "@/components/returns/ReturnOrderForm";
+import { SalePrintButton } from "@/components/SalePrintButton";
 
 const statusMap: Record<string, { label: string; color: string }> = {
   pending: { label: "待收款", color: "bg-red-100 text-red-800" },
@@ -63,6 +64,9 @@ interface Sale {
   rounding_adjustment: string;
   after_sales_adjustment: string;
   discount: string;
+  discount_reason: string | null;
+  balance_adjustment: string;
+  balance_adjustment_reason: string | null;
   commission: string;
   net_amount: string;
   paid_amount: string;
@@ -117,6 +121,8 @@ const PAGE_SIZE = 30;
 export function SalesPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
   const [page, setPage] = useState(1);
   const [formOpen, setFormOpen] = useState(false);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
@@ -142,17 +148,22 @@ export function SalesPage() {
   const [receiptDescription, setReceiptDescription] = useState("");
   const [adjRounding, setAdjRounding] = useState("0");
   const [adjDiscount, setAdjDiscount] = useState("0");
+  const [adjDiscountReason, setAdjDiscountReason] = useState("");
+  const [adjBalanceAdjustment, setAdjBalanceAdjustment] = useState("0");
+  const [adjBalanceAdjustmentReason, setAdjBalanceAdjustmentReason] = useState("");
   const [adjCommission, setAdjCommission] = useState("0");
   const [adjCommissionType, setAdjCommissionType] = useState<"fixed" | "per_kg">("fixed");
   const [exportLoading, setExportLoading] = useState(false);
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery<SaleListResponse>({
-    queryKey: ["sales", statusFilter, page, search],
+    queryKey: ["sales", statusFilter, page, search, startDate, endDate],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
       if (search.trim()) params.append("search", search.trim());
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
       params.append("skip", String((page - 1) * PAGE_SIZE));
       params.append("limit", String(PAGE_SIZE));
       const res = await api.get(`/v1/sales/whole-fish?${params.toString()}`);
@@ -164,11 +175,13 @@ export function SalesPage() {
 
   // 全局汇总查询（不分页，获取所有匹配数据）
   const { data: allSalesData } = useQuery<SaleListResponse>({
-    queryKey: ["sales-all", statusFilter, search],
+    queryKey: ["sales-all", statusFilter, search, startDate, endDate],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
       if (search.trim()) params.append("search", search.trim());
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
       params.append("skip", "0");
       params.append("limit", "500");
       const res = await api.get(`/v1/sales/whole-fish?${params.toString()}`);
@@ -231,6 +244,8 @@ export function SalesPage() {
       const params = new URLSearchParams();
       if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
       if (search.trim()) params.append("search", search.trim());
+      if (startDate) params.append("start_date", startDate);
+      if (endDate) params.append("end_date", endDate);
       const res = await api.get(`/v1/sales/whole-fish/export?${params.toString()}`, {
         responseType: "blob",
       });
@@ -349,13 +364,16 @@ export function SalesPage() {
       return res.data;
     },
   });
-  const customersList = customersData?.items || [];
+  const customersList = Array.isArray(customersData?.items) ? customersData.items : [];
 
   const handleOpenAdjust = (sale: Sale) => {
     if (sale.is_locked) { toast.error("销售记录已锁定，不能调整"); return; }
     setAdjustSale(sale);
     const discount = String(sale.discount ?? 0);
     setAdjDiscount(discount);
+    setAdjDiscountReason(sale.discount_reason ?? "");
+    setAdjBalanceAdjustment(String(sale.balance_adjustment ?? 0));
+    setAdjBalanceAdjustmentReason(sale.balance_adjustment_reason ?? "");
     setAdjRounding(String(sale.rounding_adjustment ?? 0));
     setAdjCommission(String(sale.commission ?? 0));
     setAdjBankAccountId("");
@@ -436,10 +454,15 @@ export function SalesPage() {
   const handleSaveAdjust = async () => {
     if (!adjustSale) return;
 
+    const balanceAdjustment = Number(adjBalanceAdjustment || 0);
+
     try {
       // 保存调整项（售后已独立，不再通过调整弹窗修改售后金额）
       await api.put(`/v1/sales/whole-fish/${adjustSale.id}`, {
         discount: Number(adjDiscount || 0),
+        discount_reason: adjDiscountReason.trim() || undefined,
+        balance_adjustment: balanceAdjustment,
+        balance_adjustment_reason: adjBalanceAdjustmentReason.trim() || undefined,
         rounding_adjustment: Number(adjRounding || 0),
         commission: Number(adjCommission || 0),
       });
@@ -543,6 +566,15 @@ export function SalesPage() {
                   <span className="tabular-nums">-¥{Number(adjDiscount || adjustSale.discount || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               )}
+              {adjustSale && Number(adjustSale.balance_adjustment || adjBalanceAdjustment) !== 0 && (
+                <div className={cn("flex justify-between", Number(adjBalanceAdjustment || adjustSale.balance_adjustment || 0) < 0 ? "text-red-500" : "text-orange-600")}>
+                  <span>账平调整</span>
+                  <span className="tabular-nums">
+                    {Number(adjBalanceAdjustment || adjustSale.balance_adjustment || 0) > 0 ? "-" : "+"}
+                    ¥{Math.abs(Number(adjBalanceAdjustment || adjustSale.balance_adjustment || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              )}
               {adjustSale && (Number(adjustSale.commission || adjCommission) !== 0) && (
                 <div className="flex justify-between text-orange-600">
                   <span>提成</span>
@@ -554,7 +586,7 @@ export function SalesPage() {
                 <span className="text-blue-600 tabular-nums">
                   ¥{(() => {
                     if (!adjustSale) return "0.00";
-                    const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || adjustSale.rounding_adjustment || 0) - Number(adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || adjustSale.discount || 0) - Number(adjCommission || adjustSale.commission || 0));
+                    const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || adjustSale.rounding_adjustment || 0) - Number(adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || adjustSale.discount || 0) - Number(adjBalanceAdjustment || adjustSale.balance_adjustment || 0) - Number(adjCommission || adjustSale.commission || 0));
                     return net.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                   })()}
                 </span>
@@ -567,14 +599,14 @@ export function SalesPage() {
                 <span>未付余额</span>
                 <span className={(() => {
                   if (!adjustSale) return "text-gray-400";
-                  const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || adjustSale.rounding_adjustment || 0) - Number(adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || adjustSale.discount || 0) - Number(adjCommission || adjustSale.commission || 0));
-                  const remaining = net - Number(adjustSale.paid_amount || 0);
+                  const statusNet = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || adjustSale.rounding_adjustment || 0) - Number(adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || adjustSale.discount || 0) - Number(adjCommission || adjustSale.commission || 0));
+                  const remaining = statusNet - Number(adjustSale.paid_amount || 0);
                   return remaining <= 0 ? "text-green-600" : "text-orange-600";
                 })()}>
                   ¥{(() => {
                     if (!adjustSale) return "0.00";
-                    const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || adjustSale.rounding_adjustment || 0) - Number(adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || adjustSale.discount || 0) - Number(adjCommission || adjustSale.commission || 0));
-                    const remaining = Math.max(0, net - Number(adjustSale.paid_amount || 0));
+                    const statusNet = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || adjustSale.rounding_adjustment || 0) - Number(adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || adjustSale.discount || 0) - Number(adjCommission || adjustSale.commission || 0));
+                    const remaining = Math.max(0, statusNet - Number(adjustSale.paid_amount || 0));
                     return remaining.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                   })()}
                 </span>
@@ -595,6 +627,29 @@ export function SalesPage() {
               </div>
 
               <div className="space-y-1">
+                <Label className="text-xs">折扣原因</Label>
+                <Input value={adjDiscountReason} onChange={(e) => setAdjDiscountReason(e.target.value)} placeholder="如：降价补偿" />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">账平调整 <span className="text-muted-foreground font-normal">（尾差/挂账抹平，不进入银行流水）</span></Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={adjBalanceAdjustment}
+                  onChange={(e) => setAdjBalanceAdjustment(e.target.value)}
+                  placeholder="0"
+                />
+                <p className="text-xs text-muted-foreground">正数表示从应收中扣减，负数表示追加应收</p>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">账平调整原因</Label>
+                <Input value={adjBalanceAdjustmentReason} onChange={(e) => setAdjBalanceAdjustmentReason(e.target.value)} placeholder="如：尾差抹平" />
+              </div>
+
+              <div className="space-y-1">
                 <Label className="text-xs">提成</Label>
                 <Input inputMode="decimal" value={adjCommission} onChange={(e) => setAdjCommission(e.target.value)} placeholder="0" />
               </div>
@@ -603,8 +658,8 @@ export function SalesPage() {
             {/* 调整提示 */}
             {(() => {
               if (!adjustSale) return null;
-              const net = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || 0) - Number(adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || 0) - Number(adjCommission || 0));
-              const remaining = net - Number(adjustSale.paid_amount || 0);
+              const statusNet = Math.max(0, Number(adjustSale.gross_amount || 0) - Number(adjustSale.scan_fee || 0) - Number(adjRounding || 0) - Number(adjustSale.after_sales_adjustment || 0) - Number(adjDiscount || 0) - Number(adjCommission || 0));
+              const remaining = statusNet - Number(adjustSale.paid_amount || 0);
               if (remaining <= 0 && Number(adjustSale.paid_amount || 0) > 0) {
                 return (
                   <div className="flex items-center gap-2 text-xs text-green-600 bg-green-50 rounded-md p-2">
@@ -666,6 +721,15 @@ export function SalesPage() {
                 <div className="flex justify-between text-orange-600">
                   <span>折扣</span>
                   <span className="tabular-nums">-¥{Number(receiptSale.discount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
+              {receiptSale && Number(receiptSale.balance_adjustment) !== 0 && (
+                <div className={cn("flex justify-between", Number(receiptSale.balance_adjustment) < 0 ? "text-red-500" : "text-orange-600")}>
+                  <span>账平调整</span>
+                  <span className="tabular-nums">
+                    {Number(receiptSale.balance_adjustment) > 0 ? "-" : "+"}
+                    ¥{Math.abs(Number(receiptSale.balance_adjustment)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
                 </div>
               )}
               {receiptSale && Number(receiptSale.commission) !== 0 && (
@@ -805,7 +869,7 @@ export function SalesPage() {
                   <Label className="text-xs">客户余额</Label>
                   <div className="h-8 flex items-center px-3 rounded-md border bg-muted/30 text-xs">
                     {(() => {
-                      const c = (customersData?.items || []).find((c: any) => c.id === receiptSale?.customer_id);
+                      const c = (Array.isArray(customersData?.items) ? customersData.items : []).find((c: any) => c.id === receiptSale?.customer_id);
                       const bal = Number(c?.prepaid_balance || 0);
                       return (
                         <span className={bal > 0 ? "text-green-600 font-medium" : "text-muted-foreground"}>
@@ -835,7 +899,7 @@ export function SalesPage() {
             {/* 本次收款后未付 */}
             <div className="border-t pt-3">
               {receiptMethod === "balance" && receiptSale && (() => {
-                const c = (customersData?.items || []).find((c: any) => c.id === receiptSale.customer_id);
+                const c = (Array.isArray(customersData?.items) ? customersData.items : []).find((c: any) => c.id === receiptSale.customer_id);
                 const balance = Number(c?.prepaid_balance || 0);
                 const receivable = Math.max(0, Number(receiptSale.net_amount || 0) - Number(receiptSale.paid_amount || 0));
                 const entered = Number(receiptAmount) || 0;
@@ -940,11 +1004,21 @@ export function SalesPage() {
               <DialogTitle>销售详情</DialogTitle>
               <DialogDescription>销售 #{detailSale?.id} · {detailSale?.customer_name}</DialogDescription>
             </div>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDetailOpen(false)}>
-              <X className="h-4 w-4" />
-            </Button>
+            <div className="flex items-center gap-1">
+              <SalePrintButton
+                saleType="whole_fish"
+                saleId={detailSale?.id ?? ""}
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="打印"
+              />
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setDetailOpen(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </DialogHeader>
-          {detailSale && <SaleDetailDialog sale={detailSale} onClose={() => setDetailOpen(false)} onCreateReturn={() => { setReturnPrefillSale({ type: "whole_fish", sale: detailSale }); setReturnFormOpen(true); }} />}
+          {detailSale && <SaleDetailDialog sale={detailSale} onClose={() => setDetailOpen(false)} onCreateReturn={() => { setReturnPrefillSale({ type: "whole_fish", sale: detailSale }); setReturnFormOpen(true); }} onRefresh={(s) => setDetailSale(s)} />}
         </DialogContent>
       </Dialog>
 
@@ -974,31 +1048,49 @@ export function SalesPage() {
             ))}
           </SelectContent>
         </Select>
+        <div className="flex items-center gap-2">
+          <Input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setPage(1); }} className="w-[150px]" placeholder="开始日期" />
+          <span className="text-muted-foreground">-</span>
+          <Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-[150px]" placeholder="结束日期" />
+        </div>
+        {(startDate || endDate) && (
+          <Button variant="ghost" size="sm" onClick={() => { setStartDate(""); setEndDate(""); setPage(1); }}>
+            清除日期
+          </Button>
+        )}
       </div>
 
       {/* 汇总行 */}
       {data?.items && data.items.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">记录条数</p><p className="text-xl font-bold">{summary.totalCount.toLocaleString()}</p></CardContent></Card>
-          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总箱数</p><p className="text-xl font-bold">{summary.totalBoxes.toLocaleString()}</p></CardContent></Card>
-          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总重量</p><p className="text-xl font-bold">{summary.totalWeight.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p></CardContent></Card>
-          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总销售金额</p><p className="text-xl font-bold">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
-          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">售后金额</p><p className="text-xl font-bold text-red-500">¥{summary.totalAfterSales.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
-          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">应收金额</p><p className="text-xl font-bold text-orange-600">¥{summary.totalReceivable.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
-          <Card className="flex-shrink-0"><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">已收金额</p><p className="text-xl font-bold text-green-600">¥{summary.totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <Card><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">记录条数</p><p className="text-xl font-bold">{summary.totalCount.toLocaleString()}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总箱数</p><p className="text-xl font-bold">{summary.totalBoxes.toLocaleString()}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总重量</p><p className="text-xl font-bold">{summary.totalWeight.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">总销售金额</p><p className="text-xl font-bold">¥{summary.totalNetAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">售后金额</p><p className="text-xl font-bold text-red-500">¥{summary.totalAfterSales.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">应收金额</p><p className="text-xl font-bold text-orange-600">¥{summary.totalReceivable.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
+          <Card><CardContent className="p-2 text-sm whitespace-nowrap"><p className="text-muted-foreground text-xs">已收金额</p><p className="text-xl font-bold text-green-600">¥{summary.totalPaid.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></CardContent></Card>
         </div>
       )}
 
       {/* 常驻操作栏（固定在汇总行下方） */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-1 flex-wrap">
         <BatchImportButton type="sales" />
-        <Button onClick={() => { setEditingSale(null); setFormOpen(true); }}><Plus className="h-4 w-4 mr-2" />新增销售</Button>
+        <Button size="sm" onClick={() => { setEditingSale(null); setFormOpen(true); }}><Plus className="h-4 w-4 mr-1" />新增销售</Button>
         <Button variant="outline" size="sm" onClick={handleExport} disabled={exportLoading || !data?.items?.length}>
           <Download className="h-4 w-4 mr-1" />{exportLoading ? "导出中..." : "导出"}
         </Button>
         {hasSelection && <div className="h-6 w-px bg-border" />}
         <Button variant="ghost" size="sm" disabled={!single} onClick={() => singleSale && (setDetailSale(singleSale), setDetailOpen(true))} title="查看"
 ><Eye className="h-4 w-4 mr-1" />查看</Button>
+        <SalePrintButton
+          saleType="whole_fish"
+          saleId={singleSale?.id ?? ""}
+          variant="ghost"
+          size="sm"
+          disabled={!single}
+          label="打印"
+        />
         <Button variant="ghost" size="sm" disabled={!single || singleSale?.is_locked || singleSale?.batch_is_locked} onClick={() => singleSale && (setEditingSale(singleSale), setFormOpen(true))} title={singleSale?.batch_is_locked ? "批次已锁定" : "编辑"}
 ><Pencil className="h-4 w-4 mr-1" />编辑</Button>
         <Button variant="ghost" size="sm" className="text-green-600" disabled={!single || singleSale?.is_locked || singleSale?.batch_is_locked} onClick={() => singleSale && openReceipt(singleSale)} title={singleSale?.batch_is_locked ? "批次已锁定" : "收款"}
@@ -1026,26 +1118,26 @@ export function SalesPage() {
         {/* 列表区 — 占剩余空间，超出时内部滚动 */}
         <div className="flex-1 flex flex-col min-h-0 border rounded-lg overflow-hidden">
           <div className="overflow-auto">
-            <Table>
+            <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead className="sticky top-0 bg-background z-10 w-[40px]"><Checkbox checked={data?.items ? selectedIds.size === data.items.length && data.items.length > 0 : false} onCheckedChange={toggleSelectAll} /></TableHead>
-              <TableHead className="sticky top-0 bg-background z-10">销售单号</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10">日期</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10">客户</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10">业务员</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10">批次</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10">加工厂(EU)</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10">规格（公斤/箱数）</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10 text-right">箱数</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10 text-right">重量(kg)</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10 text-right">销售金额</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10 text-right">净金额</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10 text-right">已收</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10 text-right">售后</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10 text-right">抹零</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10 text-right">折扣</TableHead>
-              <TableHead className="sticky top-0 bg-background z-10">付款状态</TableHead>
+              <TableHead className="sticky top-0 left-0 bg-background z-20 w-[40px]"><Checkbox checked={data?.items ? selectedIds.size === data.items.length && data.items.length > 0 : false} onCheckedChange={toggleSelectAll} /></TableHead>
+              <TableHead className="sticky top-0 left-[40px] bg-background z-20 w-[150px] !text-left" style={{ textAlign: "left" }}>销售单号</TableHead>
+              <TableHead className="sticky top-0 left-[190px] bg-background z-20 w-[90px]">日期</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[120px]">客户</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[70px]">业务员</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[120px]">批次</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[80px]">加工厂(EU)</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[60px] text-right">箱数</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[80px] text-right">重量(kg)</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[100px] text-right">销售金额</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[100px] text-right">净金额</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[100px] text-right">已收</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[70px] text-right">售后</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[70px] text-right">抹零</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[70px] text-right">折扣</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[70px] text-right">账平</TableHead>
+              <TableHead className="sticky top-0 bg-background z-10 w-[90px]">付款状态</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1055,48 +1147,46 @@ export function SalesPage() {
                 {data?.items.map((sale) => {
                   const statusInfo = statusMap[sale.status] ?? { label: sale.status, color: "" };
                   const unpaid = Number(sale.net_amount) - Number(sale.paid_amount);
-                  return (
+                      return (
                     <TableRow
                       key={sale.id}
-                      className={cn("cursor-pointer transition-colors", selectedSale?.id === sale.id && "bg-primary/10 hover:bg-primary/15")}
-                      onClick={() => setSelectedSale(sale)}
+                      className={cn("cursor-pointer transition-colors", selectedIds.has(sale.id) && "bg-primary/10 hover:bg-primary/15")}
+                      onClick={() => { setSelectedSale(sale); setSelectedIds(new Set([sale.id])); }}
                     >
-                      <TableCell onClick={(e) => e.stopPropagation()}><Checkbox checked={selectedIds.has(sale.id)} onCheckedChange={(checked) => toggleSelect(sale.id, checked)} /></TableCell>
-                      <TableCell className="font-medium relative">
+                      <TableCell className="sticky left-0 bg-background z-10" onClick={(e) => e.stopPropagation()}><Checkbox checked={selectedIds.has(sale.id)} onCheckedChange={(checked) => toggleSelect(sale.id, checked)} /></TableCell>
+                      <TableCell className="sticky left-[40px] bg-background z-10 font-medium">
                         {sale.is_locked && <span className="text-orange-500 mr-1">🔒</span>}
                         {sale.batch_is_locked && <span className="text-red-500 mr-1" title="批次已锁定">🔒</span>}
-                        <button
-                          className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-left"
-                          onClick={() => { setEditingSale(sale); setFormOpen(true); }}
-                          disabled={sale.is_locked || sale.batch_is_locked}
-                          title={sale.batch_is_locked ? "批次已锁定，不能编辑" : "点击编辑"}
-                        >
-                          {sale.sale_no ?? `#${sale.id}`}
-                        </button>
+                        {sale.is_locked || sale.batch_is_locked ? (
+                          <span className="text-muted-foreground" title={sale.batch_is_locked ? "批次已锁定，不能编辑" : "已锁定"}>
+                            {sale.sale_no ?? `#${sale.id}`}
+                          </span>
+                        ) : (
+                          <span
+                            className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                            onClick={() => { setEditingSale(sale); setFormOpen(true); }}
+                            title={sale.sale_no ?? `#${sale.id}`}
+                          >
+                            {sale.sale_no ?? `#${sale.id}`}
+                          </span>
+                        )}
                         {(sale._aftersales_count ?? sale.aftersales?.length ?? 0) > 0 && (
                           <span className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold" title={`售后 ${sale._aftersales_count ?? sale.aftersales?.length ?? 0} 条`}>
                             {sale._aftersales_count ?? sale.aftersales?.length ?? 0}
                           </span>
                         )}
                       </TableCell>
-                      <TableCell>{sale.sale_date}</TableCell>
-                      <TableCell>{sale.customer_name ?? "-"}</TableCell>
-                      <TableCell>{sale.salesperson_name ?? "-"}</TableCell>
-                      <TableCell>
-                        <div className="text-sm">{sale.batch_name ?? sale.batch_code ?? "-"}</div>
+                      <TableCell className="sticky left-[190px] bg-background z-10 truncate" title={sale.sale_date}>{sale.sale_date}</TableCell>
+                      <TableCell className="truncate" title={sale.customer_name ?? "-"}>{sale.customer_name ?? "-"}</TableCell>
+                      <TableCell className="truncate" title={sale.salesperson_name ?? "-"}>{sale.salesperson_name ?? "-"}</TableCell>
+                      <TableCell className="truncate" title={sale.batch_name ? `${sale.batch_name} (${sale.batch_code})` : sale.batch_code ?? "-"}>
+                        <div className="text-sm truncate">{sale.batch_name ?? sale.batch_code ?? "-"}</div>
                         {sale.batch_name && sale.batch_code && (
-                          <div className="text-xs text-muted-foreground">{sale.batch_code}</div>
+                          <div className="text-xs text-muted-foreground truncate">{sale.batch_code}</div>
                         )}
                       </TableCell>
-                      <TableCell>
-                        <div className="text-sm font-mono text-muted-foreground">{sale.processing_plant_eu_no ?? "-"}</div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm">{sale.spec ?? "-"}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {sale.weight_kg ? `${Number(sale.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}kg` : ""}
-                          {sale.box_count ? ` / ${sale.box_count}箱` : ""}
-                        </div>
+                      <TableCell className="truncate" title={sale.processing_plant_eu_no ?? "-"}>
+                        <div className="text-sm font-mono text-muted-foreground truncate">{sale.processing_plant_eu_no ?? "-"}</div>
                       </TableCell>
                       <TableCell className="text-right">{sale.box_count ?? "-"}</TableCell>
                       <TableCell className="text-right">{Number(sale.weight_kg).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
@@ -1126,6 +1216,16 @@ export function SalesPage() {
                           <span className="text-muted-foreground">-</span>
                         )}
                       </TableCell>
+                      <TableCell className="text-right">
+                        {Number(sale.balance_adjustment) !== 0 ? (
+                          <span className={cn(Number(sale.balance_adjustment) < 0 ? "text-red-500" : "text-orange-500")}>
+                            {Number(sale.balance_adjustment) > 0 ? "-" : "+"}
+                            ¥{Math.abs(Number(sale.balance_adjustment)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell><Badge variant="secondary" className={statusInfo.color}>{statusInfo.label}</Badge></TableCell>
                     </TableRow>
                   );
@@ -1133,7 +1233,7 @@ export function SalesPage() {
                 {/* 页汇总行 */}
                 {data?.items && data.items.length > 0 && (
                   <TableRow className="bg-muted/50 font-medium border-t-2">
-                    <TableCell colSpan={8} className="text-right">本页合计:</TableCell>
+                    <TableCell colSpan={7} className="text-right">本页合计:</TableCell>
                     <TableCell className="text-right">
                       {data.items.reduce((s, it) => s + (Number(it.box_count) || 0), 0)}
                     </TableCell>
@@ -1165,6 +1265,13 @@ export function SalesPage() {
                       {(() => {
                         const totalDiscount = data.items.reduce((s, it) => s + Number(it.discount || 0), 0);
                         return totalDiscount > 0 ? `-¥${totalDiscount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "-";
+                      })()}
+                    </TableCell>
+                    <TableCell className={cn("text-right", summary.totalBalanceAdjustment < 0 ? "text-red-500" : "text-orange-500")}>
+                      {(() => {
+                        const totalBalanceAdjustment = data.items.reduce((s, it) => s + Number(it.balance_adjustment || 0), 0);
+                        if (totalBalanceAdjustment === 0) return "-";
+                        return `${totalBalanceAdjustment > 0 ? "-" : "+"}¥${Math.abs(totalBalanceAdjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                       })()}
                     </TableCell>
                     <TableCell colSpan={1} />
@@ -1293,6 +1400,7 @@ interface SpecItem {
   box_count: string;
   weight_kg: string;
   unit_price: string;
+  product_id?: string;
 }
 
 // ==================== 销售表单弹窗 ====================
@@ -1309,7 +1417,7 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
   const [customerId, setCustomerId] = useState("");
   const [salespersonId, setSalespersonId] = useState("");
   const [notes, setNotes] = useState("");
-  const [specItems, setSpecItems] = useState<SpecItem[]>([{ spec: "", box_count: "", weight_kg: "", unit_price: "" }]);
+  const [specItems, setSpecItems] = useState<SpecItem[]>([{ spec: "", box_count: "", weight_kg: "", unit_price: "", product_id: "" }]);
 
   React.useEffect(() => {
     if (open && saleDate) {
@@ -1338,15 +1446,16 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
           box_count: it.box_count ? String(it.box_count) : "",
           weight_kg: String(Number(it.weight_kg).toFixed(2)),
           unit_price: String(Number(it.unit_price).toFixed(2)),
+          product_id: "",
         })));
       } else {
-        setSpecItems([{ spec: initialData.spec ?? "", box_count: initialData.box_count ? String(initialData.box_count) : "", weight_kg: String(Number(initialData.weight_kg).toFixed(2)), unit_price: String(Number(initialData.unit_price).toFixed(2)) }]);
+        setSpecItems([{ spec: initialData.spec ?? "", box_count: initialData.box_count ? String(initialData.box_count) : "", weight_kg: String(Number(initialData.weight_kg).toFixed(2)), unit_price: String(Number(initialData.unit_price).toFixed(2)), product_id: "" }]);
       }
       setNotes(initialData.notes ?? "");
     } else {
       setSaleDate(new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-'));
       setBatchId(""); setCustomerId(""); setSalespersonId("");
-      setSpecItems([{ spec: "", box_count: "", weight_kg: "", unit_price: "" }]);
+      setSpecItems([{ spec: "", box_count: "", weight_kg: "", unit_price: "", product_id: "" }]);
       setNotes("");
     }
   };
@@ -1367,7 +1476,7 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
 
   const importSpecs = importSpecsData?.items || [];
 
-  const addSpecItem = () => setSpecItems([...specItems, { spec: "", box_count: "", weight_kg: "", unit_price: "" }]);
+  const addSpecItem = () => setSpecItems([...specItems, { spec: "", box_count: "", weight_kg: "", unit_price: "", product_id: "" }]);
   const updateSpecItem = (index: number, field: keyof SpecItem, value: string) => {
     const newItems = [...specItems];
     newItems[index] = { ...newItems[index], [field]: value };
@@ -1380,7 +1489,7 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!saleDate || !batchId || !customerId) { toast.error("请填写必填字段"); return; }
-    const validItems = specItems.filter(it => it.weight_kg && it.unit_price);
+    const validItems = specItems.filter(it => it.weight_kg && it.unit_price !== undefined && it.unit_price !== "");
     if (validItems.length === 0) { toast.error("请至少填写一条规格明细"); return; }
 
     setIsSubmitting(true);
@@ -1472,7 +1581,7 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
             <div className="space-y-2">
               <Label>客户 <span className="text-red-500">*</span></Label>
               <CustomerSearchSelect
-                customers={customersData?.items || []}
+                customers={Array.isArray(customersData?.items) ? customersData.items : []}
                 value={customerId}
                 onChange={setCustomerId}
                 placeholder="选择客户"
@@ -1503,18 +1612,39 @@ function SaleFormDialog({ open, onOpenChange, initialData, onSuccess }: {
             <div className="space-y-2">
               {specItems.map((item, idx) => {
                 const amount = (Number(item.weight_kg) || 0) * (Number(item.unit_price) || 0);
-                const selectedProduct = importSpecs.find((p: any) => (p.spec || p.name) === item.spec);
+                const selectedProduct = importSpecs.find((p: any) => 
+                  String(p.id) === item.product_id || (p.spec || p.name) === item.spec
+                );
                 return (
                   <div key={idx} className="grid grid-cols-[70px_1fr_50px_65px_65px_60px_26px] gap-2 items-center">
                     <div className="text-xs font-medium truncate min-w-0" title={selectedProduct?.name}>
                       {selectedProduct?.name || <span className="text-muted-foreground">产品</span>}
                     </div>
-                    <Select value={item.spec} onValueChange={(v) => updateSpecItem(idx, "spec", v ?? "")}>
-                      <SelectTrigger className="h-8 text-xs px-2"><SelectValue placeholder="规格" /></SelectTrigger>
+                    <Select 
+                      value={selectedProduct ? String(selectedProduct.id) : item.spec || ""} 
+                      onValueChange={(v) => {
+                        const product = importSpecs.find((p: any) => String(p.id) === v);
+                        if (product) {
+                          updateSpecItem(idx, "product_id", String(product.id));
+                          updateSpecItem(idx, "spec", product.spec || product.name);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs px-2">
+                        <SelectValue placeholder="规格">
+                          {selectedProduct ? (selectedProduct.spec || selectedProduct.name) : (item.spec || "规格")}
+                        </SelectValue>
+                      </SelectTrigger>
                       <SelectContent>
-                        {importSpecs.map((p: any) => (
-                          <SelectItem key={p.id} value={p.spec || p.name} className="text-xs">{p.spec || p.name}</SelectItem>
-                        ))}
+                        {importSpecs.length === 0 ? (
+                          <div className="px-3 py-2 text-xs text-muted-foreground">暂无规格数据，请先在产品管理中维护进口规格</div>
+                        ) : (
+                          importSpecs.map((p: any) => (
+                            <SelectItem key={p.id} value={String(p.id)} className="text-xs">
+                              {p.spec || p.name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                     <Input inputMode="decimal" value={item.box_count} onChange={(e) => updateSpecItem(idx, "box_count", e.target.value)} className="h-8 text-center text-xs px-1" placeholder="箱" />
@@ -1557,11 +1687,12 @@ function CustomerSearchSelect({ customers, value, onChange, placeholder }: { cus
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const safeCustomers = Array.isArray(customers) ? customers : [];
 
-  const selected = customers.find((c: any) => String(c.id) === value);
+  const selected = safeCustomers.find((c: any) => String(c.id) === value);
   const filtered = search.trim()
-    ? customers.filter((c: any) => c.name?.toLowerCase().includes(search.trim().toLowerCase()))
-    : customers;
+    ? safeCustomers.filter((c: any) => c.name?.toLowerCase().includes(search.trim().toLowerCase()))
+    : safeCustomers;
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -1627,7 +1758,7 @@ function CustomerSearchSelect({ customers, value, onChange, placeholder }: { cus
 
 // ==================== 详情弹窗组件 ====================
 
-function SaleDetailDialog({ sale, onClose, onCreateReturn }: { sale: Sale; onClose: () => void; onCreateReturn?: () => void }) {
+function SaleDetailDialog({ sale, onClose, onCreateReturn, onRefresh }: { sale: Sale; onClose: () => void; onCreateReturn?: () => void; onRefresh?: (sale: Sale) => void }) {
   const [activeTab, setActiveTab] = useState("info");
   const queryClient = useQueryClient();
 
@@ -1760,6 +1891,13 @@ function SaleDetailDialog({ sale, onClose, onCreateReturn }: { sale: Sale; onClo
             {Number(sale.rounding_adjustment) > 0 && <div className="flex justify-between text-red-500"><span>抹零调整</span><span>-¥{Number(sale.rounding_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
             {Number(sale.after_sales_adjustment) > 0 && <div className="flex justify-between text-red-500"><span>售后调整</span><span>-¥{Number(sale.after_sales_adjustment).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
             {Number(sale.discount) > 0 && <div className="flex justify-between text-red-500"><span>折扣</span><span>-¥{Number(sale.discount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
+            {Number(sale.balance_adjustment) !== 0 && <div className={cn("flex justify-between", Number(sale.balance_adjustment) < 0 ? "text-blue-500" : "text-red-500")}>
+              <span>账平调整</span>
+              <span>
+                {Number(sale.balance_adjustment) > 0 ? "-" : "+"}
+                ¥{Math.abs(Number(sale.balance_adjustment)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>}
             {Number(sale.commission) > 0 && <div className="flex justify-between text-red-500"><span>提成</span><span>-¥{Number(sale.commission).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>}
             <div className="flex justify-between font-semibold border-t pt-1"><span>净金额</span><span>¥{Number(sale.net_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
             <div className="flex justify-between text-green-600"><span>已付</span><span>¥{Number(sale.paid_amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>
@@ -1825,7 +1963,7 @@ function SaleDetailDialog({ sale, onClose, onCreateReturn }: { sale: Sale; onClo
                     <Label className="text-xs">客户余额</Label>
                     <div className="h-8 flex items-center px-3 rounded-md border bg-muted/30 text-xs">
                       {(() => {
-                        const c = (customersData?.items || []).find((c: any) => c.id === sale?.customer_id);
+                        const c = (Array.isArray(customersData?.items) ? customersData.items : []).find((c: any) => c.id === sale?.customer_id);
                         const bal = Number(c?.prepaid_balance || 0);
                         return (
                           <span className={bal > 0 ? "text-green-600 font-medium" : "text-muted-foreground"}>
@@ -1857,6 +1995,7 @@ function SaleDetailDialog({ sale, onClose, onCreateReturn }: { sale: Sale; onClo
                   <TableHead className="text-xs">银行</TableHead>
                   <TableHead className="text-xs text-right">金额</TableHead>
                   <TableHead className="text-xs">备注</TableHead>
+                  <TableHead className="text-xs">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1870,6 +2009,29 @@ function SaleDetailDialog({ sale, onClose, onCreateReturn }: { sale: Sale; onClo
                     })()}</TableCell>
                     <TableCell className="text-sm text-right">¥{Number(r.amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                     <TableCell className="text-sm">{r.notes ?? "-"}</TableCell>
+                    <TableCell className="text-sm">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-500 hover:text-red-700"
+                        disabled={sale.is_locked}
+                        onClick={async () => {
+                          if (!confirm('确定删除此收款记录？')) return;
+                          try {
+                            await api.delete(`/v1/sales/whole-fish/${sale.id}/receipts/${r.id}`);
+                            toast.success('删除成功');
+                            // 刷新当前销售单详情
+                            const res = await api.get(`/v1/sales/whole-fish/${sale.id}`);
+                            // 将刷新后的数据传给父组件
+                            onRefresh?.(res.data);
+                          } catch (err: any) {
+                            toast.error(err.response?.data?.detail || '删除失败');
+                          }
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

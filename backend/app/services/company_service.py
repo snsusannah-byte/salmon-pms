@@ -199,6 +199,8 @@ class CompanyService:
     async def create(db: AsyncSession, data: CompanyCreate) -> Company:
         """创建主体"""
         dump_data = data.model_dump(exclude_unset=True)
+        # 收款账户由 endpoint 单独同步，不要直接传给 ORM
+        dump_data.pop("bank_accounts", None)
         
         # 检查编码是否被活跃主体占用
         if dump_data.get("code"):
@@ -252,6 +254,8 @@ class CompanyService:
                 )
         
         for field, value in update_data.items():
+            if field == "bank_accounts":
+                continue
             setattr(company, field, value)
         
         await db.commit()

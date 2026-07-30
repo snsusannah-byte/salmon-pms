@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     daily_slaughter,
     dashboard,
     finance,
+    finance_v4_migration,
     finished_product_sales,
     finished_product_sales_v2,
     finished_products,
@@ -18,6 +19,7 @@ from app.api.v1.endpoints import (
     material_purchases,
     materials,
     notifications,
+    print as print_endpoint,
     products,
     purchase_inbound,
     purchase_orders,
@@ -59,6 +61,9 @@ api_router.include_router(warehouse.router, prefix="/warehouse", tags=["warehous
 api_router.include_router(warehouse_v2.router, prefix="/warehouse-v2", tags=["warehouse-v2"])
 api_router.include_router(loss_records.router, prefix="/loss-records", tags=["loss-records"])
 api_router.include_router(finished_product_sales_v2.router, prefix="/finished-product-sales", tags=["finished-product-sales-v2"])
+api_router.include_router(finished_product_sales_v2.v2_router, prefix="/finished-product-sales-v2", tags=["finished-product-sales-v2"])
+api_router.include_router(finished_product_sales_v2.conversion_router, prefix="/product-unit-conversions", tags=["product-unit-conversions"])
+api_router.include_router(print_endpoint.router, prefix="/print/sales", tags=["打印"])
 api_router.include_router(materials.router, prefix="/materials", tags=["物料管理"])
 api_router.include_router(material_categories.router, prefix="/material-categories", tags=["物料分类"])
 api_router.include_router(material_purchases.router, prefix="/material-purchases", tags=["物料采购"])
@@ -68,4 +73,4 @@ api_router.include_router(returns.router, prefix="/returns", tags=["退货管理
 
 api_router.include_router(purchase_inbound.router, tags=["采购入库"])
 api_router.include_router(purchase_returns.router, prefix="/purchase-returns", tags=["采购售后"])
-# api_router.include_router(finance_v4_migration.router, prefix="/v4", tags=["国内采购与成品销售"])
+api_router.include_router(finance_v4_migration.router, prefix="/v4", tags=["国内采购与成品销售"])

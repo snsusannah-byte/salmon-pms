@@ -5,6 +5,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models import CompanyType, CustomerCategory, SupplierCategory
 
+
+class BankAccountItem(BaseModel):
+    """主体收款/银行账户信息"""
+    id: int | None = Field(None, description="ID，新建不传或传 null")
+    account_name: str = Field(..., max_length=100, description="账户名称/户名")
+    bank_name: str = Field(..., max_length=200, description="开户行")
+    account_number: str = Field(..., max_length=100, description="银行账号")
+    currency: str = Field("CNY", max_length=10, description="币种")
+    is_active: bool = Field(True, description="是否启用")
+    notes: str | None = Field(None, description="备注")
+
 # 主体业务角色分类
 UPSTREAM_TYPES = {"processing_plant", "fish_farm", "exporter"}  # 上游溯源（不参与应收应付）
 BUSINESS_PARTNER_TYPES = {"supplier", "customer", "customs_broker", "logistics", "internal"}  # 业务往来（参与应收应付）
@@ -50,6 +61,7 @@ class CompanyBase(BaseModel):
     is_internal: bool | None = Field(False, description="是否内部客户（加工厂/代工方）")
     is_active: bool | None = Field(True, description="是否启用")
     notes: str | None = Field(None, description="备注")
+    bank_accounts: list[BankAccountItem] | None = Field(None, description="收款账户列表")
 
     @field_validator("website", mode="before")
     @classmethod
@@ -105,6 +117,7 @@ class CompanyUpdate(BaseModel):
     supplier_category: SupplierCategory | None = None
     is_active: bool | None = None
     notes: str | None = None
+    bank_accounts: list[BankAccountItem] | None = Field(None, description="收款账户列表")
 
 
 class CompanyResponse(CompanyBase):
@@ -118,6 +131,7 @@ class CompanyResponse(CompanyBase):
     payable_cny: Decimal | None = Field(None, description="应付款(CNY)")
     created_at: datetime
     updated_at: datetime
+    bank_accounts: list[BankAccountItem] = Field(default_factory=list, description="收款账户列表")
 
 
 class CompanyListResponse(BaseModel):
@@ -135,7 +149,8 @@ class SalespersonBase(BaseModel):
     name: str = Field(..., max_length=100, description="姓名")
     phone: str | None = Field(None, max_length=50, description="电话")
     email: str | None = Field(None, max_length=100, description="邮箱")
-    commission_rate: Decimal = Field(Decimal("0"), ge=0, description="默认提成单价 元/kg")
+    commission_type: str = Field("per_kg", description="提成方式: per_kg=按公斤; percentage_of_receipt=按实收金额比例")
+    commission_rate: Decimal = Field(Decimal("0"), ge=0, description="提成率: per_kg 为元/kg; percentage_of_receipt 为千分比(‰)")
     is_active: bool = Field(True, description="是否在职")
     notes: str | None = Field(None, description="备注")
 
@@ -150,7 +165,8 @@ class SalespersonUpdate(BaseModel):
     name: str | None = Field(None, max_length=100)
     phone: str | None = Field(None, max_length=50)
     email: str | None = Field(None, max_length=100)
-    commission_rate: Decimal | None = Field(None, ge=0, description="提成单价 元/kg")
+    commission_type: str | None = Field(None, description="提成方式: per_kg=按公斤; percentage_of_receipt=按实收金额比例")
+    commission_rate: Decimal | None = Field(None, ge=0, description="提成率: per_kg 为元/kg; percentage_of_receipt 为千分比(‰)")
     is_active: bool | None = None
     notes: str | None = None
 
@@ -173,6 +189,8 @@ class CommissionResponse(BaseModel):
     customer_name: str | None = None
     sale_amount: Decimal
     weight_kg: Decimal
+    received_amount: Decimal = Decimal("0")
+    commission_type: str = "per_kg"
     commission_rate: Decimal
     commission_amount: Decimal
     status: str

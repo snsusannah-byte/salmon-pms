@@ -198,6 +198,14 @@ input[type="number"] {
     margin: 10mm;
   }
 
+  /* 关键：打印时移除所有 overflow 限制，防止内容被裁剪 */
+  html, body, div, main, section, article {
+    overflow: visible !important;
+    overflow-x: visible !important;
+    overflow-y: visible !important;
+    max-height: none !important;
+  }
+
   /* Hide navigation, sidebar, etc */
   nav, aside, .sidebar, header, footer {
     display: none !important;

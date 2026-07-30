@@ -14,7 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
-from app.models.enums import CompanyType, CustomerCategory
+from app.models.enums import CompanyType, CustomerCategory, SupplierCategory
 
 
 class Company(Base, TimestampMixin):
@@ -45,7 +45,7 @@ class Company(Base, TimestampMixin):
     credit_limit: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     # 客户专用字段
     logistics_info: Mapped[str | None] = mapped_column(Text)  # 物流信息
-    salesperson_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))  # 业务员
+    salesperson_id: Mapped[int | None] = mapped_column(ForeignKey("salespersons.id"))  # 业务员
     customer_category: Mapped[CustomerCategory | None] = mapped_column(Enum(CustomerCategory))  # 客户分类
     supplier_category: Mapped[str | None] = mapped_column(String(50))  # 供应商分类: raw_material/material_supply/customs_broker/service_provider
     # 客户等级（用于成品定义V2价格匹配）
@@ -58,7 +58,14 @@ class Company(Base, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text)
 
     # 关系
-    salesperson: Mapped["User"] = relationship("User", foreign_keys=[salesperson_id], lazy="raise")
+    salesperson: Mapped["Salesperson"] = relationship("Salesperson", foreign_keys=[salesperson_id], lazy="raise")
+    bank_accounts: Mapped[list["BankAccount"]] = relationship(
+        "BankAccount",
+        foreign_keys="BankAccount.company_id",
+        back_populates="company",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
 
 
 
@@ -70,7 +77,8 @@ class Salesperson(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(50))
     email: Mapped[str | None] = mapped_column(String(100))
-    commission_rate: Mapped[Decimal] = mapped_column(Numeric(8, 2), default=Decimal("0"))  # 默认提成单价 元/kg
+    commission_type: Mapped[str] = mapped_column(String(50), default="per_kg")  # per_kg / percentage_of_receipt
+    commission_rate: Mapped[Decimal] = mapped_column(Numeric(8, 2), default=Decimal("0"))  # per_kg: 元/kg; percentage: ‰
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text)
 
@@ -86,8 +94,10 @@ class CommissionRecord(Base, TimestampMixin):
     sale_date: Mapped[Date] = mapped_column(Date, nullable=False)
     sale_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 销售金额
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False, default=Decimal("0"))  # 销售重量(kg)
-    commission_rate: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)  # 实际提成单价 元/kg
-    commission_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 提成金额 = weight_kg * rate
+    received_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, default=Decimal("0"))  # 实收金额（按比例提成时使用）
+    commission_type: Mapped[str] = mapped_column(String(50), default="per_kg")  # per_kg / percentage_of_receipt
+    commission_rate: Mapped[Decimal] = mapped_column(Numeric(8, 2), nullable=False)  # per_kg: 元/kg; percentage: ‰
+    commission_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)  # 提成金额
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending / paid
     paid_date: Mapped[Date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -112,5 +122,7 @@ class BankAccount(Base, TimestampMixin):
     company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text)
+
+    company: Mapped["Company"] = relationship("Company", foreign_keys=[company_id], back_populates="bank_accounts")
 
 
