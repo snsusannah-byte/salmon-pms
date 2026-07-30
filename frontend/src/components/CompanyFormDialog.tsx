@@ -260,10 +260,10 @@ export function CompanyFormDialog({ open, onOpenChange, initialData, defaultType
           .map((acc) => ({
             ...acc,
             id: acc.id && acc.id > 0 ? acc.id : undefined,
-            account_name: acc.account_name.trim(),
-            bank_name: acc.bank_name.trim(),
-            account_number: acc.account_number.trim(),
-            notes: acc.notes.trim(),
+            account_name: acc.account_name,
+            bank_name: acc.bank_name,
+            account_number: acc.account_number,
+            notes: acc.notes,
           })),
       };
       

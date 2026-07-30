@@ -182,10 +182,10 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
         .map((acc) => ({
           ...acc,
           id: acc.id && acc.id > 0 ? acc.id : undefined,
-          account_name: acc.account_name.trim(),
-          bank_name: acc.bank_name.trim(),
-          account_number: acc.account_number.trim(),
-          notes: acc.notes.trim(),
+          account_name: acc.account_name,
+          bank_name: acc.bank_name,
+          account_number: acc.account_number,
+          notes: acc.notes,
         }));
 
       const payload: any = {
@@ -222,7 +222,7 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onOpenChange(false); }}>
-      <DialogContent className="max-w-[520px]">
+      <DialogContent className="max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="h-5 w-5 text-purple-600" />
