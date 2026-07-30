@@ -12,6 +12,7 @@ class BatchInvoiceInfo(BaseModel):
     invoice_id: int
     invoice_no: str
     invoice_date: date
+    kill_date: date | None = None
     processing_plant_name: str | None = None
     exporter_name: str | None = None
     total_amount_usd: Decimal
@@ -56,6 +57,7 @@ class BatchResponse(BatchBase):
     invoice_nos: str = ""  # 关联发票号，如 8353&8468
     invoice_count: int = 0
     invoices: list[BatchInvoiceInfo] = []
+    slaughter_date: date | None = None  # 关联发票中最早的宰杀日期
     created_at: datetime
     updated_at: datetime
 

@@ -333,7 +333,27 @@ class InvoiceService:
         
         await db.commit()
         await db.refresh(invoice)
+        
+        # 同步关联批次的汇总数据（箱数、重量、金额）
+        await InvoiceService._sync_batch_totals(db, invoice.id)
+        
         return invoice
+    
+    @staticmethod
+    async def _sync_batch_totals(db: AsyncSession, invoice_id: int) -> None:
+        """发票数据变更后，同步更新关联批次的汇总"""
+        from sqlalchemy import select as sa_select
+
+        from app.models import BatchInvoice
+        from app.services.batch_service import BatchService
+
+        bi_result = await db.execute(
+            sa_select(BatchInvoice).where(BatchInvoice.invoice_id == invoice_id)
+        )
+        for bi in bi_result.scalars().all():
+            batch = await BatchService.get_by_id(db, bi.batch_id)
+            if batch:
+                await BatchService.recalculate_totals(db, batch)
     
     @staticmethod
     async def delete(db: AsyncSession, invoice: ImportInvoice) -> None:
@@ -416,6 +436,9 @@ class InvoiceService:
         # 更新发票汇总数据
         await InvoiceService._recalculate_totals(db, invoice)
         
+        # 同步关联批次汇总
+        await InvoiceService._sync_batch_totals(db, invoice_id)
+        
         return product
     
     @staticmethod
@@ -432,6 +455,7 @@ class InvoiceService:
         invoice = await InvoiceService.get_by_id(db, product.invoice_id)
         if invoice:
             await InvoiceService._recalculate_totals(db, invoice)
+            await InvoiceService._sync_batch_totals(db, product.invoice_id)
         
         return product
     
@@ -448,6 +472,7 @@ class InvoiceService:
         
         if invoice:
             await InvoiceService._recalculate_totals(db, invoice)
+            await InvoiceService._sync_batch_totals(db, product.invoice_id)
     
     @staticmethod
     async def _recalculate_totals(db: AsyncSession, invoice: ImportInvoice) -> None:

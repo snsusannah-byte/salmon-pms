@@ -35,8 +35,11 @@ async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
 
     invoices = []
     invoice_nos = []
+    kill_dates = []
     for bi, inv in invoices_data:
         invoice_nos.append(inv.invoice_no)
+        if inv.kill_date:
+            kill_dates.append(inv.kill_date)
         plant_name = None
         exporter_name = None
         if inv.processing_plant_id:
@@ -50,6 +53,7 @@ async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
             invoice_id=inv.id,
             invoice_no=inv.invoice_no,
             invoice_date=inv.invoice_date,
+            kill_date=inv.kill_date,
             processing_plant_name=plant_name,
             exporter_name=exporter_name,
             total_amount_usd=inv.total_amount_usd,
@@ -68,6 +72,8 @@ async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
     sold_boxes = sold_result.scalar() or 0
     remaining_boxes = max(0, (batch.total_boxes or 0) - sold_boxes)
 
+    slaughter_date = min(kill_dates) if kill_dates else None
+
     return BatchResponse(
         id=batch.id,
         batch_code=batch.batch_code,
@@ -84,6 +90,7 @@ async def _build_batch_response(db: AsyncSession, batch) -> BatchResponse:
         updated_at=batch.updated_at,
         invoice_count=len(invoices),
         invoices=invoices,
+        slaughter_date=slaughter_date,
     )
 
 
