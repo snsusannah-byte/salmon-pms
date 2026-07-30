@@ -36,7 +36,9 @@ interface CommissionRecord {
   batch_name: string;
   sale_amount: number;
   weight_kg: number;
-  commission_rate: number; // 元/kg
+  received_amount: number;
+  commission_type: string;
+  commission_rate: number;
   commission_amount: number;
   status: string;
   paid_date: string | null;
@@ -77,7 +79,7 @@ export function CommissionPage() {
     queryKey: ["salespersons"],
     queryFn: async () => {
       const res = await api.get("/v1/salespersons/");
-      return res.data.items as { id: number; name: string; commission_rate: number }[];
+      return res.data.items as { id: number; name: string; commission_type: string; commission_rate: number }[];
     },
   });
   
@@ -235,9 +237,10 @@ export function CommissionPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>业务员</TableHead>
-                  <TableHead>默认提成单价</TableHead>
+                  <TableHead>提成方式</TableHead>
                   <TableHead>本月销售额</TableHead>
                   <TableHead>本月销售重量</TableHead>
+                  <TableHead>本月实收</TableHead>
                   <TableHead>本月提成</TableHead>
                   <TableHead>待发放</TableHead>
                   <TableHead>已发放</TableHead>
@@ -249,6 +252,7 @@ export function CommissionPage() {
                   const spRecords = records?.items.filter((r) => r.salesperson_id === sp.id) ?? [];
                   const totalSale = spRecords.reduce((sum, r) => sum + r.sale_amount, 0);
                   const totalWeight = spRecords.reduce((sum, r) => sum + r.weight_kg, 0);
+                  const totalReceived = spRecords.reduce((sum, r) => sum + r.received_amount, 0);
                   const totalCommission = spRecords.reduce((sum, r) => sum + r.commission_amount, 0);
                   const pending = spRecords
                     .filter((r) => r.status === "pending")
@@ -264,9 +268,15 @@ export function CommissionPage() {
                           {sp.name}
                         </div>
                       </TableCell>
-                      <TableCell>¥{sp.commission_rate}/kg</TableCell>
+                      <TableCell className="text-sm">
+                        {sp.commission_type === "percentage_of_receipt" ? "按实收比例" : "按公斤"}
+                        <span className="text-muted-foreground ml-1">
+                          ({sp.commission_type === "percentage_of_receipt" ? `${sp.commission_rate}‰` : `¥${sp.commission_rate}/kg`})
+                        </span>
+                      </TableCell>
                       <TableCell>¥{totalSale.toLocaleString()}</TableCell>
                       <TableCell>{totalWeight.toFixed(1)} kg</TableCell>
+                      <TableCell>¥{totalReceived.toLocaleString()}</TableCell>
                       <TableCell className="font-medium">
                         ¥{totalCommission.toLocaleString()}
                       </TableCell>
@@ -351,7 +361,8 @@ export function CommissionPage() {
                   <TableHead>客户</TableHead>
                   <TableHead>批次</TableHead>
                   <TableHead>销售重量</TableHead>
-                  <TableHead>提成单价</TableHead>
+                  <TableHead>实收金额</TableHead>
+                  <TableHead>提成方式/率</TableHead>
                   <TableHead>提成金额</TableHead>
                   <TableHead>状态</TableHead>
                 </TableRow>
@@ -385,7 +396,12 @@ export function CommissionPage() {
                       <TableCell>{r.customer_name}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{r.batch_name}</TableCell>
                       <TableCell>{r.weight_kg?.toFixed(1) ?? 0} kg</TableCell>
-                      <TableCell>¥{r.commission_rate}/kg</TableCell>
+                      <TableCell>¥{Number(r.received_amount || 0).toLocaleString()}</TableCell>
+                      <TableCell className="text-sm">
+                        {r.commission_type === "percentage_of_receipt"
+                          ? `按比例 ${r.commission_rate}‰`
+                          : `¥${r.commission_rate}/kg`}
+                      </TableCell>
                       <TableCell className="font-medium">
                         ¥{r.commission_amount.toLocaleString()}
                       </TableCell>

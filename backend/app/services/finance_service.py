@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -758,8 +759,6 @@ class FinanceService:
                         continue
                     
                     product_id = product_row.id
-                    product_category = product_row.category
-                    product_name = product_row.name
                     
                     # 根据产品类型自动选择仓库
                     warehouse = await WarehouseV2Service.get_default_warehouse_for_product(
@@ -1122,21 +1121,30 @@ class FinanceService:
                 if inv:
                     data["related_invoice_id"] = inv.id
         
-        # 如果关联了销售单，检查是否全部已收款
+        # 如果关联了销售单，检查是否全部已收款（同时检查 WholeFishSale 和 FinishedProductSaleV2）
         if related_sale_ids:
-            # 查询这些销售单的已收款总额
-            sale_result = await db.execute(
+            from app.models.finished_product import FinishedProductSaleV2
+            # 查询两种销售单的已收款总额
+            wf_result = await db.execute(
                 select(WholeFishSale).where(WholeFishSale.id.in_(related_sale_ids))
             )
-            sales = sale_result.scalars().all()
+            wf_sales = wf_result.scalars().all()
+            v2_result = await db.execute(
+                select(FinishedProductSaleV2).where(FinishedProductSaleV2.id.in_(related_sale_ids))
+            )
+            v2_sales = v2_result.scalars().all()
             total_remaining = sum(
                 max(Decimal("0"), Decimal(str(s.net_amount or 0)) - Decimal(str(s.paid_amount or 0)))
-                for s in sales
+                for s in wf_sales
+            )
+            total_remaining += sum(
+                max(Decimal("0"), Decimal(str(s.net_amount or 0)) - Decimal(str(s.paid_amount or 0)))
+                for s in v2_sales
             )
             # 如果所有销售单都已全额收款，才拒绝
             if total_remaining <= 0:
                 from fastapi import HTTPException
-                sale_nos = [s.sale_no or f"#{s.id}" for s in sales]
+                sale_nos = [s.sale_no or f"#{s.id}" for s in wf_sales + v2_sales]
                 raise HTTPException(
                     status_code=400,
                     detail=f"销售单 {', '.join(sale_nos)} 已全部收款，无需再次录入。"
@@ -1146,20 +1154,117 @@ class FinanceService:
         db.add(record)
         await db.flush()  # 获取 record.id
         
-        # 如果关联了销售单且分类不是客户预付款，处理收款记录（FIFO：先填日期久的单）
-        if related_sale_ids and data.get("category") != TransactionCategory.CUSTOMER_DEPOSIT:
+        # 如果关联了销售单且分类不是客户预付款/对冲结算，处理收款记录（FIFO：先填日期久的单）
+        if related_sale_ids and data.get("category") not in [TransactionCategory.CUSTOMER_DEPOSIT, TransactionCategory.NETTING_SETTLEMENT]:
             from app.models import SalesReceipt
+            from app.models.finished_product import FinishedProductReceipt, FinishedProductSaleV2
             from app.services.sales_service import SalesService
             
             remaining_amount = Decimal(str(data.get("amount", 0)))
             
-            # 查询所有关联销售单，按日期从旧到新排序（FIFO）
-            sale_result = await db.execute(
+            # 1. 先处理以销定采 V2 销售单（FinishedProductSaleV2）
+            v2_result = await db.execute(
+                select(FinishedProductSaleV2)
+                .where(FinishedProductSaleV2.id.in_(related_sale_ids))
+                .order_by(FinishedProductSaleV2.sale_date.asc(), FinishedProductSaleV2.id.asc())
+            )
+            v2_sales = v2_result.scalars().all()
+            
+            for sale in v2_sales:
+                if remaining_amount <= 0:
+                    break
+                
+                # 检查是否已为此 transaction + sale 创建过收款记录
+                existing_receipt = await db.execute(
+                    select(FinishedProductReceipt).where(
+                        FinishedProductReceipt.transaction_id == record.id,
+                        FinishedProductReceipt.sale_v2_id == sale.id
+                    )
+                )
+                if existing_receipt.scalar_one_or_none():
+                    continue  # 已存在，跳过
+                
+                # 检查该销售单是否有"未关联 transaction"的收款记录
+                orphan_result = await db.execute(
+                    select(FinishedProductReceipt).where(
+                        FinishedProductReceipt.sale_v2_id == sale.id,
+                        FinishedProductReceipt.transaction_id.is_(None)
+                    )
+                )
+                orphans = orphan_result.scalars().all()
+                
+                if orphans:
+                    # 把已有的 orphan receipt 关联到当前 transaction
+                    for orphan in orphans:
+                        orphan.transaction_id = record.id
+                    # 更新销售单已付金额
+                    receipt_result = await db.execute(
+                        select(func.sum(FinishedProductReceipt.amount))
+                        .where(FinishedProductReceipt.sale_v2_id == sale.id)
+                    )
+                    paid = receipt_result.scalar() or Decimal("0")
+                    sale.paid_amount = paid
+                    net = Decimal(str(sale.net_amount or 0))
+                    if paid >= net and net > 0:
+                        sale.status = "paid"
+                        sale.paid = 1
+                    elif paid > 0:
+                        sale.status = "partial_paid"
+                        sale.paid = 1
+                    else:
+                        sale.status = "pending"
+                        sale.paid = 0
+                    # 减少剩余金额
+                    orphan_total = sum(Decimal(str(o.amount)) for o in orphans)
+                    remaining_amount -= min(orphan_total, remaining_amount)
+                else:
+                    # 没有 orphan receipt，创建新的
+                    sale_remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
+                    if sale_remaining <= 0:
+                        continue
+                    
+                    allocate = min(sale_remaining, remaining_amount)
+                    
+                    receipt = FinishedProductReceipt(
+                        sale_v2_id=sale.id,
+                        receipt_date=data.get("transaction_date"),
+                        amount=allocate,
+                        payable_amount=sale_remaining,  # 记录创建时单据的应付/待付金额
+                        payment_method="transfer",
+                        bank_account_id=data.get("to_account_id") or data.get("from_account_id"),
+                        reference_no=data.get("reference_no"),
+                        notes=data.get("notes"),
+                        transaction_id=record.id,
+                    )
+                    db.add(receipt)
+                    await db.flush()
+                    # 更新销售单已付金额
+                    receipt_result = await db.execute(
+                        select(func.sum(FinishedProductReceipt.amount))
+                        .where(FinishedProductReceipt.sale_v2_id == sale.id)
+                    )
+                    paid = receipt_result.scalar() or Decimal("0")
+                    sale.paid_amount = paid
+                    net = Decimal(str(sale.net_amount or 0))
+                    if paid >= net and net > 0:
+                        sale.status = "paid"
+                        sale.paid = 1
+                    elif paid > 0:
+                        sale.status = "partial_paid"
+                        sale.paid = 1
+                    else:
+                        sale.status = "pending"
+                        sale.paid = 0
+                    
+                    remaining_amount -= allocate
+            
+            # 2. 再处理进口销售单（WholeFishSale）
+            wf_result = await db.execute(
                 select(WholeFishSale).where(WholeFishSale.id.in_(related_sale_ids)).order_by(WholeFishSale.sale_date.asc(), WholeFishSale.id.asc())
             )
-            sales = sale_result.scalars().all()
+            wf_sales = wf_result.scalars().all()
             
-            for sale in sales:
+            for sale in wf_sales:
                 if remaining_amount <= 0:
                     break
                 
@@ -1203,6 +1308,7 @@ class FinanceService:
                         sale_id=sale.id,
                         receipt_date=data.get("transaction_date"),
                         amount=allocate,
+                        payable_amount=sale_remaining,  # 记录创建时单据的应付/待付金额
                         payment_method="transfer",
                         bank_account_id=data.get("to_account_id") or data.get("from_account_id"),
                         reference_no=data.get("reference_no"),
@@ -1215,7 +1321,7 @@ class FinanceService:
                     
                     remaining_amount -= allocate
         
-        # 客户预付款：更新客户余额
+        # 客户预付款：更新客户余额，同时冲减关联销售单的应收
         if data.get("category") == TransactionCategory.CUSTOMER_DEPOSIT and data.get("counterparty_id"):
             from app.models import Company
             company_result = await db.execute(
@@ -1225,7 +1331,112 @@ class FinanceService:
             if company:
                 deposit = Decimal(str(data.get("amount", 0)))
                 company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + deposit
+
+            # 同时冲减关联销售单的应收（相当于自动余额抵扣）
+            if related_sale_ids:
+                await FinanceService._apply_prepayment_to_sales(db, record, related_sale_ids, Decimal(str(data.get("amount", 0))))
         
+        # ========== 对冲结算：应收应付互抵（差额模式）==========
+        if data.get("category") == TransactionCategory.NETTING_SETTLEMENT:
+            from app.models import MaterialPurchaseOrder, SalesReceipt
+            from app.models.finished_product import FinishedProductReceipt, FinishedProductSaleV2
+            from app.services.sales_service import SalesService
+
+            related_purchase_ids = data.get("related_purchase_ids", [])
+            related_purchase_inbound_ids = data.get("related_purchase_inbound_ids", [])
+            sale_ids = related_sale_ids or []
+            purchase_ids = related_purchase_ids or []
+            inbound_ids = related_purchase_inbound_ids or []
+
+            # 差额模式：全额结清采购单和销售单，交易金额 = 差额
+            # 1. 全额结清辅料采购单
+            if purchase_ids:
+                po_result = await db.execute(
+                    select(MaterialPurchaseOrder).where(MaterialPurchaseOrder.id.in_(purchase_ids))
+                )
+                for po in po_result.scalars().all():
+                    po.paid_amount = Decimal(str(po.actual_total or 0))
+                    po.payment_status = "paid"
+
+            # 2. 全额结清采购入库单
+            if inbound_ids:
+                from app.models.finance import PurchaseOrderV2
+                inbound_result = await db.execute(
+                    select(PurchaseOrderV2).where(PurchaseOrderV2.id.in_(inbound_ids))
+                )
+                for po in inbound_result.scalars().all():
+                    net = Decimal(str(po.total_amount or 0)) - Decimal(str(po.after_sales_adjustment or 0))
+                    po.paid_amount = net
+                    po.payment_status = "paid"
+
+            # 3. 全额结清销售单（创建 netting receipt）
+            if sale_ids:
+                # V2 销售单
+                v2_result = await db.execute(
+                    select(FinishedProductSaleV2).where(FinishedProductSaleV2.id.in_(sale_ids))
+                    .order_by(FinishedProductSaleV2.sale_date.asc(), FinishedProductSaleV2.id.asc())
+                )
+                v2_sales = list(v2_result.scalars().all())
+                for sale in v2_sales:
+                    sale_remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
+                    if sale_remaining <= 0:
+                        continue
+                    receipt = FinishedProductReceipt(
+                        sale_v2_id=sale.id,
+                        receipt_date=data.get("transaction_date"),
+                        amount=sale_remaining,
+                        payable_amount=sale_remaining,  # 对冲结清时应付等于实收
+                        payment_method="netting",
+                        transaction_id=record.id,
+                        notes="对冲结算收款",
+                    )
+                    db.add(receipt)
+
+                # 进口销售单
+                wf_result = await db.execute(
+                    select(WholeFishSale).where(WholeFishSale.id.in_(sale_ids))
+                    .order_by(WholeFishSale.sale_date.asc(), WholeFishSale.id.asc())
+                )
+                wf_sales = list(wf_result.scalars().all())
+                for sale in wf_sales:
+                    sale_remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
+                    if sale_remaining <= 0:
+                        continue
+                    sr = SalesReceipt(
+                        sale_id=sale.id,
+                        receipt_date=data.get("transaction_date"),
+                        amount=sale_remaining,
+                        payable_amount=sale_remaining,  # 对冲结清时应付等于实收
+                        payment_method="netting",
+                        transaction_id=record.id,
+                        notes="对冲结算收款",
+                    )
+                    db.add(sr)
+
+                await db.flush()
+
+                # 更新 V2 销售单状态
+                for sale in v2_sales:
+                    receipt_result = await db.execute(
+                        select(func.sum(FinishedProductReceipt.amount)).where(FinishedProductReceipt.sale_v2_id == sale.id)
+                    )
+                    paid = receipt_result.scalar() or Decimal("0")
+                    sale.paid_amount = paid
+                    net = Decimal(str(sale.net_amount or 0))
+                    if paid >= net and net > 0:
+                        sale.status = "paid"
+                        sale.paid = 1
+                    elif paid > 0:
+                        sale.status = "partial_paid"
+                        sale.paid = 1
+                    else:
+                        sale.status = "pending"
+                        sale.paid = 0
+
+                # 更新进口销售单状态
+                for sale in wf_sales:
+                    await SalesService._update_paid_amount(db, sale)
+
         await db.commit()
         await db.refresh(record)
         return record
@@ -1264,13 +1475,15 @@ class FinanceService:
         await db.commit()
         await db.refresh(record)
         
-        # 如果交易金额变更，同步更新关联的销售收款并重新计算销售单状态
+        # 如果交易金额变更，同步更新关联的销售收款并重新计算销售单状态（同时支持 WholeFishSale 和 FinishedProductSaleV2）
         if "amount" in data and record.id:
             from decimal import Decimal
 
             from app.models import SalesReceipt, WholeFishSale
+            from app.models.finished_product import FinishedProductReceipt, FinishedProductSaleV2
             from app.services.sales_service import SalesService
             
+            # 1. 更新整鱼销售收款记录
             result = await db.execute(
                 select(SalesReceipt).where(SalesReceipt.transaction_id == record.id)
             )
@@ -1292,6 +1505,42 @@ class FinanceService:
                     sale = sale_result.scalar_one_or_none()
                     if sale:
                         await SalesService._update_paid_amount(db, sale)
+            
+            # 2. 更新以销定采 V2 收款记录
+            v2_result = await db.execute(
+                select(FinishedProductReceipt).where(FinishedProductReceipt.transaction_id == record.id)
+            )
+            v2_receipts = v2_result.scalars().all()
+            affected_v2_sale_ids = set()
+            
+            for receipt in v2_receipts:
+                receipt.amount = Decimal(str(data["amount"]))
+                affected_v2_sale_ids.add(receipt.sale_v2_id)
+            
+            if affected_v2_sale_ids:
+                await db.flush()
+                for sale_id in affected_v2_sale_ids:
+                    sale_result = await db.execute(
+                        select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id)
+                    )
+                    sale = sale_result.scalar_one_or_none()
+                    if sale:
+                        receipt_result = await db.execute(
+                            select(func.sum(FinishedProductReceipt.amount))
+                            .where(FinishedProductReceipt.sale_v2_id == sale_id)
+                        )
+                        paid = receipt_result.scalar() or Decimal("0")
+                        sale.paid_amount = paid
+                        net = Decimal(str(sale.net_amount or 0))
+                        if paid >= net and net > 0:
+                            sale.status = "paid"
+                            sale.paid = 1
+                        elif paid > 0:
+                            sale.status = "partial_paid"
+                            sale.paid = 1
+                        else:
+                            sale.status = "pending"
+                            sale.paid = 0
         
         return record
 
@@ -1302,6 +1551,7 @@ class FinanceService:
             from sqlalchemy import select
 
             from app.models import MaterialPurchaseOrder
+            from app.models.finance import PurchaseOrderV2
             
             # 查找关联的辅料采购单
             po_result = await db.execute(
@@ -1320,6 +1570,22 @@ class FinanceService:
                     po.payment_status = "partial"
                 else:
                     po.payment_status = "unpaid"
+            else:
+                # 尝试匹配采购入库单
+                inbound_result = await db.execute(
+                    select(PurchaseOrderV2).where(PurchaseOrderV2.purchase_no == record.reference_no)
+                )
+                inbound = inbound_result.scalar_one_or_none()
+                if inbound:
+                    amount = Decimal(str(record.amount or 0))
+                    inbound.paid_amount = max(Decimal("0"), Decimal(str(inbound.paid_amount or 0)) - amount)
+                    net = Decimal(str(inbound.total_amount or 0)) - Decimal(str(inbound.after_sales_adjustment or 0))
+                    if inbound.paid_amount >= net:
+                        inbound.payment_status = "paid"
+                    elif inbound.paid_amount > 0:
+                        inbound.payment_status = "partial"
+                    else:
+                        inbound.payment_status = "unpaid"
 
         # 如果关联了整鱼销售收款，同步删除并重新计算销售单状态
         if record.id:
@@ -1346,10 +1612,10 @@ class FinanceService:
                 )
                 sale = sale_result.scalar_one_or_none()
                 if sale:
-                    await SalesService._update_paid_amount(db, sale)
-                    # 如果已全额清零，同步清零因收款产生的抹零
+                    # 如果已全额清零，先同步清零因收款产生的抹零，再重新计算净额
                     if Decimal(str(sale.paid_amount or 0)) == 0:
                         sale.rounding_adjustment = Decimal("0")
+                    await SalesService._update_paid_amount(db, sale)
 
         # 如果关联了成品销售/以销定采收款，同步删除并重新计算
         if record.id:
@@ -1394,8 +1660,10 @@ class FinanceService:
                         sale.status = "paid"
                         sale.paid = 1
                     elif paid_amount > 0:
+                        sale.status = "partial_paid"
                         sale.paid = 1
                     else:
+                        sale.status = "pending"
                         sale.paid = 0
                         # 已全额清零，同步清零抹零
                         sale.rounding = Decimal("0")
@@ -1404,13 +1672,10 @@ class FinanceService:
                         sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
                     await db.flush()
 
-        # 客户预付款删除：恢复客户余额，并撤销该客户的所有余额抵扣收款
+        # 客户预付款删除：恢复客户余额，并删除关联的收款记录
         if record.category == TransactionCategory.CUSTOMER_DEPOSIT and record.counterparty_id:
-            from sqlalchemy import func
-
-            from app.models import Company, SalesReceipt, WholeFishSale
-            
-            # 1. 扣减客户余额（预付款金额）
+            from app.models import Company
+            # 1. 扣减客户余额
             company_result = await db.execute(
                 select(Company).where(Company.id == record.counterparty_id)
             )
@@ -1422,52 +1687,245 @@ class FinanceService:
                     Decimal(str(company.prepaid_balance or 0)) - deposit
                 )
             
-            # 2. 撤销该客户的所有余额抵扣收款（balance 类型的 SalesReceipt）
-            receipt_result = await db.execute(
-                select(SalesReceipt, WholeFishSale)
-                .join(WholeFishSale, SalesReceipt.sale_id == WholeFishSale.id)
-                .where(
-                    WholeFishSale.customer_id == record.counterparty_id,
-                    SalesReceipt.payment_method == 'balance'
-                )
+            # 2. 删除这条预付款创建的收款记录（通过 transaction_id 关联）
+            # 2a. 删除以销定采 V2 的收款记录
+            from app.models.finished_product import FinishedProductReceipt, FinishedProductSaleV2
+            fp_v2_receipt_result = await db.execute(
+                select(FinishedProductReceipt).where(FinishedProductReceipt.transaction_id == record.id)
             )
-            balance_receipts = receipt_result.all()
-            affected_sale_ids = set()
-            total_deduction = Decimal("0")
-            for receipt, sale in balance_receipts:
-                affected_sale_ids.add(sale.id)
-                total_deduction += Decimal(str(receipt.amount or 0))
+            fp_v2_receipts = fp_v2_receipt_result.scalars().all()
+            affected_v2_sale_ids = set()
+            for receipt in fp_v2_receipts:
+                affected_v2_sale_ids.add(receipt.sale_v2_id)
+                await db.delete(receipt)
+            
+            # 2b. 删除进口销售的收款记录
+            wf_receipt_result = await db.execute(
+                select(SalesReceipt).where(SalesReceipt.transaction_id == record.id)
+            )
+            wf_receipts = wf_receipt_result.scalars().all()
+            affected_wf_sale_ids = set()
+            for receipt in wf_receipts:
+                affected_wf_sale_ids.add(receipt.sale_id)
                 await db.delete(receipt)
             
             await db.flush()
             
+            # 2c. 余额抵扣收款没有关联 transaction_id，但资金来源于客户预付款；
+            # 删除预付款时一并回退这些收款，并恢复客户余额。
+            if company:
+                from app.models import WholeFishSale
+                from app.models.finished_product import FinishedProductReceipt, FinishedProductSaleV2
+                
+                # 以销定采 V2
+                fp_balance_receipts_result = await db.execute(
+                    select(FinishedProductReceipt)
+                    .join(FinishedProductSaleV2, FinishedProductReceipt.sale_v2_id == FinishedProductSaleV2.id)
+                    .where(
+                        FinishedProductSaleV2.customer == company.name,
+                        FinishedProductReceipt.payment_method == "balance",
+                        FinishedProductReceipt.transaction_id.is_(None),
+                    )
+                )
+                for receipt in fp_balance_receipts_result.scalars().all():
+                    affected_v2_sale_ids.add(receipt.sale_v2_id)
+                    company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + Decimal(str(receipt.amount or 0))
+                    await db.delete(receipt)
+                
+                # 进口销售
+                wf_balance_receipts_result = await db.execute(
+                    select(SalesReceipt)
+                    .join(WholeFishSale, SalesReceipt.sale_id == WholeFishSale.id)
+                    .where(
+                        WholeFishSale.customer_id == record.counterparty_id,
+                        SalesReceipt.payment_method == "balance",
+                        SalesReceipt.transaction_id.is_(None),
+                    )
+                )
+                for receipt in wf_balance_receipts_result.scalars().all():
+                    affected_wf_sale_ids.add(receipt.sale_id)
+                    company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + Decimal(str(receipt.amount or 0))
+                    await db.delete(receipt)
+                
+                await db.flush()
+            
             # 3. 重新计算受影响销售单的收款状态
-            for sale_id in affected_sale_ids:
+            # 3a. 以销定采 V2
+            for sale_id in affected_v2_sale_ids:
+                if not sale_id:
+                    continue
+                sale_result = await db.execute(
+                    select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id)
+                )
+                sale = sale_result.scalar_one_or_none()
+                if sale:
+                    receipt_result = await db.execute(
+                        select(func.sum(FinishedProductReceipt.amount)).where(FinishedProductReceipt.sale_v2_id == sale_id)
+                    )
+                    paid = receipt_result.scalar() or Decimal("0")
+                    sale.paid_amount = paid
+                    net = Decimal(str(sale.net_amount or 0))
+                    if paid >= net and net > 0:
+                        sale.status = "paid"
+                        sale.paid = 1
+                    elif paid > 0:
+                        sale.status = "partial_paid"
+                        sale.paid = 1
+                    else:
+                        sale.status = "pending"
+                        sale.paid = 0
+                        sale.rounding = Decimal("0")
+                        sale.actual_amount = (sale.total_amount or Decimal("0")) - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - sale.rounding
+                        sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
+            
+            # 3b. 进口销售
+            for sale_id in affected_wf_sale_ids:
                 sale_result = await db.execute(
                     select(WholeFishSale).where(WholeFishSale.id == sale_id)
                 )
                 sale = sale_result.scalar_one_or_none()
                 if sale:
-                    # 重新计算已收金额
                     paid_result = await db.execute(
                         select(func.sum(SalesReceipt.amount)).where(SalesReceipt.sale_id == sale_id)
                     )
                     total_paid = paid_result.scalar() or Decimal("0")
                     sale.paid_amount = total_paid
-                    
-                    # 更新状态
-                    if sale.paid_amount >= sale.net_amount:
+                    status_net = Decimal(str(sale.net_amount or 0)) + Decimal(str(sale.balance_adjustment or 0))
+                    if sale.paid_amount >= status_net and status_net > 0:
                         sale.status = SalesStatus.FULLY_PAID
                     elif sale.paid_amount > 0:
                         sale.status = SalesStatus.PARTIAL_PAID
                     else:
                         sale.status = SalesStatus.PENDING
-                        # 如果已全额清零，同步清零因收款产生的抹零
                         sale.rounding_adjustment = Decimal("0")
+
+        # ========== 对冲结算删除：恢复销售单和采购单状态 ==========
+        if record.category == TransactionCategory.NETTING_SETTLEMENT:
+            from app.models import MaterialPurchaseOrder
+            from app.models.finished_product import FinishedProductReceipt, FinishedProductSaleV2
+            from app.services.sales_service import SalesService
+
+            # 1. 删除关联收款记录并恢复销售单
+            # 1a. V2 销售单
+            fp_v2_receipt_result = await db.execute(
+                select(FinishedProductReceipt).where(FinishedProductReceipt.transaction_id == record.id)
+            )
+            fp_v2_receipts = fp_v2_receipt_result.scalars().all()
+            affected_v2_sale_ids = set()
+            for receipt in fp_v2_receipts:
+                affected_v2_sale_ids.add(receipt.sale_v2_id)
+                await db.delete(receipt)
             
-            # 4. 恢复客户余额（余额抵扣总金额，因为撤销了抵扣）
-            if company and total_deduction > 0:
-                company.prepaid_balance = Decimal(str(company.prepaid_balance or 0)) + total_deduction
+            # 1b. 进口销售单
+            wf_receipt_result = await db.execute(
+                select(SalesReceipt).where(SalesReceipt.transaction_id == record.id)
+            )
+            wf_receipts = wf_receipt_result.scalars().all()
+            affected_wf_sale_ids = set()
+            for receipt in wf_receipts:
+                affected_wf_sale_ids.add(receipt.sale_id)
+                await db.delete(receipt)
+            
+            await db.flush()
+            
+            # 2. 恢复销售单状态
+            for sale_id in affected_v2_sale_ids:
+                if not sale_id:
+                    continue
+                sale_result = await db.execute(
+                    select(FinishedProductSaleV2).where(FinishedProductSaleV2.id == sale_id)
+                )
+                sale = sale_result.scalar_one_or_none()
+                if sale:
+                    receipt_result = await db.execute(
+                        select(func.sum(FinishedProductReceipt.amount)).where(FinishedProductReceipt.sale_v2_id == sale_id)
+                    )
+                    paid = receipt_result.scalar() or Decimal("0")
+                    sale.paid_amount = paid
+                    net = Decimal(str(sale.net_amount or 0))
+                    if paid >= net and net > 0:
+                        sale.status = "paid"
+                        sale.paid = 1
+                    elif paid > 0:
+                        sale.status = "partial_paid"
+                        sale.paid = 1
+                    else:
+                        sale.status = "pending"
+                        sale.paid = 0
+                        sale.rounding = Decimal("0")
+                        sale.actual_amount = (sale.total_amount or Decimal("0")) - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - sale.rounding
+                        sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
+            
+            for sale_id in affected_wf_sale_ids:
+                sale_result = await db.execute(
+                    select(WholeFishSale).where(WholeFishSale.id == sale_id)
+                )
+                sale = sale_result.scalar_one_or_none()
+                if sale:
+                    paid_result = await db.execute(
+                        select(func.sum(SalesReceipt.amount)).where(SalesReceipt.sale_id == sale_id)
+                    )
+                    total_paid = paid_result.scalar() or Decimal("0")
+                    sale.paid_amount = total_paid
+                    status_net = Decimal(str(sale.net_amount or 0)) + Decimal(str(sale.balance_adjustment or 0))
+                    if sale.paid_amount >= status_net and status_net > 0:
+                        sale.status = SalesStatus.FULLY_PAID
+                    elif sale.paid_amount > 0:
+                        sale.status = SalesStatus.PARTIAL_PAID
+                    else:
+                        sale.status = SalesStatus.PENDING
+                        sale.rounding_adjustment = Decimal("0")
+
+            # 3. 恢复采购单已付金额
+            if record.related_purchase_ids:
+                purchase_ids = record.related_purchase_ids if isinstance(record.related_purchase_ids, list) else json.loads(record.related_purchase_ids)
+                txn_amount = Decimal(str(record.amount or 0))
+                # 按 FIFO 倒序扣减（和创建时顺序相反）
+                po_result = await db.execute(
+                    select(MaterialPurchaseOrder).where(MaterialPurchaseOrder.id.in_(purchase_ids))
+                    .order_by(MaterialPurchaseOrder.order_date.desc(), MaterialPurchaseOrder.id.desc())
+                )
+                remaining_deduct = txn_amount
+                for po in po_result.scalars().all():
+                    if remaining_deduct <= 0:
+                        break
+                    # 计算该采购单被本次对冲结算贡献了多少已付金额
+                    # 简单处理：按剩余金额扣减，直到扣完 txn_amount
+                    deduct = min(Decimal(str(po.paid_amount or 0)), remaining_deduct)
+                    po.paid_amount = max(Decimal("0"), Decimal(str(po.paid_amount or 0)) - deduct)
+                    remaining_deduct -= deduct
+                    if po.paid_amount >= po.actual_total:
+                        po.payment_status = "paid"
+                    elif po.paid_amount > 0:
+                        po.payment_status = "partial"
+                    else:
+                        po.payment_status = "unpaid"
+                await db.flush()
+
+            # 4. 恢复采购入库单已付金额
+            if record.related_purchase_inbound_ids:
+                inbound_ids = record.related_purchase_inbound_ids if isinstance(record.related_purchase_inbound_ids, list) else json.loads(record.related_purchase_inbound_ids)
+                txn_amount = Decimal(str(record.amount or 0))
+                from app.models.finance import PurchaseOrderV2
+                inbound_result = await db.execute(
+                    select(PurchaseOrderV2).where(PurchaseOrderV2.id.in_(inbound_ids))
+                    .order_by(PurchaseOrderV2.purchase_date.desc(), PurchaseOrderV2.id.desc())
+                )
+                remaining_deduct = txn_amount
+                for po in inbound_result.scalars().all():
+                    if remaining_deduct <= 0:
+                        break
+                    deduct = min(Decimal(str(po.paid_amount or 0)), remaining_deduct)
+                    po.paid_amount = max(Decimal("0"), Decimal(str(po.paid_amount or 0)) - deduct)
+                    remaining_deduct -= deduct
+                    net = Decimal(str(po.total_amount or 0)) - Decimal(str(po.after_sales_adjustment or 0))
+                    if po.paid_amount >= net:
+                        po.payment_status = "paid"
+                    elif po.paid_amount > 0:
+                        po.payment_status = "partial"
+                    else:
+                        po.payment_status = "unpaid"
+                await db.flush()
 
         await db.delete(record)
         await db.commit()
@@ -1520,14 +1978,97 @@ class FinanceService:
             )
             sale = sale_result.scalar_one_or_none()
             if sale:
-                await SalesService._update_paid_amount(db, sale)
-                # 如果已全额清零，同步清零因收款产生的抹零
+                # 如果已全额清零，先同步清零因收款产生的抹零，再重新计算净额
                 if Decimal(str(sale.paid_amount or 0)) == 0:
                     sale.rounding_adjustment = Decimal("0")
+                await SalesService._update_paid_amount(db, sale)
 
         await db.commit()
 
         return {"deleted": deleted_count, "not_found": not_found}
+
+    # ============== 预付款冲减销售单 ==============
+
+    @staticmethod
+    async def _apply_prepayment_to_sales(db: AsyncSession, record: TransactionRecord, related_sale_ids: list, amount: Decimal) -> None:
+        """预付款冲减关联销售单的应收（支持进口销售、以销定采、预包装销售）"""
+        from app.models import SalesReceipt, WholeFishSale
+        from app.models.finished_product import FinishedProductReceipt, FinishedProductSaleV2
+        from app.services.sales_service import SalesService
+
+        remaining = amount
+
+        # 1. 冲减以销定采 V2 销售单
+        fp_v2_result = await db.execute(
+            select(FinishedProductSaleV2).where(FinishedProductSaleV2.id.in_(related_sale_ids))
+        )
+        fp_v2_sales = fp_v2_result.scalars().all()
+        for sale in sorted(fp_v2_sales, key=lambda s: (s.sale_date, s.id)):
+            if remaining <= 0:
+                break
+            sale_remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
+            if sale_remaining <= 0:
+                continue
+            allocate = min(sale_remaining, remaining)
+            receipt = FinishedProductReceipt(
+                sale_v2_id=sale.id,
+                receipt_date=record.transaction_date,
+                amount=allocate,
+                payable_amount=sale_remaining,  # 记录创建时单据的应付/待付金额
+                payment_method="balance",  # 预付款抵扣标记为 balance
+                transaction_id=record.id,
+                notes="客户预付款抵扣",
+            )
+            db.add(receipt)
+            remaining -= allocate
+
+        # 2. 冲减进口销售单
+        if remaining > 0:
+            wf_result = await db.execute(
+                select(WholeFishSale).where(WholeFishSale.id.in_(related_sale_ids)).order_by(WholeFishSale.sale_date.asc(), WholeFishSale.id.asc())
+            )
+            wf_sales = wf_result.scalars().all()
+            for sale in wf_sales:
+                if remaining <= 0:
+                    break
+                sale_remaining = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
+                if sale_remaining <= 0:
+                    continue
+                allocate = min(sale_remaining, remaining)
+                sr = SalesReceipt(
+                    sale_id=sale.id,
+                    receipt_date=record.transaction_date,
+                    amount=allocate,
+                    payable_amount=sale_remaining,  # 记录创建时单据的应付/待付金额
+                    payment_method="balance",
+                    transaction_id=record.id,
+                    notes="客户预付款抵扣",
+                )
+                db.add(sr)
+                remaining -= allocate
+
+        await db.flush()
+
+        # 更新所有受影响的销售单状态
+        for sale in fp_v2_sales:
+            receipt_result = await db.execute(
+                select(func.sum(FinishedProductReceipt.amount)).where(FinishedProductReceipt.sale_v2_id == sale.id)
+            )
+            paid = receipt_result.scalar() or Decimal("0")
+            sale.paid_amount = paid
+            net = Decimal(str(sale.net_amount or 0))
+            if paid >= net and net > 0:
+                sale.status = "paid"
+                sale.paid = 1
+            elif paid > 0:
+                sale.status = "partial_paid"
+                sale.paid = 1
+            else:
+                sale.status = "pending"
+                sale.paid = 0
+
+        for sale in wf_sales:
+            await SalesService._update_paid_amount(db, sale)
 
     # ============== 汇总 ==============
 

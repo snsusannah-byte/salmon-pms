@@ -11,11 +11,11 @@ export function MainLayout() {
       <div className="print:hidden">
         <Sidebar />
       </div>
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden print:overflow-visible">
         <div className="print:hidden">
           <Header />
         </div>
-        <main className="flex-1 overflow-y-auto p-6 print:p-0">
+        <main className="flex-1 overflow-y-auto p-6 print:p-0 print:overflow-visible">
           <Outlet />
         </main>
       </div>

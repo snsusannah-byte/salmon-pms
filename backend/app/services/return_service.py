@@ -722,6 +722,7 @@ class ReturnService:
                 - sale.after_sales_adjustment
                 - (sale.discount or Decimal("0"))
                 - (sale.commission or Decimal("0"))
+                - (sale.balance_adjustment or Decimal("0"))
             )
             # V2 状态流转独立于收款，不在这里更新 status
             # 只更新 actual_amount（V2 的应收金额）
@@ -735,12 +736,14 @@ class ReturnService:
                 - (sale.rounding_adjustment or Decimal("0"))
                 - sale.after_sales_adjustment
                 - (sale.discount or Decimal("0"))
+                - (sale.balance_adjustment or Decimal("0"))
                 - (sale.commission or Decimal("0"))
             )
 
-            # 更新收款状态
+            # 更新收款状态（账平调整不影响付款状态）
+            status_net = sale.net_amount + (sale.balance_adjustment or Decimal("0"))
             paid = sale.paid_amount or Decimal("0")
-            net = sale.net_amount or Decimal("0")
+            net = status_net or Decimal("0")
             if paid >= net:
                 sale.status = SalesStatus.FULLY_PAID
             elif paid > 0:

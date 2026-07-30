@@ -223,15 +223,17 @@ export function ProductTemplatePage() {
     setTplDialog(true);
   };
   const handleSaveTemplate = async () => {
-    if (!tplForm.code || !tplForm.name) { toast.error("编码和名称必填"); return; }
+    if (!tplForm.name.trim()) { toast.error("名称必填"); return; }
     setTplSubmitting(true);
     const url = editingTpl ? `/v1/finished-products/templates/${editingTpl.id}` : "/v1/finished-products/templates";
-    const payload = {
-      code: tplForm.code,
-      name: tplForm.name,
+    const payload: any = {
+      name: tplForm.name.trim(),
       series_id: tplForm.series_id ? Number(tplForm.series_id) : null,
       spec: null,
     };
+    if (tplForm.code.trim()) {
+      payload.code = tplForm.code.trim();
+    }
     let res;
     if (editingTpl) {
       res = await apiFetch(url, { method: "PUT", body: JSON.stringify(payload) }, "SPU 更新成功");
@@ -305,19 +307,21 @@ export function ProductTemplatePage() {
   };
 
   const handleSaveSpec = async () => {
-    if (!selectedTpl || !specForm.code || !specForm.name) return;
+    if (!selectedTpl || !specForm.name.trim()) return;
     setSubmitting(true);
     const partsConfig = specParts.length > 0 ? JSON.stringify(specParts) : null;
     const pkgConfig = specPackagings.length > 0 ? JSON.stringify(specPackagings) : null;
-    const payload = {
-      code: specForm.code,
-      name: specForm.name,
+    const payload: any = {
+      name: specForm.name.trim(),
       total_weight_g: specForm.total_weight_g ? Number(specForm.total_weight_g) : null,
-      box_count: Number(specForm.box_count),
-      sort_order: Number(specForm.sort_order),
+      box_count: Number(specForm.box_count) || 1,
+      sort_order: Number(specForm.sort_order) || 0,
       parts_config: partsConfig,
       packagings_config: pkgConfig,
     };
+    if (specForm.code.trim()) {
+      payload.code = specForm.code.trim();
+    }
     let res;
     if (editingSpec) {
       res = await apiFetch(
@@ -485,7 +489,7 @@ export function ProductTemplatePage() {
           <DialogHeader><DialogTitle>{editingTpl ? "编辑 SPU" : "新建 SPU"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>编码 <span className="text-red-500">*</span></Label><Input value={tplForm.code} onChange={e => setTplForm({...tplForm, code: e.target.value})} placeholder="如 SASH-001" disabled={!!editingTpl} /></div>
+              <div className="space-y-2"><Label>编码</Label><Input value={tplForm.code} onChange={e => setTplForm({...tplForm, code: e.target.value})} placeholder="留空自动生成（如 TP-003）" disabled={!!editingTpl} /></div>
               <div className="space-y-2"><Label>系列</Label>
                 <Select value={tplForm.series_id} onValueChange={v => setTplForm({...tplForm, series_id: v})}>
                   <SelectTrigger><SelectValue placeholder="选择系列">{seriesList.find(s => String(s.id) === tplForm.series_id)?.name || <span className="text-muted-foreground">选择系列</span>}</SelectValue></SelectTrigger>
@@ -497,7 +501,7 @@ export function ProductTemplatePage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setTplDialog(false)}>取消</Button>
-            <Button onClick={handleSaveTemplate} disabled={tplSubmitting || !tplForm.code || !tplForm.name}>{tplSubmitting && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}{editingTpl ? "保存" : "创建"}</Button>
+            <Button onClick={handleSaveTemplate} disabled={tplSubmitting || !tplForm.name.trim()}>{tplSubmitting && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}{editingTpl ? "保存" : "创建"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -509,10 +513,10 @@ export function ProductTemplatePage() {
           <div className="space-y-4 py-2">
             {/* 基础信息 */}
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>编码 <span className="text-red-500">*</span></Label><Input value={specForm.code} onChange={e => setSpecForm({...specForm, code: e.target.value})} placeholder="如 TP-003" disabled={!!editingSpec} /></div>
+              <div className="space-y-2"><Label>编码</Label><Input value={specForm.code} onChange={e => setSpecForm({...specForm, code: e.target.value})} placeholder="留空自动生成" disabled={!!editingSpec} /></div>
               <div className="space-y-2"><Label>盒数</Label><Input type="number" value={specForm.box_count} onChange={e => setSpecForm({...specForm, box_count: Number(e.target.value)})} /></div>
             </div>
-            <div className="space-y-2"><Label>名称 <span className="text-red-500">*</span></Label><Input value={specForm.name} onChange={e => setSpecForm({...specForm, name: e.target.value})} placeholder="如 鱼腩200g+中段200g" /></div>
+            <div className="space-y-2"><Label>名称 <span className="text-red-500">*</span></Label><Input value={specForm.name} onChange={e => setSpecForm({...specForm, name: e.target.value})} placeholder="如 去尾甜虾" /></div>
             <div className="space-y-2"><Label>总重量 (g)</Label><Input type="number" value={specForm.total_weight_g} onChange={e => setSpecForm({...specForm, total_weight_g: e.target.value})} placeholder="自动计算或手动填写" /></div>
 
             {/* ── 通用包装物（从物料管理选择） ── */}
@@ -687,7 +691,7 @@ export function ProductTemplatePage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSpecDialog(false)}>取消</Button>
-            <Button onClick={handleSaveSpec} disabled={submitting || !specForm.code || !specForm.name}>
+            <Button onClick={handleSaveSpec} disabled={submitting || !specForm.name.trim()}>
               {submitting && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}{editingSpec ? "保存" : "创建"}
             </Button>
           </DialogFooter>

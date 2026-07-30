@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 export function SimplePagination({
   current,
@@ -24,6 +24,15 @@ export function SimplePagination({
           variant="outline"
           size="sm"
           disabled={current === 0}
+          onClick={() => onChange(0)}
+          title="首页"
+        >
+          <ChevronsLeft className="h-3 w-3" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={current === 0}
           onClick={() => onChange(current - 1)}
         >
           <ChevronLeft className="h-3 w-3" />
@@ -35,6 +44,15 @@ export function SimplePagination({
           onClick={() => onChange(current + 1)}
         >
           <ChevronRight className="h-3 w-3" />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={current >= totalPages - 1}
+          onClick={() => onChange(totalPages - 1)}
+          title="尾页"
+        >
+          <ChevronsRight className="h-3 w-3" />
         </Button>
       </div>
     </div>

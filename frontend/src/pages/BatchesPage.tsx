@@ -54,6 +54,7 @@ interface BatchInvoice {
   invoice_id: number;
   invoice_no: string;
   invoice_date: string;
+  kill_date: string | null;
   processing_plant_name: string | null;
   exporter_name: string | null;
   total_amount_usd: string;
@@ -74,6 +75,7 @@ interface Batch {
   notes: string | null;
   invoice_count: number;
   invoices: BatchInvoice[];
+  slaughter_date: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -233,7 +235,13 @@ export function BatchesPage() {
               </div>
 
               {/* 汇总 */}
-              <div className="grid grid-cols-3 gap-3 text-sm bg-muted p-3 rounded-md">
+              <div className="grid grid-cols-4 gap-3 text-sm bg-muted p-3 rounded-md">
+                <div className="text-center">
+                  <div className="text-muted-foreground text-xs">宰杀日期</div>
+                  <div className="text-lg font-semibold">
+                    {detailBatch.slaughter_date ? detailBatch.slaughter_date : "-"}
+                  </div>
+                </div>
                 <div className="text-center">
                   <div className="text-muted-foreground text-xs">总箱数</div>
                   <div className="text-lg font-semibold">{detailBatch.total_boxes}</div>
@@ -262,6 +270,7 @@ export function BatchesPage() {
                         <TableRow>
                           <TableHead className="text-xs">发票号</TableHead>
                           <TableHead className="text-xs">日期</TableHead>
+                          <TableHead className="text-xs">宰杀日期</TableHead>
                           <TableHead className="text-xs">加工厂</TableHead>
                           <TableHead className="text-xs">出口商</TableHead>
                           <TableHead className="text-xs text-right">箱数</TableHead>
@@ -276,6 +285,9 @@ export function BatchesPage() {
                           <TableRow key={inv.invoice_id}>
                             <TableCell className="text-sm font-medium">{inv.invoice_no}</TableCell>
                             <TableCell className="text-sm">{inv.invoice_date}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {inv.kill_date ? inv.kill_date : "-"}
+                            </TableCell>
                             <TableCell className="text-sm">{inv.processing_plant_name ?? "-"}</TableCell>
                             <TableCell className="text-sm">{inv.exporter_name ?? "-"}</TableCell>
                             <TableCell className="text-sm text-right">{inv.total_boxes}</TableCell>
@@ -301,7 +313,7 @@ export function BatchesPage() {
                       {/* 合计行 */}
                       <tfoot className="bg-muted/50 border-t">
                         <TableRow className="font-medium text-sm">
-                          <TableCell colSpan={4} className="text-right">合计</TableCell>
+                          <TableCell colSpan={5} className="text-right">合计</TableCell>
                           <TableCell className="text-right">
                             {detailBatch.invoices.reduce((sum, i) => sum + (i.total_boxes || 0), 0)}
                           </TableCell>
@@ -378,26 +390,27 @@ export function BatchesPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>批次ID</TableHead>
+              <TableHead className="w-[110px]">批次ID</TableHead>
               <TableHead>批次名称</TableHead>
-              <TableHead>状态</TableHead>
+              <TableHead className="w-[90px]">状态</TableHead>
               <TableHead>关联发票</TableHead>
-              <TableHead>总箱数</TableHead>
-              <TableHead>总净重(kg)</TableHead>
-              <TableHead>总金额(USD)</TableHead>
-              <TableHead>操作</TableHead>
+              <TableHead className="w-[110px]">宰杀日期</TableHead>
+              <TableHead className="text-right w-[90px]">总箱数</TableHead>
+              <TableHead className="text-right w-[110px]">总净重(kg)</TableHead>
+              <TableHead className="text-right w-[120px]">总金额(USD)</TableHead>
+              <TableHead className="w-[120px]">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -419,6 +432,9 @@ export function BatchesPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>{batch.invoice_nos?.replace(/&/g, ", ")}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {batch.slaughter_date ? batch.slaughter_date : "-"}
+                    </TableCell>
                     <TableCell className="text-right">
                       {(batch.total_boxes || 0).toLocaleString()}
                     </TableCell>
@@ -454,7 +470,7 @@ export function BatchesPage() {
           {!isLoading && data && data.items.length > 0 && (
             <tfoot className="bg-muted/50 border-t">
               <TableRow className="font-medium text-sm">
-                <TableCell colSpan={4} className="text-right">本页合计：</TableCell>
+                <TableCell colSpan={5} className="text-right">本页合计：</TableCell>
                 <TableCell className="text-right">
                   {data.items.reduce((sum, b) => sum + (b.total_boxes || 0), 0)}
                 </TableCell>

@@ -68,6 +68,9 @@ class TransactionCategory(StrEnum):
     # === 内部划转 ===
     BALANCE_DEDUCTION = "balance_deduction"               # 余额抵扣销售单
 
+    # === 对冲结算 ===
+    NETTING_SETTLEMENT = "netting_settlement"             # 对冲结算（应收应付互抵）
+
     # === 支出-销售费用 ===
     MARKETING_FEE = "marketing_fee"                         # 市场推广费
     PACKAGING_CONSUMABLES = "packaging_consumables"         # 包装物及低值易耗品

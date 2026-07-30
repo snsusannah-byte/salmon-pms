@@ -42,6 +42,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BatchImportButton } from "@/components/BatchImportButton";
 import { BatchExchangeDialog } from "@/components/BatchExchangeDialog";
+import { NettingSettlementDialog } from "@/components/NettingSettlementDialog";
 import {
   Plus,
   Trash2,
@@ -61,6 +62,7 @@ import {
   Search,
   Lock,
   Unlock,
+  Landmark,
 } from "lucide-react";
 import { toast } from "sonner";
 import { exportExcel } from "@/lib/export";
@@ -100,6 +102,7 @@ const transactionCategoryMap: Record<string, string> = {
 
   // 内部划转
   balance_deduction: "余额抵扣",
+  netting_settlement: "对冲结算",
   marketing_fee: "市场推广费",
   packaging_consumables: "包装物及低值易耗品",
   gift_fee: "赠品费用",
@@ -191,6 +194,8 @@ interface Transaction {
   description: string | null;
   is_locked: boolean;
   related_sale_ids: number[];
+  _related_sale_receipts?: Record<string, number>;
+  _related_sale_payables?: Record<string, number>;
 }
 
 interface ImportFeeItem {
@@ -2052,6 +2057,7 @@ function TransactionsTab() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [nettingDialogOpen, setNettingDialogOpen] = useState(false);
 
   // 搜索防抖
   useEffect(() => {
@@ -2066,6 +2072,8 @@ function TransactionsTab() {
   const [filterCategory, setFilterCategory] = useState("");
   const [filterSaleId, setFilterSaleId] = useState("");
   const [filterInvoiceNo, setFilterInvoiceNo] = useState("");
+  const [filterStartDate, setFilterStartDate] = useState("");
+  const [filterEndDate, setFilterEndDate] = useState("");
   const [filterLocked, setFilterLocked] = useState("");
   const [filterBankAccountId, setFilterBankAccountId] = useState("");
 
@@ -2080,13 +2088,15 @@ function TransactionsTab() {
   // 筛选条件变化时重置页码
   useEffect(() => {
     setTransactionPage(1);
-  }, [debouncedSearch, filterType, filterCategory, filterSaleId, filterInvoiceNo, filterLocked, filterBankAccountId]);
+  }, [debouncedSearch, filterStartDate, filterEndDate, filterType, filterCategory, filterSaleId, filterInvoiceNo, filterLocked, filterBankAccountId]);
 
   const { data: transactionsData, isLoading: transactionsLoading } = useQuery<{ total: number; items: Transaction[]; skip: number; limit: number }>({
-    queryKey: ["transactions", debouncedSearch, filterType, filterCategory, filterSaleId, filterInvoiceNo, filterLocked, filterBankAccountId, transactionPage],
+    queryKey: ["transactions", debouncedSearch, filterStartDate, filterEndDate, filterType, filterCategory, filterSaleId, filterInvoiceNo, filterLocked, filterBankAccountId, transactionPage],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (debouncedSearch.trim()) params.append("search", debouncedSearch.trim());
+      if (filterStartDate) params.append("start_date", filterStartDate);
+      if (filterEndDate) params.append("end_date", filterEndDate);
       if (filterType) params.append("type", filterType);
       if (filterCategory) params.append("category", filterCategory);
       if (filterSaleId.trim() && /^[1-9]\d*$/.test(filterSaleId.trim())) params.append("related_sale_id", filterSaleId.trim());
@@ -2140,6 +2150,70 @@ function TransactionsTab() {
     return map;
   }, [allSalesData]);
 
+  const allSalesDetailMap = React.useMemo(() => {
+    const map: Record<number, any> = {};
+    (allSalesData || []).forEach((s: any) => {
+      map[s.id] = s;
+    });
+    return map;
+  }, [allSalesData]);
+
+  // Fetch all purchases for displaying related purchase numbers in netting settlement
+  const { data: allPurchasesData } = useQuery({
+    queryKey: ["all-purchases-for-transaction-list", transactions?.flatMap((t: any) => t.related_purchase_ids || [])],
+    queryFn: async () => {
+      const ids = transactions?.flatMap((t: any) => t.related_purchase_ids || []).filter((id: number, i: number, arr: number[]) => arr.indexOf(id) === i) || [];
+      if (ids.length === 0) return [];
+      const res = await api.get(`/v1/material-purchases?ids=${ids.join(",")}&limit=500`).catch(() => ({ data: { items: [] } }));
+      return res.data?.items || [];
+    },
+    enabled: !!(transactions && transactions.length > 0 && transactions.some((t: any) => t.category === "netting_settlement")),
+  });
+
+  // Fetch all purchase inbounds for displaying related inbound numbers in netting settlement
+  const { data: allInboundData } = useQuery({
+    queryKey: ["all-inbound-for-transaction-list", transactions?.flatMap((t: any) => t.related_purchase_inbound_ids || [])],
+    queryFn: async () => {
+      const ids = transactions?.flatMap((t: any) => t.related_purchase_inbound_ids || []).filter((id: number, i: number, arr: number[]) => arr.indexOf(id) === i) || [];
+      if (ids.length === 0) return [];
+      const res = await api.get(`/v1/import-inbound?ids=${ids.join(",")}&limit=500`).catch(() => ({ data: { items: [] } }));
+      return res.data?.items || [];
+    },
+    enabled: !!(transactions && transactions.length > 0 && transactions.some((t: any) => t.related_purchase_inbound_ids?.length > 0)),
+  });
+
+  const allPurchasesMap = React.useMemo(() => {
+    const map: Record<number, string> = {};
+    (allPurchasesData || []).forEach((p: any) => {
+      map[p.id] = p.order_no || `#${p.id}`;
+    });
+    return map;
+  }, [allPurchasesData]);
+
+  const allPurchasesDetailMap = React.useMemo(() => {
+    const map: Record<number, any> = {};
+    (allPurchasesData || []).forEach((p: any) => {
+      map[p.id] = p;
+    });
+    return map;
+  }, [allPurchasesData]);
+
+  const allInboundMap = React.useMemo(() => {
+    const map: Record<number, string> = {};
+    (allInboundData || []).forEach((p: any) => {
+      map[p.id] = p.purchase_no || `#${p.id}`;
+    });
+    return map;
+  }, [allInboundData]);
+
+  const allInboundDetailMap = React.useMemo(() => {
+    const map: Record<number, any> = {};
+    (allInboundData || []).forEach((p: any) => {
+      map[p.id] = p;
+    });
+    return map;
+  }, [allInboundData]);
+
   // Fetch customers
   const { data: customersData } = useQuery({
     queryKey: ["customers-for-transaction"],
@@ -2169,8 +2243,45 @@ function TransactionsTab() {
       const params = new URLSearchParams();
       if (selectedCustomerId) params.set("customer_id", selectedCustomerId);
       params.set("limit", "500");
-      const res = await api.get(`/v1/sales/whole-fish?${params.toString()}`);
-      return res.data?.items || [];
+      
+      // 同时查询三种销售类型
+      const [wfRes, fpV2Res, fpRes] = await Promise.all([
+        api.get(`/v1/sales/whole-fish?${params.toString()}`),
+        api.get(`/v4/finished-product-sales?limit=500`),
+        api.get(`/v1/finished-product-sales?limit=500`),
+      ]);
+      
+      const wfItems = (wfRes.data?.items || []).map((s: any) => ({
+        ...s,
+        _type: 'whole_fish',
+        _displayName: s.sale_no || `#${s.id}`,
+      }));
+      
+      const fpV2Items = (fpV2Res.data?.data || fpV2Res.data?.items || [])
+        .filter((s: any) => !selectedCustomerId || s.customer === customersList.find((c: any) => c.id === Number(selectedCustomerId))?.name)
+        .map((s: any) => ({
+          ...s,
+          id: s.id,
+          sale_no: s.sale_no,
+          net_amount: s.net_amount ?? s.total_amount,
+          paid_amount: s.paid_amount || 0,
+          _type: 'finished_product_v2',
+          _displayName: s.sale_no || `#${s.id}`,
+        }));
+      
+      const fpItems = (fpRes.data?.items || [])
+        .filter((s: any) => !selectedCustomerId || s.customer_id === Number(selectedCustomerId))
+        .map((s: any) => ({
+          ...s,
+          id: s.id,
+          sale_no: s.sale_no || `FP-${s.id}`,
+          net_amount: s.net_amount,
+          paid_amount: s.paid_amount || 0,
+          _type: 'finished_product',
+          _displayName: s.sale_no || `FP-${s.id}`,
+        }));
+      
+      return [...wfItems, ...fpV2Items, ...fpItems];
     },
     enabled: type === "income" && (category === "main_business_revenue" || category === "customer_deposit") && formOpen,
   });
@@ -2434,6 +2545,23 @@ function TransactionsTab() {
                 ))}
               </SelectContent>
             </Select>
+            <div className="flex items-center gap-1">
+              <Input
+                type="date"
+                placeholder="开始日期"
+                value={filterStartDate}
+                onChange={(e) => setFilterStartDate(e.target.value)}
+                className="w-[130px] h-9 text-sm"
+              />
+              <span className="text-muted-foreground text-sm">~</span>
+              <Input
+                type="date"
+                placeholder="结束日期"
+                value={filterEndDate}
+                onChange={(e) => setFilterEndDate(e.target.value)}
+                className="w-[130px] h-9 text-sm"
+              />
+            </div>
             <Select value={filterCategory} onValueChange={(v) => setFilterCategory(v ?? "")}>
               <SelectTrigger className="w-[140px] h-9">
                 <SelectValue placeholder="分类">
@@ -2508,9 +2636,12 @@ function TransactionsTab() {
               onClick={() => {
                 setSearchQuery("");
                 setDebouncedSearch("");
+                setFilterStartDate("");
+                setFilterEndDate("");
                 setFilterType("");
                 setFilterCategory("");
                 setFilterSaleId("");
+                setFilterInvoiceNo("");
                 setFilterLocked("");
                 setFilterBankAccountId("");
               }}
@@ -2617,9 +2748,23 @@ function TransactionsTab() {
             新增流水
           </Button>
           <BatchImportButton type="transactions" />
+          <Button
+            variant="outline"
+            className="text-blue-600 border-blue-200 hover:bg-blue-50"
+            onClick={() => setNettingDialogOpen(true)}
+          >
+            <Landmark className="h-4 w-4 mr-1" />
+            对冲结算
+          </Button>
         </div>
       </div>
       </div>
+
+      <NettingSettlementDialog
+        open={nettingDialogOpen}
+        onOpenChange={setNettingDialogOpen}
+        onSuccess={() => queryClient.invalidateQueries({ queryKey: ["transactions-list"] })}
+      />
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-[400px]">
@@ -2741,7 +2886,7 @@ function TransactionsTab() {
                   )}
                 </div>
                 
-                {selectedCustomerId && category === "main_business_revenue" && (
+                {selectedCustomerId && (category === "main_business_revenue" || category === "customer_deposit") && (
                   <div>
                     <Label>关联销售单（可多选）</Label>
                     <div className="border rounded-md p-2 space-y-1 max-h-[200px] overflow-y-auto">
@@ -3016,8 +3161,91 @@ function TransactionsTab() {
                   <TableCell className="text-xs">
                     {r.related_exchange_no
                       ? r.related_exchange_no
-                      : r.related_sale_ids?.length > 0
-                      ? [...new Set(r.related_sale_ids)].map(id => allSalesMap[id]).filter(Boolean).join(", ")
+                      : r.related_sale_ids?.length > 0 || r.related_purchase_ids?.length > 0 || r.related_purchase_inbound_ids?.length > 0
+                      ? (() => {
+                          const saleIds = [...new Set(r.related_sale_ids || [])];
+                          const purchaseIds = [...new Set(r.related_purchase_ids || [])];
+                          const inboundIds = [...new Set(r.related_purchase_inbound_ids || [])];
+                          if (r.category === "customer_deposit") {
+                            const receiptMap = r._related_sale_receipts || {};
+                            const payableMap = r._related_sale_payables || {};
+                            const lines = saleIds.map(id => {
+                              const s = allSalesDetailMap[id];
+                              if (!s) return allSalesMap[id] || `#${id}`;
+                              const saleNo = s.sale_no || `#${s.id}`;
+                              // 本次交易从预付款中实际扣减的金额（实收）
+                              const receiptAmt = receiptMap[String(id)];
+                              let receivedAmt: number;
+                              if (receiptAmt !== undefined) {
+                                receivedAmt = Number(receiptAmt);
+                              } else {
+                                // 兜底：按当前剩余应付估算
+                                receivedAmt = Math.max(0, Number(s.net_amount || s.total_amount || 0) - Number(s.paid_amount || 0));
+                              }
+                              // 创建该预付款时关联单据显示的应付/待付金额
+                              const payableAmt = payableMap[String(id)];
+                              let payableDisplay: number;
+                              if (payableAmt !== undefined) {
+                                payableDisplay = Number(payableAmt);
+                              } else if (receiptAmt !== undefined) {
+                                // 无存储的应付金额时，按公式回推：创建时应付 = 当前剩余 + 本次实收
+                                payableDisplay = Math.max(0, Number(s.net_amount || s.total_amount || 0) - Number(s.paid_amount || 0) + receivedAmt);
+                              } else {
+                                payableDisplay = Math.max(0, Number(s.net_amount || s.total_amount || 0) - Number(s.paid_amount || 0));
+                              }
+                              const payableStr = payableDisplay.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                              const receivedStr = receivedAmt.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                              return `${saleNo} - 实收 ¥${receivedStr} · 应付 ¥${payableStr}`;
+                            });
+                            return (
+                              <div className="space-y-0.5">
+                                <div className="text-blue-600 font-medium">客户预付款：{saleIds.length} 个销售单</div>
+                                {lines.map((line, i) => (
+                                  <div key={i} className="text-muted-foreground">{line}</div>
+                                ))}
+                              </div>
+                            );
+                          }
+                          if (r.category === "netting_settlement") {
+                            // 对冲结算：显示原始应收/应付金额（已全额结清）
+                            const saleLines = saleIds.map(id => {
+                              const s = allSalesDetailMap[id];
+                              if (!s) return allSalesMap[id] || `#${id}`;
+                              const saleNo = s.sale_no || `#${s.id}`;
+                              const net = Number(s.net_amount || s.total_amount || 0);
+                              return `${saleNo} - 实收 ¥${net.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                            });
+                            const purchaseLines = purchaseIds.map(id => {
+                              const p = allPurchasesDetailMap[id];
+                              if (!p) return allPurchasesMap[id] || `#${id}`;
+                              const orderNo = p.order_no || `#${p.id}`;
+                              const actualTotal = Number(p.actual_total || p.total_amount || 0);
+                              return `${orderNo} - 实付 ¥${actualTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                            });
+                            const inboundLines = inboundIds.map(id => {
+                              const p = allInboundDetailMap[id];
+                              if (!p) return allInboundMap[id] || `#${id}`;
+                              const orderNo = p.purchase_no || `#${p.id}`;
+                              const net = Number(p.total_amount || 0) - Number(p.after_sales_adjustment || 0);
+                              return `${orderNo} - 实付 ¥${net.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                            });
+                            return (
+                              <div className="space-y-0.5">
+                                <div className="text-purple-600 font-medium">对冲结算：{saleIds.length} 个销售单 + {purchaseIds.length + inboundIds.length} 个采购单</div>
+                                {saleLines.map((line, i) => (
+                                  <div key={`s-${i}`} className="text-muted-foreground">{line}</div>
+                                ))}
+                                {purchaseLines.map((line, i) => (
+                                  <div key={`p-${i}`} className="text-muted-foreground">{line}</div>
+                                ))}
+                                {inboundLines.map((line, i) => (
+                                  <div key={`i-${i}`} className="text-muted-foreground">{line}</div>
+                                ))}
+                              </div>
+                            );
+                          }
+                          return saleIds.map(id => allSalesMap[id]).filter(Boolean).join(", ");
+                        })()
                       : "-"}
                   </TableCell>
                   <TableCell>

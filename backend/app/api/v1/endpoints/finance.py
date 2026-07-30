@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -541,6 +541,52 @@ async def list_transactions(
         )
         invoice_map = {row[0]: row[1] for row in inv_result.all()}
     
+    # 批量获取预付款关联销售单的 receipt 金额（用于前端显示本次交易实际分配金额）
+    prepayment_txn_ids = [r.id for r in items if r.category == "customer_deposit" and r.related_sale_ids]
+    txn_receipt_map: dict[int, dict[int, Decimal]] = {}
+    txn_payable_map: dict[int, dict[int, Decimal]] = {}
+    if prepayment_txn_ids:
+        from app.models.finished_product import FinishedProductReceipt
+        from app.models import SalesReceipt
+        # V2 receipts
+        fp_result = await db.execute(
+            select(FinishedProductReceipt.transaction_id, FinishedProductReceipt.sale_v2_id, func.sum(FinishedProductReceipt.amount))
+            .where(FinishedProductReceipt.transaction_id.in_(prepayment_txn_ids))
+            .group_by(FinishedProductReceipt.transaction_id, FinishedProductReceipt.sale_v2_id)
+        )
+        for txn_id, sale_id, amt in fp_result.all():
+            if txn_id not in txn_receipt_map:
+                txn_receipt_map[txn_id] = {}
+            txn_receipt_map[txn_id][sale_id] = Decimal(str(amt)) if amt else Decimal("0")
+        fp_payable_result = await db.execute(
+            select(FinishedProductReceipt.transaction_id, FinishedProductReceipt.sale_v2_id, func.sum(FinishedProductReceipt.payable_amount))
+            .where(FinishedProductReceipt.transaction_id.in_(prepayment_txn_ids))
+            .group_by(FinishedProductReceipt.transaction_id, FinishedProductReceipt.sale_v2_id)
+        )
+        for txn_id, sale_id, amt in fp_payable_result.all():
+            if txn_id not in txn_payable_map:
+                txn_payable_map[txn_id] = {}
+            txn_payable_map[txn_id][sale_id] = Decimal(str(amt)) if amt else Decimal("0")
+        # WF receipts
+        wf_result = await db.execute(
+            select(SalesReceipt.transaction_id, SalesReceipt.sale_id, func.sum(SalesReceipt.amount))
+            .where(SalesReceipt.transaction_id.in_(prepayment_txn_ids))
+            .group_by(SalesReceipt.transaction_id, SalesReceipt.sale_id)
+        )
+        for txn_id, sale_id, amt in wf_result.all():
+            if txn_id not in txn_receipt_map:
+                txn_receipt_map[txn_id] = {}
+            txn_receipt_map[txn_id][sale_id] = Decimal(str(amt)) if amt else Decimal("0")
+        wf_payable_result = await db.execute(
+            select(SalesReceipt.transaction_id, SalesReceipt.sale_id, func.sum(SalesReceipt.payable_amount))
+            .where(SalesReceipt.transaction_id.in_(prepayment_txn_ids))
+            .group_by(SalesReceipt.transaction_id, SalesReceipt.sale_id)
+        )
+        for txn_id, sale_id, amt in wf_payable_result.all():
+            if txn_id not in txn_payable_map:
+                txn_payable_map[txn_id] = {}
+            txn_payable_map[txn_id][sale_id] = Decimal(str(amt)) if amt else Decimal("0")
+    
     result_items = []
     for r in items:
         data = TransactionRecordResponse.model_validate(r).model_dump()
@@ -549,6 +595,12 @@ async def list_transactions(
             data["related_invoice_no"] = r.related_invoice_no
         elif r.related_invoice_id:
             data["related_invoice_no"] = invoice_map.get(r.related_invoice_id)
+        # 预付款：加入关联销售单的 receipt 金额映射
+        if r.id in txn_receipt_map:
+            data["_related_sale_receipts"] = {str(k): float(v) for k, v in txn_receipt_map[r.id].items()}
+        # 预付款：加入关联销售单的创建时应付金额映射
+        if r.id in txn_payable_map:
+            data["_related_sale_payables"] = {str(k): float(v) for k, v in txn_payable_map[r.id].items()}
         result_items.append(data)
     
     # 购汇交易：补充关联发票号（多张逗号间隔）和购汇单号
@@ -598,8 +650,14 @@ async def create_transaction(
     db: AsyncSession = Depends(get_db),
 ):
     """创建交易记录"""
-    record = await FinanceService.create_transaction(db, data.model_dump())
-    return TransactionRecordResponse.model_validate(record)
+    try:
+        record = await FinanceService.create_transaction(db, data.model_dump())
+        return TransactionRecordResponse.model_validate(record)
+    except Exception as e:
+        import traceback
+        traceback_str = traceback.format_exc()
+        print(f"[CREATE_TRANSACTION ERROR] {e}\n{traceback_str}")
+        raise HTTPException(status_code=500, detail=f"{e}\n{traceback_str}")
 
 
 @router.put("/transactions/{record_id}", response_model=TransactionRecordResponse)

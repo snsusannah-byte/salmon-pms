@@ -2,6 +2,7 @@
 from decimal import Decimal
 from typing import Optional
 
+from enum import Enum as PyEnum
 from sqlalchemy import (
     Boolean,
     Enum,
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin
 
 
-class ProductCategory(str, Enum):
+class ProductCategory(str, PyEnum):
     """产品分类"""
     WHOLE_FISH = "whole_fish"           # 进口规格（整鱼）
     FILLET = "fillet"                   # 进口规格（鱼柳）

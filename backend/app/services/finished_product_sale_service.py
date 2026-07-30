@@ -347,6 +347,10 @@ class FinishedProductSaleService:
         if sale.is_locked:
             raise HTTPException(status_code=400, detail="销售记录已锁定")
 
+        # 记录创建时单据的应付/待付金额
+        if data.get("payable_amount") is None:
+            data["payable_amount"] = Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0))
+
         receipt = FinishedProductReceipt(sale_id=sale_id, **data)
         db.add(receipt)
         await db.commit()

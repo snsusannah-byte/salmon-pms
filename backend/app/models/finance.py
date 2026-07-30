@@ -44,6 +44,8 @@ class TransactionRecord(Base, TimestampMixin):
     related_batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
     related_exchange_id: Mapped[int | None] = mapped_column(ForeignKey("exchange_records.id"), nullable=True)
     related_sale_ids: Mapped[list | None] = mapped_column(JSON)  # JSON array of sale IDs
+    related_purchase_ids: Mapped[list | None] = mapped_column(JSON)  # JSON array of material purchase IDs
+    related_purchase_inbound_ids: Mapped[list | None] = mapped_column(JSON)  # JSON array of purchase inbound IDs
     
     is_confirmed: Mapped[bool] = mapped_column(Boolean, default=True)
     is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -130,6 +132,8 @@ class PurchaseOrderV2(Base, TimestampMixin):
     total_weight: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     total_boxes: Mapped[int] = mapped_column(Integer, default=0)
     after_sales_adjustment: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
+    payment_status: Mapped[str] = mapped_column(String(20), default="unpaid")
     order_type: Mapped[str | None] = mapped_column(String(20), default="raw_material")  # raw_material=整鱼, accessories=辅料
     slaughter_date: Mapped[Date | None] = mapped_column(Date, nullable=True)  # 宰杀日期
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)

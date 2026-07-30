@@ -5,7 +5,6 @@
 主要服务于需要按 PurchaseOrderV2 模型查询的场景。
 """
 
-from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -25,6 +24,7 @@ async def list_purchase_inbounds(
     order_type: str | None = Query(None, description="raw_material=整鱼, accessories=辅料"),
     status: str | None = Query(None),
     supplier_id: int | None = Query(None),
+    ids: str | None = Query(None, description="逗号分隔的ID列表"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -41,6 +41,10 @@ async def list_purchase_inbounds(
         query = query.where(PurchaseOrderV2.status == status)
     if supplier_id:
         query = query.where(PurchaseOrderV2.supplier_id == supplier_id)
+    if ids:
+        id_list = [int(x.strip()) for x in ids.split(",") if x.strip().isdigit()]
+        if id_list:
+            query = query.where(PurchaseOrderV2.id.in_(id_list))
 
     query = query.order_by(desc(PurchaseOrderV2.purchase_date), desc(PurchaseOrderV2.id))
 
@@ -69,6 +73,8 @@ async def list_purchase_inbounds(
             "total_amount": po.total_amount,
             "after_sales_adjustment": po.after_sales_adjustment or Decimal("0"),
             "net_amount": po.total_amount - (po.after_sales_adjustment or Decimal("0")),
+            "paid_amount": po.paid_amount or Decimal("0"),
+            "payment_status": po.payment_status or "unpaid",
             "total_weight": po.total_weight,
             "total_boxes": po.total_boxes,
             "order_type": po.order_type,

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models import SalesStatus
 
@@ -80,7 +80,7 @@ class WholeFishSaleItemBase(BaseModel):
     spec: str = Field(..., max_length=100, description="规格")
     box_count: int = Field(0, ge=0, description="箱数")
     weight_kg: Decimal = Field(..., gt=0, description="重量(kg)")
-    unit_price: Decimal = Field(..., gt=0, description="单价")
+    unit_price: Decimal = Field(..., ge=0, description="单价")
     sort_order: int | None = Field(0, description="排序")
     notes: str | None = Field(None, description="备注")
 
@@ -97,7 +97,7 @@ class WholeFishSaleItemUpdate(BaseModel):
     spec: str | None = Field(None, max_length=100)
     box_count: int | None = Field(None, ge=0)
     weight_kg: Decimal | None = Field(None, gt=0)
-    unit_price: Decimal | None = Field(None, gt=0)
+    unit_price: Decimal | None = Field(None, ge=0)
     sort_order: int | None = None
     notes: str | None = None
 
@@ -123,23 +123,29 @@ class WholeFishSaleBase(BaseModel):
     spec: str | None = Field(None, max_length=50, description="规格")
     box_count: int | None = Field(None, ge=0, description="箱数")
     weight_kg: Decimal = Field(..., gt=0, description="重量(kg)")
-    unit_price: Decimal = Field(..., gt=0, description="单价")
-    gross_amount: Decimal = Field(..., gt=0, description="毛金额")
+    unit_price: Decimal = Field(..., ge=0, description="单价")
+    gross_amount: Decimal = Field(..., ge=0, description="毛金额")
     scan_fee: Decimal = Field(0, ge=0, description="扫码费")
     rounding_adjustment: Decimal = Field(0, description="抹零调整")
     after_sales_adjustment: Decimal = Field(0, description="售后调整")
-    discount: Decimal = Field(0, ge=0, description="折扣")
+    discount: Decimal = Field(0, description="折扣")
+    balance_adjustment: Decimal = Field(0, description="账平调整")
+    balance_adjustment_reason: str | None = Field(None, description="账平调整原因")
+
     commission: Decimal = Field(0, ge=0, description="佣金")
-    net_amount: Decimal = Field(..., gt=0, description="净金额")
+    net_amount: Decimal = Field(..., ge=0, description="净金额")
     paid_amount: Decimal = Field(0, ge=0, description="已付金额")
     status: SalesStatus | None = Field(SalesStatus.PENDING, description="收款状态")
     salesperson_id: int | None = Field(None, description="销售员ID")
+    discount_reason: str | None = Field(None, description="折扣原因")
     is_internal_sale: bool | None = Field(False, description="是否内部销售（加工厂流转）")
     notes: str | None = Field(None, description="备注")
 
 
 
 class WholeFishSaleCreate(WholeFishSaleBase):
+    balance_adjustment: Decimal = Field(0, description="账平调整（正数表示从应收中扣减，负数表示追加应收）")
+
     items: list[WholeFishSaleItemCreate] | None = Field(None, description="规格明细列表")
 
 
@@ -150,17 +156,21 @@ class WholeFishSaleUpdate(BaseModel):
     spec: str | None = Field(None, max_length=50)
     box_count: int | None = Field(None, ge=0)
     weight_kg: Decimal | None = Field(None, gt=0)
-    unit_price: Decimal | None = Field(None, gt=0)
-    gross_amount: Decimal | None = Field(None, gt=0)
+    unit_price: Decimal | None = Field(None, ge=0)
+    gross_amount: Decimal | None = Field(None, ge=0)
     scan_fee: Decimal | None = Field(None, ge=0)
     rounding_adjustment: Decimal | None = None
     after_sales_adjustment: Decimal | None = None
-    discount: Decimal | None = Field(None, ge=0)
+    discount: Decimal | None = Field(None, description="折扣")
+    balance_adjustment: Decimal | None = Field(None, description="账平调整（正数表示从应收中扣减，负数表示追加应收）")
+    balance_adjustment_reason: str | None = None
+
     commission: Decimal | None = Field(None, ge=0)
-    net_amount: Decimal | None = Field(None, gt=0)
+    net_amount: Decimal | None = Field(None, ge=0)
     paid_amount: Decimal | None = Field(None, ge=0)
     status: SalesStatus | None = None
     salesperson_id: int | None = None
+    discount_reason: str | None = None
     notes: str | None = None
     items: list[WholeFishSaleItemCreate] | None = Field(None, description="规格明细列表（编辑时替换）")
 

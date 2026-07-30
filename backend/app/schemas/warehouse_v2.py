@@ -70,6 +70,7 @@ class StockResponse(StockBase):
     id: int
     warehouse_name: str | None = None
     product_name: str | None = None
+    product_spec: str | None = None
     product_category: str | None = None
     batch_no: str | None = None
     batch_nos: list[str] = Field(default_factory=list)

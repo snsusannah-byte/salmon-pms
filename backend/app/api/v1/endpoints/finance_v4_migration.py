@@ -132,45 +132,70 @@ async def _update_stock_inbound(db: AsyncSession, warehouse_id: int, product_id:
     )
     db.add(movement)
 
-async def _update_stock_outbound(db: AsyncSession, warehouse_id: int, product_id: int, qty: Decimal, ref_type: str = None, ref_no: str = None, ref_id: int = None, notes: str = None) -> None:
-    """更新库存：出库时减少数量（支持批次级先进先出扣减）"""
+async def _update_stock_outbound(db: AsyncSession, warehouse_id: int, product_id: int, qty: Decimal, batch_no: str | None = None, ref_type: str = None, ref_no: str = None, ref_id: int = None, notes: str = None) -> None:
+    """更新库存：出库时减少数量（支持按销售单指定批次严格扣减）"""
     from app.models import StockMovement
-    result = await db.execute(
-        select(Stock).where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id)
-    )
-    stock = result.scalar_one_or_none()
-    if not stock:
-        raise HTTPException(status_code=500, detail=f"仓库 {warehouse_id} 中没有该产品库存")
-    if stock.available_qty < qty:
-        raise HTTPException(status_code=400, detail=f"库存不足：可用 {stock.available_qty}，需要 {qty}")
+
+    # 指定了批次号时，严格按该批次查找库存；未指定时按可用量最多取一条
+    if batch_no:
+        result = await db.execute(
+            select(Stock).where(
+                Stock.warehouse_id == warehouse_id,
+                Stock.product_id == product_id,
+                Stock.batch_no == batch_no,
+            )
+        )
+        stock = result.scalar_one_or_none()
+        if not stock:
+            raise HTTPException(status_code=400, detail=f"仓库中不存在批次 {batch_no} 的库存")
+        if stock.available_qty < qty:
+            raise HTTPException(status_code=400, detail=f"批次 {batch_no} 库存不足：可用 {stock.available_qty}，需要 {qty}")
+    else:
+        result = await db.execute(
+            select(Stock)
+            .where(Stock.warehouse_id == warehouse_id, Stock.product_id == product_id)
+            .order_by(Stock.available_qty.desc())
+        )
+        stock = result.scalar_one_or_none()
+        if not stock:
+            raise HTTPException(status_code=500, detail=f"仓库 {warehouse_id} 中没有该产品库存")
+        if stock.available_qty < qty:
+            raise HTTPException(status_code=400, detail=f"库存不足：可用 {stock.available_qty}，需要 {qty}")
 
     qty_before = stock.current_qty
     stock.current_qty = stock.current_qty - qty
     stock.available_qty = stock.available_qty - qty
     stock.last_out_date = _date.today()
 
-    # 扣减批次剩余量（先进先出：按入库日期排序）
+    # 扣减入库批次剩余量（指定批次时只扣该批次，未指定时按先进先出）
     from app.models.warehouse import StockInbound
-    inbound_result = await db.execute(
+    inbound_query = (
         select(StockInbound)
         .where(StockInbound.warehouse_id == warehouse_id)
         .where(StockInbound.product_id == product_id)
-        .where(StockInbound.remaining_qty > 0)
-        .order_by(StockInbound.inbound_date.asc())
     )
+    if batch_no:
+        inbound_query = inbound_query.where(StockInbound.batch_no == batch_no).order_by(StockInbound.inbound_date.asc())
+    else:
+        inbound_query = inbound_query.where(
+            (StockInbound.remaining_qty > 0) | (StockInbound.remaining_qty == None)
+        ).order_by(StockInbound.inbound_date.asc())
+    inbound_result = await db.execute(inbound_query)
     inbounds = inbound_result.scalars().all()
     remaining_to_deduct = qty
     for inbound in inbounds:
         if remaining_to_deduct <= 0:
             break
-        if inbound.remaining_qty >= remaining_to_deduct:
-            inbound.remaining_qty = inbound.remaining_qty - remaining_to_deduct
-            if inbound.remaining_box_count and inbound.original_box_count and inbound.original_weight:
+        # remaining_qty 为空时视为完整数量（兼容旧数据）
+        inbound_remaining = inbound.remaining_qty if inbound.remaining_qty is not None else inbound.qty
+        if inbound_remaining >= remaining_to_deduct:
+            inbound.remaining_qty = inbound_remaining - remaining_to_deduct
+            if inbound.remaining_box_count is not None and inbound.original_box_count and inbound.original_weight:
                 ratio = remaining_to_deduct / inbound.original_weight
                 inbound.remaining_box_count = max(0, inbound.remaining_box_count - round(inbound.original_box_count * ratio))
             remaining_to_deduct = Decimal("0")
         else:
-            remaining_to_deduct = remaining_to_deduct - inbound.remaining_qty
+            remaining_to_deduct = remaining_to_deduct - inbound_remaining
             inbound.remaining_qty = Decimal("0")
             inbound.remaining_box_count = 0
 
@@ -178,12 +203,13 @@ async def _update_stock_outbound(db: AsyncSession, warehouse_id: int, product_id
     movement = StockMovement(
         warehouse_id=warehouse_id,
         product_id=product_id,
+        batch_no=batch_no,
         movement_type=StockMovementType.OUTBOUND,
         movement_date=_date.today(),
         qty_change=-qty,
         qty_before=qty_before,
         qty_after=stock.current_qty,
-        unit="kg",
+        unit=stock.unit or "kg",
         ref_type=ref_type or "sale",
         ref_id=ref_id,
         ref_no=ref_no,
@@ -279,15 +305,14 @@ async def _auto_inbound_from_purchase(db: AsyncSession, order: PurchaseOrderV2) 
 
 async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2) -> list:
     """销售后自动推仓库出库记录"""
-    # 整鱼出 ZB-DOMESTIC，成品出 FB-FISH
-    warehouse_code = "ZB-DOMESTIC" if sale.sale_type == "whole_fish" else "FB-FISH"
-    warehouse_id = await _get_warehouse_id(db, warehouse_code)
-
     outbounds = []
     for product in sale.products:
         # 查找产品（同时匹配 product_name + product_spec，因为 name 不唯一）
         p = None
-        if product.product_name and product.product_spec:
+        if product.product_id:
+            result = await db.execute(select(Product).where(Product.id == product.product_id))
+            p = result.scalar_one_or_none()
+        if not p and product.product_name and product.product_spec:
             result = await db.execute(
                 select(Product).where(Product.name == product.product_name, Product.spec == product.product_spec)
             )
@@ -299,16 +324,19 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
             result = await db.execute(select(Product).where(Product.name == product.product_spec))
             p = result.scalar_one_or_none()
         if not p:
-            # 仍找不到，自动创建占位产品，避免库存流失
-            p_id = await _get_or_create_product(
-                db,
-                name=product.product_name or product.product_spec or "未命名产品",
-                spec=product.product_spec or "",
-                unit="kg",
-                category="raw_material",
-            )
-            result = await db.execute(select(Product).where(Product.id == p_id))
-            p = result.scalar_one()
+            # 仍找不到，跳过该明细（避免库存流失）
+            continue
+
+        # 判断单位销售模式
+        is_unit_sale = product.sale_unit and product.sale_unit.strip() and product.box_count
+        qty = Decimal(str(product.box_count or 0)) if is_unit_sale else Decimal(str(product.weight_kg or 0))
+        unit = product.sale_unit if is_unit_sale else (p.unit or "kg")
+        if qty <= 0:
+            continue
+
+        # 根据产品分类决定仓库：BOM物料走国内整包仓，成品走成品分拣仓
+        warehouse_code = "ZB-DOMESTIC" if (p.category == "bom_material" or sale.sale_type == "whole_fish") else "FB-FISH"
+        warehouse_id = await _get_warehouse_id(db, warehouse_code)
 
         # 生成出库单号
         today = _date.today()
@@ -328,8 +356,8 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
             dest_no=sale.sale_no,
             warehouse_id=warehouse_id,
             product_id=p.id,
-            qty=Decimal(str(product.weight_kg or 0)),
-            unit="kg",
+            qty=qty,
+            unit=unit,
             unit_cost=Decimal(str(product.unit_price or 0)),
             total_cost=Decimal(str(product.total_amount or 0)),
             outbound_date=today,
@@ -339,8 +367,7 @@ async def _auto_outbound_from_sale(db: AsyncSession, sale: FinishedProductSaleV2
         db.add(outbound)
 
         # 扣减库存
-        qty = Decimal(str(product.weight_kg or 0))
-        await _update_stock_outbound(db, warehouse_id, p.id, qty, ref_type="finished_product_sale", ref_no=sale.sale_no, ref_id=sale.id, notes=f"销售单 {sale.sale_no} 自动出库")
+        await _update_stock_outbound(db, warehouse_id, p.id, qty, batch_no=product.batch, ref_type="finished_product_sale", ref_no=sale.sale_no, ref_id=sale.id, notes=f"销售单 {sale.sale_no} 自动出库")
 
         outbounds.append(outbound_no)
 
@@ -491,6 +518,8 @@ async def api_get_purchase_orders(
             "total_amount": total_amount,
             "after_sales_adjustment": float(o.after_sales_adjustment or 0),
             "net_amount": total_amount - float(o.after_sales_adjustment or 0),
+            "paid_amount": float(o.paid_amount or 0),
+            "payment_status": o.payment_status or "unpaid",
             "total_weight": round(total_weight, 2),
             "total_boxes": total_boxes,
             "slaughter_date": o.slaughter_date.isoformat() if o.slaughter_date else None,
@@ -571,6 +600,8 @@ async def api_get_purchase_order(
             "total_amount": total_amount,
             "after_sales_adjustment": float(order.after_sales_adjustment or 0),
             "net_amount": total_amount - float(order.after_sales_adjustment or 0),
+            "paid_amount": float(order.paid_amount or 0),
+            "payment_status": order.payment_status or "unpaid",
             "total_weight": round(total_weight, 2),
             "total_boxes": total_boxes,
             "slaughter_date": order.slaughter_date.isoformat() if order.slaughter_date else None,
@@ -692,10 +723,15 @@ async def api_create_purchase_order(
             if order.total_boxes and (sale.quantity is None or sale.quantity == 0):
                 sale.quantity = order.total_boxes
 
-            # 按规格匹配，把采购明细实际重量复制到销售单对应明细
-            purchase_map = {p.product_spec: p for p in order.products}
+            # 按规格+工厂+箱数匹配，把采购明细实际重量复制到销售单对应明细
+            # 避免同规格同工厂的多行采购明细互相覆盖
+            purchase_map = {}
+            for p in order.products:
+                key = (p.product_spec or "", p.factory or "", p.box_count or 0)
+                purchase_map[key] = p
             for sp in sale.products:
-                pp = purchase_map.get(sp.product_spec)
+                key = (sp.product_spec or "", sp.factory or "", sp.box_count or 0)
+                pp = purchase_map.get(key)
                 if pp and pp.weight_kg and pp.weight_kg > 0:
                     sp.weight_kg = pp.weight_kg
                     sp.total_amount = round2dec(sp.weight_kg * sp.unit_price)
@@ -812,9 +848,14 @@ async def api_update_purchase_order(
             sale.status = "ordered"
             sale.weight = order.total_weight
             sale.quantity = order.total_boxes
-            purchase_map = {p.product_spec: p for p in order.products}
+            # 按规格+工厂+箱数匹配，把采购明细实际重量复制到销售单对应明细
+            purchase_map = {}
+            for p in order.products:
+                key = (p.product_spec or "", p.factory or "", p.box_count or 0)
+                purchase_map[key] = p
             for sp in sale.products:
-                pp = purchase_map.get(sp.product_spec)
+                key = (sp.product_spec or "", sp.factory or "", sp.box_count or 0)
+                pp = purchase_map.get(key)
                 if pp and pp.weight_kg and pp.weight_kg > 0:
                     sp.weight_kg = pp.weight_kg
                     sp.total_amount = round2dec(sp.weight_kg * sp.unit_price)
@@ -1013,6 +1054,7 @@ async def api_get_finished_sales(
             "sale_date": s.sale_date.isoformat() if s.sale_date else None,
             "discount": float(s.discount) if s.discount else 0,
             "scan_fee": float(s.scan_fee) if s.scan_fee else 0,
+            "freight": float(s.freight) if s.freight else 0,
             "rounding": float(s.rounding) if s.rounding else 0,
             "after_sales_adjustment": float(s.after_sales_adjustment) if s.after_sales_adjustment else 0,
             "commission": float(s.commission) if s.commission else 0,
@@ -1034,11 +1076,14 @@ async def api_get_finished_sales(
             "products": [
                 {
                     "variant_id": p.variant_id,
+                    "product_id": p.product_id,
                     "product_name": p.product_name,
                     "product_spec": p.product_spec,
                     "factory": p.factory,
+                    "batch": p.batch,
                     "slaughter_date": p.slaughter_date.isoformat() if p.slaughter_date else None,
                     "box_count": p.box_count,
+                    "sale_unit": p.sale_unit,
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
                     "unit_price": float(p.unit_price) if p.unit_price else 0,
                     "total_amount": float(p.total_amount) if p.total_amount else 0,
@@ -1079,13 +1124,21 @@ async def api_get_finished_sale(
             .options(selectinload(PurchaseOrderV2.products))
             .where(PurchaseOrderV2.sale_id == sale_id)
         )
-        purchase = purchase_result.scalar_one_or_none()
-        if purchase and purchase.products:
-            purchase_map = {p.product_spec: p for p in purchase.products}
+        purchases = purchase_result.scalars().all()
+        if purchases:
+            # 收集所有采购明细，按规格+工厂+箱数分组（多个采购单累加）
+            purchase_map = {}
+            for purchase in purchases:
+                for p in purchase.products or []:
+                    key = (p.product_spec or "", p.factory or "", p.box_count or 0)
+                    if key not in purchase_map:
+                        purchase_map[key] = Decimal("0")
+                    purchase_map[key] += (p.weight_kg or Decimal("0"))
             for p in products:
-                pp = purchase_map.get(p.product_spec)
-                if pp and pp.weight_kg and pp.weight_kg > 0:
-                    p.weight_kg = pp.weight_kg
+                key = (p.product_spec or "", p.factory or "", p.box_count or 0)
+                purchase_weight = purchase_map.get(key)
+                if purchase_weight and purchase_weight > 0:
+                    p.weight_kg = purchase_weight
                     p.total_amount = round2dec(p.weight_kg * p.unit_price)
         else:
             # 无采购单则按箱数比例分摊
@@ -1142,6 +1195,7 @@ async def api_get_finished_sale(
             "sale_date": sale.sale_date.isoformat() if sale.sale_date else None,
             "discount": float(sale.discount) if sale.discount else 0,
             "scan_fee": float(sale.scan_fee) if sale.scan_fee else 0,
+            "freight": float(sale.freight) if sale.freight else 0,
             "rounding": float(sale.rounding) if sale.rounding else 0,
             "after_sales_adjustment": float(sale.after_sales_adjustment) if sale.after_sales_adjustment else 0,
             "commission": float(sale.commission) if sale.commission else 0,
@@ -1159,11 +1213,14 @@ async def api_get_finished_sale(
                 {
                     "id": p.id,
                     "variant_id": p.variant_id,
+                    "product_id": p.product_id,
                     "product_name": p.product_name,
                     "product_spec": p.product_spec,
                     "factory": p.factory,
+                    "batch": p.batch,
                     "slaughter_date": p.slaughter_date.isoformat() if p.slaughter_date else None,
                     "box_count": p.box_count,
+                    "sale_unit": p.sale_unit,
                     "weight_kg": float(p.weight_kg) if p.weight_kg else 0,
                     "unit_price": float(p.unit_price) if p.unit_price else 0,
                     "total_amount": float(p.total_amount) if p.total_amount else 0,
@@ -1266,10 +1323,11 @@ async def api_create_finished_sale(
     # 费用
     discount = Decimal(str(data.get("discount", 0)))
     scan_fee = Decimal(str(data.get("scan_fee", 0)))
+    freight = Decimal(str(data.get("freight", 0)))
     rounding = Decimal(str(data.get("rounding", 0)))
     after_sales_adjustment = Decimal(str(data.get("after_sales_adjustment", 0)))
     commission = Decimal(str(data.get("commission", 0)))
-    net_amount = total_amount - discount - scan_fee - rounding - after_sales_adjustment - commission
+    net_amount = total_amount + freight - discount - scan_fee - rounding - after_sales_adjustment - commission
 
     # 以销定采：生成批次号（MMDD-加工厂缩写-NNN）
     from datetime import date as _date
@@ -1290,10 +1348,11 @@ async def api_create_finished_sale(
         sale_date=_parse_date(data.get("sale_date")),
         discount=discount,
         scan_fee=scan_fee,
+        freight=freight,
         rounding=rounding,
         after_sales_adjustment=after_sales_adjustment,
         commission=commission,
-        actual_amount=total_amount - discount - scan_fee - rounding,
+        actual_amount=total_amount + freight - discount - scan_fee - rounding,
         net_amount=net_amount,
         paid=1 if data.get("paid") else 0,
         remark=data.get("remark"),
@@ -1311,12 +1370,15 @@ async def api_create_finished_sale(
         product = FinishedSaleProductV2(
             sale_id=sale.id,
             variant_id=p.get("variant_id"),
+            product_id=p.get("product_id"),
             product_name=p.get("product_name"),
             product_spec=p.get("product_spec", ""),
             factory=p.get("factory"),
+            batch=p.get("batch"),
             slaughter_date=_parse_date(p.get("slaughter_date")),
             box_count=p.get("box_count", 0),
             weight_kg=Decimal(str(p.get("weight_kg", 0))),
+            sale_unit=p.get("sale_unit"),
             unit_price=Decimal(str(p.get("unit_price", 0))),
             total_amount=Decimal(str(p.get("total_amount", 0))),
             commission_rate=Decimal(str(p.get("commission_rate", 0))),
@@ -1326,6 +1388,23 @@ async def api_create_finished_sale(
         db.add(product)
 
     await db.commit()
+
+    # 成品销售自动出库
+    if sale.sale_type == "finished_product":
+        try:
+            # 重新加载销售单及产品明细（commit 后对象可能已过期）
+            result = await db.execute(
+                select(FinishedProductSaleV2)
+                .options(selectinload(FinishedProductSaleV2.products))
+                .where(FinishedProductSaleV2.id == sale.id)
+            )
+            fresh_sale = result.scalar_one()
+            await _auto_outbound_from_sale(db, fresh_sale)
+        except Exception as e:
+            # 出库失败不影响销售单创建，但记录日志
+            import logging
+            logging.getLogger(__name__).warning(f"销售单 {sale.sale_no} 自动出库失败: {e}")
+
     return {"success": True, "data": {"id": sale.id, "sale_no": sale.sale_no, "batch_no": batch_no}}
 
 
@@ -1364,7 +1443,7 @@ async def api_update_finished_sale(
         sale.paid = 1 if data["paid"] else 0
 
     # 费用/调整字段（触发自动重算）
-    cost_fields = ["discount", "scan_fee", "rounding", "after_sales_adjustment", "commission"]
+    cost_fields = ["discount", "scan_fee", "freight", "rounding", "after_sales_adjustment", "commission", "balance_adjustment"]
     recalc_needed = any(field in data for field in cost_fields)
     for field in cost_fields:
         if field in data:
@@ -1374,34 +1453,41 @@ async def api_update_finished_sale(
     # 自动重算 actual_amount / net_amount
     if recalc_needed:
         total = sale.total_amount or Decimal("0")
-        sale.actual_amount = total - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - (sale.rounding or Decimal("0"))
-        sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
+        freight = Decimal(str(data.get("freight", sale.freight or 0)))
+        sale.freight = freight
+        sale.actual_amount = total + freight - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - (sale.rounding or Decimal("0"))
+        sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0")) - (sale.balance_adjustment or Decimal("0"))
 
-    # 删除旧明细
-    old_products = await db.execute(
-        select(FinishedSaleProductV2).where(FinishedSaleProductV2.sale_id == sale_id)
-    )
-    for p in old_products.scalars().all():
-        await db.delete(p)
-
-    # 创建新明细
-    for p in data.get("products", []):
-        product = FinishedSaleProductV2(
-            sale_id=sale.id,
-            variant_id=p.get("variant_id"),
-            product_name=p.get("product_name"),
-            product_spec=p.get("product_spec", ""),
-            factory=p.get("factory"),
-            slaughter_date=_parse_date(p.get("slaughter_date")),
-            box_count=p.get("box_count", 0),
-            weight_kg=Decimal(str(p.get("weight_kg", 0))),
-            unit_price=Decimal(str(p.get("unit_price", 0))),
-            total_amount=Decimal(str(p.get("total_amount", 0))),
-            commission_rate=Decimal(str(p.get("commission_rate", 0))),
-            commission_amount=Decimal(str(p.get("commission_amount", 0))),
-            after_sales_adjustment=Decimal(str(p.get("after_sales_adjustment", 0))),
+    # 更新明细（仅在编辑时传入 products 才重建）
+    if "products" in data:
+        # 删除旧明细
+        old_products = await db.execute(
+            select(FinishedSaleProductV2).where(FinishedSaleProductV2.sale_id == sale_id)
         )
-        db.add(product)
+        for p in old_products.scalars().all():
+            await db.delete(p)
+
+        # 创建新明细
+        for p in data.get("products", []):
+            product = FinishedSaleProductV2(
+                sale_id=sale.id,
+                variant_id=p.get("variant_id"),
+                product_id=p.get("product_id"),
+                product_name=p.get("product_name"),
+                product_spec=p.get("product_spec", ""),
+                factory=p.get("factory"),
+                batch=p.get("batch"),
+                slaughter_date=_parse_date(p.get("slaughter_date")),
+                box_count=p.get("box_count", 0),
+                weight_kg=Decimal(str(p.get("weight_kg", 0))),
+                sale_unit=p.get("sale_unit"),
+                unit_price=Decimal(str(p.get("unit_price", 0))),
+                total_amount=Decimal(str(p.get("total_amount", 0))),
+                commission_rate=Decimal(str(p.get("commission_rate", 0))),
+                commission_amount=Decimal(str(p.get("commission_amount", 0))),
+                after_sales_adjustment=Decimal(str(p.get("after_sales_adjustment", 0))),
+            )
+            db.add(product)
 
     await db.commit()
     return {"success": True}
@@ -1464,12 +1550,63 @@ async def api_delete_finished_sale(
         sa_delete(FinishedProductAftersales).where(FinishedProductAftersales.sale_id == sale_id)
     )
 
-    # 5. 删除产品明细
+    # 5. 成品销售删除时回退库存（删除出库记录并恢复库存）
+    if sale.sale_type == "finished_product":
+        outbound_result = await db.execute(
+            select(StockOutbound).where(StockOutbound.dest_id == sale.id, StockOutbound.dest_type == "sale")
+        )
+        outbounds = outbound_result.scalars().all()
+        for outbound in outbounds:
+            # 恢复库存（优先匹配批次）
+            product = next((p for p in sale.products if p.product_id == outbound.product_id), None)
+            batch_no = product.batch if product else None
+            stock_query = select(Stock).where(Stock.warehouse_id == outbound.warehouse_id, Stock.product_id == outbound.product_id)
+            if batch_no:
+                stock_query = stock_query.where(Stock.batch_no == batch_no)
+            stock_result = await db.execute(stock_query)
+            stock = stock_result.scalar_one_or_none()
+            if stock:
+                stock.current_qty = stock.current_qty + outbound.qty
+                stock.available_qty = stock.available_qty + outbound.qty
+                stock.last_out_date = _date.today()
+
+            # 恢复入库记录剩余量（按批次匹配）
+            inbound_query = (
+                select(StockInbound)
+                .where(StockInbound.warehouse_id == outbound.warehouse_id)
+                .where(StockInbound.product_id == outbound.product_id)
+                .where(StockInbound.remaining_qty >= 0)
+            )
+            if batch_no:
+                inbound_query = inbound_query.where(StockInbound.batch_no == batch_no)
+            inbound_query = inbound_query.order_by(StockInbound.inbound_date.desc())
+            inbound_result = await db.execute(inbound_query)
+            inbounds = inbound_result.scalars().all()
+            remaining_to_restore = outbound.qty
+            for inbound in inbounds:
+                if remaining_to_restore <= 0:
+                    break
+                max_restore = (inbound.qty or Decimal("0")) - (inbound.remaining_qty or Decimal("0"))
+                if max_restore <= 0:
+                    continue
+                restore_qty = min(remaining_to_restore, max_restore)
+                inbound.remaining_qty = (inbound.remaining_qty or Decimal("0")) + restore_qty
+                remaining_to_restore = remaining_to_restore - restore_qty
+
+        # 删除该销售单关联的出库记录和库存变动记录
+        await db.execute(
+            sa_delete(StockOutbound).where(StockOutbound.dest_id == sale.id, StockOutbound.dest_type == "sale")
+        )
+        await db.execute(
+            sa_delete(StockMovement).where(StockMovement.ref_id == sale.id, StockMovement.ref_type == "finished_product_sale")
+        )
+
+    # 6. 删除产品明细
     await db.execute(
         sa_delete(FinishedSaleProductV2).where(FinishedSaleProductV2.sale_id == sale_id)
     )
 
-    # 6. 删除销售单
+    # 7. 删除销售单
     await db.delete(sale)
     await db.commit()
     return {"success": True}
@@ -1538,6 +1675,54 @@ async def api_batch_delete_finished_sales(
             await db.execute(
                 sa_delete(FinishedProductAftersales).where(FinishedProductAftersales.sale_id == sale_id)
             )
+
+            # 成品销售批量删除时回退库存
+            if sale.sale_type == "finished_product":
+                outbound_result = await db.execute(
+                    select(StockOutbound).where(StockOutbound.dest_id == sale.id, StockOutbound.dest_type == "sale")
+                )
+                outbounds = outbound_result.scalars().all()
+                for outbound in outbounds:
+                    product = next((p for p in sale.products if p.product_id == outbound.product_id), None)
+                    batch_no = product.batch if product else None
+                    stock_query = select(Stock).where(Stock.warehouse_id == outbound.warehouse_id, Stock.product_id == outbound.product_id)
+                    if batch_no:
+                        stock_query = stock_query.where(Stock.batch_no == batch_no)
+                    stock_result = await db.execute(stock_query)
+                    stock = stock_result.scalar_one_or_none()
+                    if stock:
+                        stock.current_qty = stock.current_qty + outbound.qty
+                        stock.available_qty = stock.available_qty + outbound.qty
+                        stock.last_out_date = _date.today()
+
+                    inbound_query = (
+                        select(StockInbound)
+                        .where(StockInbound.warehouse_id == outbound.warehouse_id)
+                        .where(StockInbound.product_id == outbound.product_id)
+                    )
+                    if batch_no:
+                        inbound_query = inbound_query.where(StockInbound.batch_no == batch_no)
+                    inbound_query = inbound_query.order_by(StockInbound.inbound_date.desc())
+                    inbound_result = await db.execute(inbound_query)
+                    inbounds = inbound_result.scalars().all()
+                    remaining_to_restore = outbound.qty
+                    for inbound in inbounds:
+                        if remaining_to_restore <= 0:
+                            break
+                        max_restore = (inbound.qty or Decimal("0")) - (inbound.remaining_qty if inbound.remaining_qty is not None else (inbound.qty or Decimal("0")))
+                        if max_restore <= 0:
+                            continue
+                        restore_qty = min(remaining_to_restore, max_restore)
+                        inbound.remaining_qty = (inbound.remaining_qty if inbound.remaining_qty is not None else inbound.qty) + restore_qty
+                        remaining_to_restore = remaining_to_restore - restore_qty
+
+                await db.execute(
+                    sa_delete(StockOutbound).where(StockOutbound.dest_id == sale.id, StockOutbound.dest_type == "sale")
+                )
+                await db.execute(
+                    sa_delete(StockMovement).where(StockMovement.ref_id == sale.id, StockMovement.ref_type == "finished_product_sale")
+                )
+
             await db.execute(
                 sa_delete(FinishedSaleProductV2).where(FinishedSaleProductV2.sale_id == sale_id)
             )
@@ -1619,7 +1804,7 @@ async def api_create_finished_sale_receipt(sale_id: int, data: dict, db: AsyncSe
         sale.rounding = (sale.rounding or Decimal("0")) + user_rounding
         # 抹零变化后重算 actual_amount / net_amount
         sale.actual_amount = sale.total_amount - (sale.discount or Decimal("0")) - (sale.scan_fee or Decimal("0")) - (sale.rounding or Decimal("0"))
-        sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0"))
+        sale.net_amount = sale.actual_amount - (sale.after_sales_adjustment or Decimal("0")) - (sale.commission or Decimal("0")) - (sale.balance_adjustment or Decimal("0"))
         await db.flush()
 
     receipt = FinishedProductReceipt(
@@ -1674,7 +1859,8 @@ async def api_create_finished_sale_receipt(sale_id: int, data: dict, db: AsyncSe
 
     # 更新付款状态
     net_amount = sale.net_amount or Decimal("0")
-    if paid_amount >= net_amount and net_amount > 0:
+    status_net = net_amount + (sale.balance_adjustment or Decimal("0"))
+    if paid_amount >= status_net and status_net > 0:
         sale.status = "paid"
         sale.paid = 1
     elif paid_amount > 0:
@@ -1706,6 +1892,13 @@ async def api_delete_finished_sale_receipt(sale_id: int, receipt_id: int, db: As
         .where(FinishedProductReceipt.id == receipt_id, FinishedProductReceipt.sale_v2_id == sale_id)
     )
     receipt = receipt_result.scalar_one_or_none()
+    if not receipt:
+        # 兼容旧数据：尝试按 sale_id（V1 成品销售）匹配
+        receipt_result = await db.execute(
+            select(FinishedProductReceipt)
+            .where(FinishedProductReceipt.id == receipt_id, FinishedProductReceipt.sale_id == sale_id)
+        )
+        receipt = receipt_result.scalar_one_or_none()
     if not receipt:
         raise HTTPException(status_code=404, detail="收款记录不存在")
 
@@ -1745,12 +1938,15 @@ async def api_delete_finished_sale_receipt(sale_id: int, receipt_id: int, db: As
     if sale:
         sale.paid_amount = paid_amount
         net_amount = sale.net_amount or Decimal("0")
-        if paid_amount >= net_amount and net_amount > 0:
+        status_net = net_amount + (sale.balance_adjustment or Decimal("0"))
+        if paid_amount >= status_net and status_net > 0:
             sale.status = "paid"
             sale.paid = 1
         elif paid_amount > 0:
+            sale.status = "partial_paid"
             sale.paid = 1
         else:
+            sale.status = "pending"
             sale.paid = 0
 
     await db.commit()

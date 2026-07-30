@@ -187,6 +187,7 @@ async def batch_collect_sales(
             sale_id=sale.id,
             receipt_date=data.collect_date,
             amount=allocated,
+            payable_amount=Decimal(str(sale.net_amount or 0)) - Decimal(str(sale.paid_amount or 0)),  # 创建时单据应付/待付金额
             payment_method=data.payment_method,
             bank_account_id=None if is_balance_payment else data.bank_account_id,
             notes="合并收款" + ("（余额抵扣）" if is_balance_payment else ""),

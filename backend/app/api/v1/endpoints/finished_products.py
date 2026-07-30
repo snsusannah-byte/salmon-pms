@@ -944,9 +944,9 @@ async def delete_variant(
 # ==================== 重构新增：Schemas ====================
 
 class ProductSeriesCreate(BaseModel):
-    code: str
+    code: str | None = None  # 为空时自动生成
     name: str
-    sort_order: int = 0
+    sort_order: int | None = None  # 为空时取最大值+1
     notes: str | None = None
 
 
@@ -970,7 +970,7 @@ class ProductSeriesResponse(BaseModel):
 
 
 class ProductSpecCreate(BaseModel):
-    code: str
+    code: str | None = None  # 为空时自动生成
     name: str
     parts_config: str | None = None
     total_weight_g: int | None = None
@@ -1080,11 +1080,28 @@ async def create_series(
     db: AsyncSession = Depends(get_db),
 ):
     """创建产品系列"""
-    existing = await db.execute(select(ProductSeries).where(ProductSeries.code == data.code))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail=f"系列编码 {data.code} 已存在")
+    # 自动编码：取现有系列中最大 id，生成 S{n}；若用户已填则校验唯一性
+    series_code = data.code
+    if not series_code:
+        max_id_result = await db.execute(select(func.max(ProductSeries.id)))
+        max_id = max_id_result.scalar() or 0
+        series_code = f"S{max_id + 1}"
 
-    series = ProductSeries(**data.model_dump())
+    existing = await db.execute(select(ProductSeries).where(ProductSeries.code == series_code))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail=f"系列编码 {series_code} 已存在")
+
+    # 自动排序：取最大值+1
+    sort_order = data.sort_order
+    if sort_order is None:
+        max_sort_result = await db.execute(select(func.max(ProductSeries.sort_order)))
+        max_sort = max_sort_result.scalar() or 0
+        sort_order = int(max_sort) + 1
+
+    create_data = data.model_dump(exclude={"code", "sort_order"})
+    create_data["code"] = series_code
+    create_data["sort_order"] = sort_order
+    series = ProductSeries(**create_data)
     db.add(series)
     await db.commit()
     await db.refresh(series)
@@ -1202,7 +1219,27 @@ async def create_spec(
     if not template:
         raise HTTPException(status_code=404, detail="模板不存在")
 
-    spec = ProductSpec(template_id=template_id, **data.model_dump())
+    # 自动生成规格编码：优先使用模板编码，冲突时追加 -1/-2...
+    spec_code = data.code
+    if not spec_code:
+        base = template.code or f"T{template_id}"
+        candidate = base
+        suffix = 0
+        existing_codes = {
+            c for c in (
+                await db.execute(
+                    select(ProductSpec.code).where(ProductSpec.template_id == template_id)
+                )
+            ).scalars().all()
+        }
+        while candidate in existing_codes:
+            suffix += 1
+            candidate = f"{base}-{suffix}"
+        spec_code = candidate
+
+    create_data = data.model_dump(exclude={"code"})
+    create_data["code"] = spec_code
+    spec = ProductSpec(template_id=template_id, **create_data)
     db.add(spec)
     await db.commit()
     await db.refresh(spec)

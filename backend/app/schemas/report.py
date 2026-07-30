@@ -153,6 +153,7 @@ class BatchReportDetail(BaseModel):
     total_commission: Decimal = Decimal("0")
     total_after_sales: Decimal = Decimal("0")
     total_discount: Decimal = Decimal("0")
+    total_balance_adjustment: Decimal = Decimal("0")
     sales_count: int = 0
 
     # 利润
@@ -333,13 +334,42 @@ class ReceivableSaleItem(BaseModel):
     date: date
     sale_no: str
     product_name: str | None = None  # 产品名称
-    batch_no: str | None = None      # 批次号
+    batch_name: str | None = None      # 批次名称
+    slaughter_date: date | None = None  # 宰杀日期（批次关联发票中最早）
+    processing_plant_code: str | None = None  # 加工厂EU编号
     spec: str | None = None
     quantity: int | None = None
     weight_kg: Decimal | None = None
     unit_price: Decimal | None = None
     gross_amount: Decimal = Decimal("0")
+    after_sales_adjustment: Decimal = Decimal("0")  # 售后扣减
+    discount: Decimal = Decimal("0")  # 折扣
     net_amount: Decimal = Decimal("0")
+
+
+class PayablePurchaseItem(BaseModel):
+    """应付对账 - 采购明细（进口采购用）"""
+    model_config = ConfigDict(from_attributes=True)
+    date: date
+    invoice_no: str
+    product_name: str | None = None  # 产品名称
+    spec: str | None = None          # 规格
+    batch_no: str | None = None      # 批次号
+    quantity: int | None = None      # 数量
+    weight_kg: Decimal | None = None # 重量(kg)
+    unit_price: Decimal | None = None # 单价
+    amount_usd: Decimal = Decimal("0")
+    exchange_rate: Decimal | None = None
+    amount_cny: Decimal = Decimal("0")
+    after_sales_adjustment: Decimal = Decimal("0")  # 采购售后扣减
+    # 进口商信息（仅进口采购用）
+    importer_name: str | None = None  # 进口商名称
+    # 购汇关联信息
+    exchange_status: str | None = None  # not_exchanged / exchanged / partial
+    exchange_no: str | None = None  # 购汇单号
+    exchange_date: date | None = None  # 购汇日期
+    exchange_rate_actual: Decimal | None = None  # 实际购汇汇率
+    amount_usd_exchanged: Decimal | None = None  # 已购汇 USD 金额
 
 
 class ReceivableDiscountItem(BaseModel):
@@ -371,6 +401,8 @@ class ReceivableReceiptItem(BaseModel):
     amount: Decimal = Decimal("0")
     payment_method: str | None = None
     reference_no: str | None = None
+    is_batch_collect: bool = False  # 是否合并收款
+    related_sales: list[dict] = []  # 关联销售单 [{sale_no, amount, payable_amount}]
 
 
 class ReceivableCustomerItem(BaseModel):
@@ -444,30 +476,6 @@ class PayableSupplierItem(BaseModel):
     debit: Decimal = Decimal("0")  # 应付增加（采购/费用）
     credit: Decimal = Decimal("0")  # 应付减少（付款）
     balance: Decimal = Decimal("0")  # 累计余额
-
-
-class PayablePurchaseItem(BaseModel):
-    """应付对账 - 采购明细（进口采购用）"""
-    model_config = ConfigDict(from_attributes=True)
-    date: date
-    invoice_no: str
-    product_name: str | None = None  # 产品名称
-    spec: str | None = None          # 规格
-    batch_no: str | None = None      # 批次号
-    quantity: int | None = None      # 数量
-    weight_kg: Decimal | None = None # 重量(kg)
-    unit_price: Decimal | None = None # 单价
-    amount_usd: Decimal = Decimal("0")
-    exchange_rate: Decimal | None = None
-    amount_cny: Decimal = Decimal("0")
-    # 进口商信息（仅进口采购用）
-    importer_name: str | None = None  # 进口商名称
-    # 购汇关联信息
-    exchange_status: str | None = None  # not_exchanged / exchanged / partial
-    exchange_no: str | None = None  # 购汇单号
-    exchange_date: date | None = None  # 购汇日期
-    exchange_rate_actual: Decimal | None = None  # 实际购汇汇率
-    amount_usd_exchanged: Decimal | None = None  # 已购汇 USD 金额
 
 
 class NettingPaymentItem(BaseModel):
@@ -677,6 +685,7 @@ class NettingStatementItem(BaseModel):
     purchase_details: list[PayablePurchaseItem] = []
     payment_details: list[NettingPaymentItem] = []  # 收支明细
     expense_details: list[PayableExpenseItem] = []
+    purchase_return_details: list[dict] = []  # 采购售后明细
 
 
 class NettingStatementResponse(BaseModel):

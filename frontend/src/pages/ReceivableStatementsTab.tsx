@@ -50,12 +50,12 @@ export function ReceivableStatementsTab() {
     queryKey: ["customers-list"],
     queryFn: async () => {
       const res = await api.get("/v1/companies/?limit=500");
-      return (res.data?.items || []) as { id: number; name: string; code?: string; type?: string }[];
+      return Array.isArray(res.data?.items) ? res.data.items : [] as { id: number; name: string; code?: string; type?: string }[];
     },
   });
 
   const filteredCustomers = useMemo(() => {
-    if (!customers) return [];
+    if (!Array.isArray(customers)) return [];
     if (!customerSearch.trim()) return customers;
     return customers.filter(c =>
       c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
@@ -64,11 +64,12 @@ export function ReceivableStatementsTab() {
   }, [customers, customerSearch]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["reports-receivable", startDate, endDate, doSearch],
+    queryKey: ["reports-receivable", startDate, endDate, selectedCustomerId, doSearch],
     queryFn: async () => {
       const params = new URLSearchParams({ skip: "0", limit: "500" });
       if (startDate) params.set("start_date", startDate);
       if (endDate) params.set("end_date", endDate);
+      if (selectedCustomerId) params.set("customer_id", selectedCustomerId);
       const res = await api.get(`/v1/reports/receivable-statements?${params}`);
       return res.data as {
         total: number;
@@ -270,6 +271,9 @@ export function ReceivableStatementsTab() {
                             <TableRow className="bg-muted/20">
                               <TableHead className="text-xs py-1.5">日期</TableHead>
                               <TableHead className="text-xs py-1.5">销售单号</TableHead>
+                              <TableHead className="text-xs py-1.5">批次名称</TableHead>
+                              <TableHead className="text-xs py-1.5">宰杀日期</TableHead>
+                              <TableHead className="text-xs py-1.5">加工厂(EU)</TableHead>
                               <TableHead className="text-xs py-1.5">规格</TableHead>
                               <TableHead className="text-xs py-1.5 text-right">数量</TableHead>
                               <TableHead className="text-xs py-1.5 text-right">重量(kg)</TableHead>
@@ -281,13 +285,16 @@ export function ReceivableStatementsTab() {
                           <TableBody>
                             {(activeItem.sale_details || []).length === 0 ? (
                               <TableRow className="print-empty">
-                                <TableCell colSpan={8} className="text-xs text-center text-muted-foreground py-2">无销售明细</TableCell>
+                                <TableCell colSpan={11} className="text-xs text-center text-muted-foreground py-2">无销售明细</TableCell>
                               </TableRow>
                             ) : (
                               (activeItem.sale_details || []).map((d: any, idx: number) => (
                                 <TableRow key={idx}>
                                   <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
                                   <TableCell className="text-xs py-1.5">{d.sale_no}</TableCell>
+                                  <TableCell className="text-xs py-1.5">{d.batch_name || "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5">{d.slaughter_date ? fmtDate(d.slaughter_date) : "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5">{d.processing_plant_code || "-"}</TableCell>
                                   <TableCell className="text-xs py-1.5">{d.spec || "-"}</TableCell>
                                   <TableCell className="text-xs py-1.5 text-right">{d.quantity != null ? d.quantity : "-"}</TableCell>
                                   <TableCell className="text-xs py-1.5 text-right">{d.weight_kg ? Number(d.weight_kg).toFixed(2) : "-"}</TableCell>
@@ -298,7 +305,7 @@ export function ReceivableStatementsTab() {
                               ))
                             )}
                             <TableRow className="bg-muted/30 font-medium">
-                              <TableCell className="text-xs py-1.5" colSpan={3}>销售合计</TableCell>
+                              <TableCell className="text-xs py-1.5" colSpan={6}>销售合计</TableCell>
                               <TableCell className="text-xs py-1.5 text-right">{(activeItem.sale_details || []).reduce((sum: number, d: any) => sum + (Number(d.quantity) || 0), 0)}</TableCell>
                               <TableCell className="text-xs py-1.5 text-right">{(activeItem.sale_details || []).reduce((sum: number, d: any) => sum + (Number(d.weight_kg) || 0), 0).toFixed(2)}</TableCell>
                               <TableCell className="text-xs py-1.5"></TableCell>
@@ -310,37 +317,56 @@ export function ReceivableStatementsTab() {
                       </div>
                     </div>
 
-                    {/* 折扣明细 */}
+                    {/* 折扣/账平明细 */}
                     <div className="space-y-1">
-                      <h4 className="text-sm font-medium">折扣明细</h4>
+                      <h4 className="text-sm font-medium">折扣/账平明细</h4>
                       <div className="border rounded-md">
                         <Table>
                           <TableHeader>
                             <TableRow className="bg-muted/20">
                               <TableHead className="text-xs py-1.5">日期</TableHead>
                               <TableHead className="text-xs py-1.5">销售单号</TableHead>
-                              <TableHead className="text-xs py-1.5 text-right">折扣金额</TableHead>
+                              <TableHead className="text-xs py-1.5 text-right">金额</TableHead>
                               <TableHead className="text-xs py-1.5">原因</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {(activeItem.discount_details || []).length === 0 ? (
                               <TableRow className="print-empty">
-                                <TableCell colSpan={4} className="text-xs text-center text-muted-foreground py-2">无折扣明细</TableCell>
+                                <TableCell colSpan={4} className="text-xs text-center text-muted-foreground py-2">无折扣/账平明细</TableCell>
                               </TableRow>
                             ) : (
-                              (activeItem.discount_details || []).map((d: any, idx: number) => (
-                                <TableRow key={idx}>
-                                  <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
-                                  <TableCell className="text-xs py-1.5">{d.sale_no}</TableCell>
-                                  <TableCell className="text-xs py-1.5 text-right">{fmt$(d.discount_amount)}</TableCell>
-                                  <TableCell className="text-xs py-1.5">{d.reason || "-"}</TableCell>
-                                </TableRow>
-                              ))
+                              (activeItem.discount_details || []).map((d: any, idx: number) => {
+                                const amt = Number(d.discount_amount) || 0;
+                                return (
+                                  <TableRow key={idx}>
+                                    <TableCell className="text-xs py-1.5">{fmtDate(d.date)}</TableCell>
+                                    <TableCell className="text-xs py-1.5">{d.sale_no}</TableCell>
+                                    <TableCell className={cn("text-xs py-1.5 text-right", amt > 0 ? "text-red-500" : amt < 0 ? "text-blue-500" : "text-muted-foreground")}>
+                                      {amt !== 0 ? (
+                                        <>
+                                          {amt > 0 ? "-" : "+"}
+                                          ¥{Math.abs(amt).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </>
+                                      ) : "-"}
+                                    </TableCell>
+                                    <TableCell className="text-xs py-1.5">{d.reason || "-"}</TableCell>
+                                  </TableRow>
+                                );
+                              })
                             )}
                             <TableRow className="bg-muted/30 font-medium">
-                              <TableCell className="text-xs py-1.5" colSpan={2}>折扣合计</TableCell>
-                              <TableCell className="text-xs py-1.5 text-right">{fmt$((activeItem.discount_details || []).reduce((sum: number, d: any) => sum + (Number(d.discount_amount) || 0), 0))}</TableCell>
+                              <TableCell className="text-xs py-1.5" colSpan={2}>合计</TableCell>
+                              <TableCell className={cn("text-xs py-1.5 text-right", (() => {
+                                const total = (activeItem.discount_details || []).reduce((sum: number, d: any) => sum + (Number(d.discount_amount) || 0), 0);
+                                return total > 0 ? "text-red-500" : total < 0 ? "text-blue-500" : "text-muted-foreground";
+                              })())}>
+                                {(() => {
+                                  const total = (activeItem.discount_details || []).reduce((sum: number, d: any) => sum + (Number(d.discount_amount) || 0), 0);
+                                  if (total === 0) return "-";
+                                  return `${total > 0 ? "-" : "+"}¥${Math.abs(total).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                })()}
+                              </TableCell>
                               <TableCell className="text-xs py-1.5"></TableCell>
                             </TableRow>
                           </TableBody>
@@ -439,9 +465,30 @@ export function ReceivableStatementsTab() {
                                      d.payment_method === 'alipay' ? '支付宝' :
                                      d.payment_method === 'check' ? '支票' :
                                      d.payment_method === 'card' ? '刷卡' :
+                                     d.payment_method === 'batch_collect' ? '合并收款' :
                                      d.payment_method || '-'}
                                   </TableCell>
-                                  <TableCell className="text-xs py-1.5 ">{d.reference_no || "-"}</TableCell>
+                                  <TableCell className="text-xs py-1.5 ">
+                                    {d.is_batch_collect && d.related_sales?.length > 0 ? (
+                                      <div className="space-y-0.5">
+                                        <div className="font-medium text-xs text-blue-600">{d.reference_no}</div>
+                                        {d.related_sales.map((s: any, i: number) => (
+                                          <div key={i} className="text-xs text-muted-foreground">
+                                            {s.sale_no} · 实收 {fmt$(s.amount)} · 应付 {fmt$(s.payable_amount)}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : d.payment_method === 'prepayment' && d.related_sales?.length > 0 ? (
+                                      <div className="space-y-0.5">
+                                        <div className="font-medium text-xs text-blue-600">{d.reference_no}</div>
+                                        {d.related_sales.map((s: any, i: number) => (
+                                          <div key={i} className="text-xs text-muted-foreground">
+                                            {s.sale_no} · 实收 {fmt$(s.amount)} · 应付 {fmt$(s.payable_amount)}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (d.reference_no || "-")}
+                                  </TableCell>
                                 </TableRow>
                               ))
                             )}

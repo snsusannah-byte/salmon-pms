@@ -8,6 +8,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -30,13 +31,15 @@ from app.models import (
     ImportTax,
     InvoiceProduct,
     MaterialPurchaseOrder,
+    Product,
     PurchaseOrder,
+    PurchaseOrderItem,
     PurchaseOrderV2,
+    PurchaseReturnOrder,
     ReturnItem,
     ReturnOrder,
     SalesReceipt,
     TransactionRecord,
-    User,
     WholeFishSale,
 )
 from app.schemas.report import (
@@ -55,6 +58,7 @@ from app.schemas.report import (
     InvoiceReportListResponse,
     InvoiceReportSummaryItem,
     InvoiceSaleDetail,
+    NettingPaymentItem,
     NettingStatementItem,
     NettingStatementResponse,
     PayableExchangeItem,
@@ -372,6 +376,7 @@ async def _calculate_invoice_report_data(
     total_commission = Decimal("0")
     total_after_sales = Decimal("0")
     total_discount = Decimal("0")
+    total_balance_adjustment = Decimal("0")
     sales_count = 0
 
     if include_sales and batch_id:
@@ -393,6 +398,7 @@ async def _calculate_invoice_report_data(
             total_rounding += _to_decimal(sale.rounding_adjustment)
             total_after_sales += _to_decimal(sale.after_sales_adjustment)
             total_discount += _to_decimal(sale.discount)
+            total_balance_adjustment += _to_decimal(sale.balance_adjustment)
             sales_count += 1
 
             sales_data.append({
@@ -408,6 +414,7 @@ async def _calculate_invoice_report_data(
                 "commission": _to_decimal(sale.commission),
                 "after_sales_adjustment": _to_decimal(sale.after_sales_adjustment),
                 "discount": _to_decimal(sale.discount),
+                "balance_adjustment": _to_decimal(sale.balance_adjustment),
                 "net_amount": _to_decimal(sale.net_amount),
             })
 
@@ -488,6 +495,7 @@ async def _calculate_invoice_report_data(
         "total_commission": total_commission,
         "total_after_sales": total_after_sales,
         "total_discount": total_discount,
+        "total_balance_adjustment": total_balance_adjustment,
         "sales_count": sales_count,
         "sales_data": sales_data,
 
@@ -662,6 +670,7 @@ async def list_batch_reports(
                 - _to_decimal(sale.rounding_adjustment)
                 - _to_decimal(sale.after_sales_adjustment)
                 - _to_decimal(sale.discount)
+                - _to_decimal(sale.balance_adjustment)
             )
 
         # 从 CommissionRecord 表查询提成（仅用于显示）
@@ -1061,6 +1070,7 @@ async def _calc_batch_financials(db: AsyncSession, batch) -> dict:
     total_commission = Decimal("0")
     total_after_sales = Decimal("0")
     total_discount = Decimal("0")
+    total_balance_adjustment = Decimal("0")
     sales_count = 0
 
     sales_data = []
@@ -1082,6 +1092,7 @@ async def _calc_batch_financials(db: AsyncSession, batch) -> dict:
         total_rounding += _to_decimal(sale.rounding_adjustment)
         total_after_sales += _to_decimal(sale.after_sales_adjustment)
         total_discount += _to_decimal(sale.discount)
+        total_balance_adjustment += _to_decimal(sale.balance_adjustment)
         sales_count += 1
 
         sales_data.append({
@@ -1107,6 +1118,7 @@ async def _calc_batch_financials(db: AsyncSession, batch) -> dict:
         - total_rounding
         - total_after_sales
         - total_discount
+        - total_balance_adjustment
     )
 
     # 其他支出（通过交易流水关联到该批次发票的额外支出）
@@ -1198,6 +1210,7 @@ async def _calc_batch_financials(db: AsyncSession, batch) -> dict:
         "total_commission": total_commission,
         "total_after_sales": total_after_sales,
         "total_discount": total_discount,
+        "total_balance_adjustment": total_balance_adjustment,
         "sales_count": sales_count,
         "total_other_expenses": total_other_expenses,
         "total_clearance_extra": total_clearance_extra,
@@ -1251,6 +1264,7 @@ async def get_batch_report(
     total_commission = data["total_commission"]
     total_after_sales = data["total_after_sales"]
     total_discount = data["total_discount"]
+    total_balance_adjustment = data["total_balance_adjustment"]
     sales_count = data["sales_count"]
     total_other_expenses = data["total_other_expenses"]
     total_clearance_extra = data["total_clearance_extra"]
@@ -1399,6 +1413,7 @@ async def get_batch_report(
         total_commission=round(total_commission, 2),
         total_after_sales=round(total_after_sales, 2),
         total_discount=round(total_discount, 2),
+        total_balance_adjustment=round(total_balance_adjustment, 2),
         sales_count=sales_count,
         total_expenses=round(total_expenses, 2),
         total_other_expenses=round(total_other_expenses, 2),
@@ -1824,6 +1839,10 @@ async def list_receivable_statements(
     """
     from datetime import datetime as _dt
 
+    def _txn_date(receipt):
+        """优先使用交易流水日期，更准确（支持用户修改后同步）"""
+        return receipt.transaction.transaction_date if receipt.transaction else receipt.receipt_date
+
     # 获取有销售记录的公司列表（不再限定 type == "customer"，支持既是供应商又是客户的场景）
     from sqlalchemy import distinct
     sale_company_ids_result = await db.execute(
@@ -1875,10 +1894,40 @@ async def list_receivable_statements(
         # ========== 整鱼销售 ==========
         sales_result = await db.execute(
             select(WholeFishSale)
+            .options(selectinload(WholeFishSale.items))
             .where(WholeFishSale.customer_id == customer.id)
             .order_by(WholeFishSale.sale_date)
         )
         all_wf_sales = sales_result.scalars().all()
+
+        # 整鱼销售的批次名称、宰杀日期、加工厂EU编号
+        wf_batch_ids = {s.batch_id for s in all_wf_sales if s.batch_id}
+        wf_batch_map = {}
+        wf_batch_extra = {}
+        if wf_batch_ids:
+            batch_result = await db.execute(select(Batch.id, Batch.batch_name).where(Batch.id.in_(wf_batch_ids)))
+            wf_batch_map = {r[0]: r[1] for r in batch_result.all()}
+
+            batch_extra_result = await db.execute(
+                select(BatchInvoice.batch_id, ImportInvoice.kill_date, Company.code)
+                .join(ImportInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
+                .join(Company, ImportInvoice.processing_plant_id == Company.id, isouter=True)
+                .where(BatchInvoice.batch_id.in_(wf_batch_ids))
+            )
+            batch_extra_raw = {}
+            for batch_id, kill_date, plant_code in batch_extra_result.all():
+                d = batch_extra_raw.setdefault(batch_id, {"kill_dates": [], "plant_codes": []})
+                if kill_date:
+                    d["kill_dates"].append(kill_date)
+                if plant_code:
+                    d["plant_codes"].append(plant_code)
+            wf_batch_extra = {
+                bid: {
+                    "slaughter_date": min(d["kill_dates"]) if d["kill_dates"] else None,
+                    "processing_plant_code": d["plant_codes"][0] if d["plant_codes"] else None,
+                }
+                for bid, d in batch_extra_raw.items()
+            }
 
         # 成品销售
         fp_sales_result = await db.execute(
@@ -1891,6 +1940,7 @@ async def list_receivable_statements(
         # 以销定采 V2 销售单（按客户名称匹配）
         fp_v2_sales_result = await db.execute(
             select(FinishedProductSaleV2)
+            .options(selectinload(FinishedProductSaleV2.products))
             .where(FinishedProductSaleV2.customer == customer.name)
             .order_by(FinishedProductSaleV2.sale_date)
         )
@@ -1899,6 +1949,7 @@ async def list_receivable_statements(
         # 整鱼收款
         wf_receipts_result = await db.execute(
             select(SalesReceipt)
+            .options(selectinload(SalesReceipt.transaction))
             .join(WholeFishSale, SalesReceipt.sale_id == WholeFishSale.id)
             .where(WholeFishSale.customer_id == customer.id)
             .order_by(SalesReceipt.receipt_date)
@@ -1908,6 +1959,7 @@ async def list_receivable_statements(
         # 成品收款（旧版）
         fp_receipts_result = await db.execute(
             select(FinishedProductReceipt)
+            .options(selectinload(FinishedProductReceipt.transaction))
             .join(FinishedProductSale, FinishedProductReceipt.sale_id == FinishedProductSale.id)
             .where(FinishedProductSale.customer_id == customer.id)
             .order_by(FinishedProductReceipt.receipt_date)
@@ -1917,6 +1969,7 @@ async def list_receivable_statements(
         # 以销定采 V2 收款
         fp_v2_receipts_result = await db.execute(
             select(FinishedProductReceipt)
+            .options(selectinload(FinishedProductReceipt.transaction))
             .join(FinishedProductSaleV2, FinishedProductReceipt.sale_v2_id == FinishedProductSaleV2.id)
             .where(FinishedProductSaleV2.customer == customer.name)
             .order_by(FinishedProductReceipt.receipt_date)
@@ -1955,24 +2008,86 @@ async def list_receivable_statements(
         )
         all_return_orders = return_orders_result.scalars().all()
 
-        # 如果没有数据，跳过
-        if not all_wf_sales and not all_fp_sales and not all_fp_v2_sales and not all_wf_receipts and not all_fp_receipts and not all_fp_v2_receipts:
+        # 售后退款交易流水（提前查询，期初计算需要）
+        refund_tx_result = await db.execute(
+            select(TransactionRecord)
+            .where(TransactionRecord.counterparty_id == customer.id)
+            .where(TransactionRecord.type == "expense")
+            .where(TransactionRecord.category == "sales_refund")
+        )
+        refund_txs = refund_tx_result.scalars().all()
+
+        # 客户预付款交易流水（提前查询，期初计算需要）
+        prepayment_tx_result = await db.execute(
+            select(TransactionRecord)
+            .where(TransactionRecord.counterparty_id == customer.id)
+            .where(TransactionRecord.type == "income")
+            .where(TransactionRecord.category == "customer_deposit")
+            .where(TransactionRecord.is_confirmed.is_(True))
+        )
+        prepayment_txs = prepayment_tx_result.scalars().all()
+
+        # 如果没有销售和收款数据，但有退款或预付款数据，仍然处理（客户可能只有退款/预付款记录）
+        if not all_wf_sales and not all_fp_sales and not all_fp_v2_sales and not all_wf_receipts and not all_fp_receipts and not all_fp_v2_receipts and not refund_txs and not all_return_orders and not prepayment_txs:
             continue
 
-        # ========== 期初欠款（截至start之前，pending/partial_paid 的应收）==========
+        # ========== 期初欠款（截至start之前的应收余额）==========
+        # 正确计算：期初之前的销售净额 - 期初之前的收款 + 期初之前的退款
         opening_balance = Decimal("0")
         if start:
+            # 期初之前的销售净额
             for s in all_wf_sales:
-                if s.status in ("pending", "partial_paid") and s.sale_date < start:
-                    opening_balance += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
+                if s.sale_date < start:
+                    opening_balance += _to_decimal(s.net_amount)
             for s in all_fp_sales:
-                if s.status in ("pending", "partial_paid") and s.sale_date < start:
-                    opening_balance += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
+                if s.sale_date < start:
+                    opening_balance += _to_decimal(s.net_amount)
             for s in all_fp_v2_sales:
-                # V2 的 status 是字符串，paid 是 int
-                is_unpaid = s.status in ("pending", "partial_paid") or (s.status == "ordered" and not s.paid)
-                if is_unpaid and s.sale_date < start:
-                    opening_balance += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount or 0))
+                if s.sale_date < start:
+                    opening_balance += _to_decimal(s.net_amount)
+            
+            # 期初之前的收款（使用 _txn_date 优先取交易流水日期，合并收款去重）
+            processed_opening_txns = set()
+            for r in all_wf_receipts:
+                if _txn_date(r) < start:
+                    if r.transaction_id:
+                        if r.transaction_id not in processed_opening_txns:
+                            processed_opening_txns.add(r.transaction_id)
+                            opening_balance -= _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                    else:
+                        opening_balance -= _to_decimal(r.amount)
+            for r in all_fp_receipts:
+                if _txn_date(r) < start:
+                    if r.transaction_id:
+                        if r.transaction_id not in processed_opening_txns:
+                            processed_opening_txns.add(r.transaction_id)
+                            opening_balance -= _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                    else:
+                        opening_balance -= _to_decimal(r.amount)
+            for r in all_fp_v2_receipts:
+                if _txn_date(r) < start:
+                    if r.transaction_id:
+                        if r.transaction_id not in processed_opening_txns:
+                            processed_opening_txns.add(r.transaction_id)
+                            opening_balance -= _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                    else:
+                        opening_balance -= _to_decimal(r.amount)
+            
+            # 期初之前的预付款（预付款也冲减应收）
+            for txn in prepayment_txs:
+                if txn.transaction_date < start:
+                    opening_balance -= _to_decimal(txn.amount)
+            
+            # 期初之前的退款（退款会增加应收，即减少已收）
+            for tx in refund_txs:
+                if tx.transaction_date < start:
+                    opening_balance += _to_decimal(tx.amount)
+            for r in all_return_orders:
+                if r.return_date < start and r.refund_method and r.refund_method.value == "direct_refund":
+                    # 已生成交易流水的退货退款在 refund_txs 中已统计，避免重复
+                    if r.transaction_id:
+                        continue
+                    opening_balance += _to_decimal(r.refund_amount)
 
         # ========== 本期销售（期间内所有销售金额 gross_amount 合计）==========
         current_sales = Decimal("0")
@@ -2008,30 +2123,52 @@ async def list_receivable_statements(
                     current_aftersales += _to_decimal(sale.after_sales_adjustment)
 
         # ========== 本期收款 ==========
-        # 实际收款 = 所有 receipt - 售后退款（避免重复）
+        # 实际收款 = 所有 receipt（不含balance，合并收款去重） - 售后退款
         total_receipts = Decimal("0")
+        processed_current_txns = set()
         for r in all_wf_receipts:
-            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
-                total_receipts += _to_decimal(r.amount)
+            if r.payment_method != 'balance' and (start is None or _txn_date(r) >= start) and (end is None or _txn_date(r) <= end):
+                if r.transaction_id:
+                    if r.transaction_id not in processed_current_txns:
+                        processed_current_txns.add(r.transaction_id)
+                        total_receipts += _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                else:
+                    total_receipts += _to_decimal(r.amount)
         for r in all_fp_receipts:
-            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
-                total_receipts += _to_decimal(r.amount)
+            if r.payment_method != 'balance' and (start is None or _txn_date(r) >= start) and (end is None or _txn_date(r) <= end):
+                if r.transaction_id:
+                    if r.transaction_id not in processed_current_txns:
+                        processed_current_txns.add(r.transaction_id)
+                        total_receipts += _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                else:
+                    total_receipts += _to_decimal(r.amount)
         for r in all_fp_v2_receipts:
-            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
-                total_receipts += _to_decimal(r.amount)
+            if r.payment_method != 'balance' and (start is None or _txn_date(r) >= start) and (end is None or _txn_date(r) <= end):
+                if r.transaction_id:
+                    if r.transaction_id not in processed_current_txns:
+                        processed_current_txns.add(r.transaction_id)
+                        total_receipts += _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                else:
+                    total_receipts += _to_decimal(r.amount)
 
-        # 售后退款（只减去有交易流水记录的退款，如 sales_refund）
-        refund_tx_result = await db.execute(
-            select(TransactionRecord)
-            .where(TransactionRecord.counterparty_id == customer.id)
-            .where(TransactionRecord.type == "expense")
-            .where(TransactionRecord.category == "sales_refund")
-        )
-        refund_txs = refund_tx_result.scalars().all()
-        total_refunds = sum(
-            _to_decimal(tx.amount) for tx in refund_txs
-            if (start is None or tx.transaction_date >= start) and (end is None or tx.transaction_date <= end)
-        )
+        # 售后退款（已提前查询 refund_txs）
+        total_refunds = Decimal("0")
+        for tx in refund_txs:
+            if (start is None or tx.transaction_date >= start) and (end is None or tx.transaction_date <= end):
+                total_refunds += _to_decimal(tx.amount)
+        # ReturnOrder 的直接退款也计入退款（未走交易流水的情况）
+        for r in all_return_orders:
+            if (start is None or r.return_date >= start) and (end is None or r.return_date <= end):
+                if r.refund_method and r.refund_method.value == "direct_refund":
+                    # 已生成交易流水的退货退款在 refund_txs 中已统计，避免重复
+                    if r.transaction_id:
+                        continue
+                    total_refunds += _to_decimal(r.refund_amount)
+
+        # 预付款也计入本期收款（冲减应收）
+        for txn in prepayment_txs:
+            if (start is None or txn.transaction_date >= start) and (end is None or txn.transaction_date <= end):
+                total_receipts += _to_decimal(txn.amount)
 
         current_receipts = total_receipts - total_refunds
 
@@ -2041,6 +2178,8 @@ async def list_receivable_statements(
             if (start is None or sale.sale_date >= start) and (end is None or sale.sale_date <= end):
                 if sale.discount and sale.discount > 0:
                     current_discount += _to_decimal(sale.discount)
+                if sale.balance_adjustment:
+                    current_discount += _to_decimal(sale.balance_adjustment)
         for sale in all_fp_sales:
             if (start is None or sale.sale_date >= start) and (end is None or sale.sale_date <= end):
                 if sale.discount and sale.discount > 0:
@@ -2049,19 +2188,13 @@ async def list_receivable_statements(
             if (start is None or sale.sale_date >= start) and (end is None or sale.sale_date <= end):
                 if sale.discount and sale.discount > 0:
                     current_discount += _to_decimal(sale.discount)
+                if sale.balance_adjustment:
+                    current_discount += _to_decimal(sale.balance_adjustment)
 
-        # ========== 期末欠款（只统计 pending/partial_paid 的应收）==========
-        closing_balance = Decimal("0")
-        for s in all_wf_sales:
-            if s.status in ("pending", "partial_paid"):
-                closing_balance += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
-        for s in all_fp_sales:
-            if s.status in ("pending", "partial_paid"):
-                closing_balance += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
-        for s in all_fp_v2_sales:
-            is_unpaid = s.status in ("pending", "partial_paid") or (s.status == "ordered" and not s.paid)
-            if is_unpaid:
-                closing_balance += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount or 0))
+        # ========== 期末欠款（基于期初+本期净额-本期收款推导，不重新遍历所有单据）==========
+        # 勾稽关系：期末 = 期初 + 本期净额 - 本期收款
+        # 其中 after_sales_adjustment 和 discount 已包含在 net_amount 中
+        closing_balance = opening_balance + current_net_sales - current_receipts
 
         # 验证勾稽关系：期末 ≈ 期初 + 本期销售 - 本期收款 - 本期售后 - 本期折扣
         # （允许微小差异，因为 after_sales_adjustment 已包含在 net 中，而 ReturnOrder 是额外的）
@@ -2279,40 +2412,126 @@ async def list_receivable_statements(
         # 销售明细
         for sale in all_wf_sales:
             if (start is None or sale.sale_date >= start) and (end is None or sale.sale_date <= end):
-                sale_details.append(ReceivableSaleItem(
-                    date=sale.sale_date,
-                    sale_no=sale.sale_no,
-                    spec=sale.spec,
-                    quantity=sale.box_count,
-                    weight_kg=sale.weight_kg,
-                    unit_price=sale.unit_price,
-                    gross_amount=_to_decimal(sale.gross_amount),
-                    net_amount=_to_decimal(sale.net_amount),
-                ))
+                batch_extra = wf_batch_extra.get(sale.batch_id, {})
+                wf_items = sale.items or []
+                if wf_items:
+                    total_gross = sum(_to_decimal(item.amount) for item in wf_items)
+                    sale_net = _to_decimal(sale.net_amount)
+                    net_ratio = sale_net / total_gross if total_gross else Decimal("0")
+                    total_after = _to_decimal(sale.after_sales_adjustment)
+                    total_discount = _to_decimal(sale.discount)
+                    cumulative_net = Decimal("0")
+                    for i, item in enumerate(wf_items):
+                        item_amount = _to_decimal(item.amount)
+                        if i == len(wf_items) - 1:
+                            item_net = sale_net - cumulative_net
+                        else:
+                            item_net = round(item_amount * net_ratio, 2)
+                            cumulative_net += item_net
+                        ratio = item_amount / total_gross if total_gross else Decimal("0")
+                        item_after = total_after * ratio
+                        item_discount = total_discount * ratio
+                        sale_details.append(ReceivableSaleItem(
+                            date=sale.sale_date,
+                            sale_no=sale.sale_no,
+                            product_name="三文鱼",
+                            batch_name=wf_batch_map.get(sale.batch_id),
+                            slaughter_date=batch_extra.get("slaughter_date"),
+                            processing_plant_code=batch_extra.get("processing_plant_code"),
+                            spec=item.spec,
+                            quantity=item.box_count,
+                            weight_kg=item.weight_kg,
+                            unit_price=item.unit_price,
+                            gross_amount=item_amount,
+                            after_sales_adjustment=round(item_after, 2),
+                            discount=round(item_discount, 2),
+                            net_amount=round(item_net, 2),
+                        ))
+                else:
+                    sale_details.append(ReceivableSaleItem(
+                        date=sale.sale_date,
+                        sale_no=sale.sale_no,
+                        product_name="三文鱼",
+                        batch_name=wf_batch_map.get(sale.batch_id),
+                        slaughter_date=batch_extra.get("slaughter_date"),
+                        processing_plant_code=batch_extra.get("processing_plant_code"),
+                        spec=sale.spec,
+                        quantity=sale.box_count,
+                        weight_kg=sale.weight_kg,
+                        unit_price=sale.unit_price,
+                        gross_amount=_to_decimal(sale.gross_amount),
+                        after_sales_adjustment=_to_decimal(sale.after_sales_adjustment),
+                        discount=_to_decimal(sale.discount),
+                        net_amount=_to_decimal(sale.net_amount),
+                    ))
         for sale in all_fp_sales:
             if (start is None or sale.sale_date >= start) and (end is None or sale.sale_date <= end):
                 sale_details.append(ReceivableSaleItem(
                     date=sale.sale_date,
                     sale_no=f"FP-{sale.id}",
+                    product_name="成品",
                     spec="成品",
                     quantity=sale.quantity,
                     weight_kg=sale.total_weight_kg,
                     unit_price=sale.unit_price,
                     gross_amount=_to_decimal(sale.gross_amount),
+                    after_sales_adjustment=_to_decimal(sale.after_sales_adjustment),
+                    discount=_to_decimal(sale.discount),
                     net_amount=_to_decimal(sale.net_amount),
                 ))
         for sale in all_fp_v2_sales:
             if (start is None or sale.sale_date >= start) and (end is None or sale.sale_date <= end):
-                sale_details.append(ReceivableSaleItem(
-                    date=sale.sale_date,
-                    sale_no=sale.sale_no,
-                    spec=sale.product_name or "成品",
-                    quantity=sale.quantity,
-                    weight_kg=sale.weight,
-                    unit_price=sale.unit_price,
-                    gross_amount=_to_decimal(sale.total_amount),
-                    net_amount=_to_decimal(sale.net_amount),
-                ))
+                fp_v2_products = sale.products or []
+                if fp_v2_products:
+                    total_gross = sum(_to_decimal(p.total_amount) for p in fp_v2_products)
+                    sale_net = _to_decimal(sale.net_amount)
+                    net_ratio = sale_net / total_gross if total_gross else Decimal("0")
+                    total_after = _to_decimal(sale.after_sales_adjustment)
+                    total_discount = _to_decimal(sale.discount)
+                    cumulative_net = Decimal("0")
+                    for i, p in enumerate(fp_v2_products):
+                        p_amount = _to_decimal(p.total_amount)
+                        if i == len(fp_v2_products) - 1:
+                            p_net = sale_net - cumulative_net
+                        else:
+                            p_net = round(p_amount * net_ratio, 2)
+                            cumulative_net += p_net
+                        ratio = p_amount / total_gross if total_gross else Decimal("0")
+                        p_after = total_after * ratio
+                        p_discount = total_discount * ratio
+                        sale_details.append(ReceivableSaleItem(
+                            date=sale.sale_date,
+                            sale_no=sale.sale_no,
+                            product_name=p.product_name or sale.product_name or "成品",
+                            batch_name=sale.batch_no,
+                            slaughter_date=p.slaughter_date,
+                            processing_plant_code=p.factory,
+                            spec=p.product_spec,
+                            quantity=p.box_count,
+                            weight_kg=p.weight_kg,
+                            unit_price=p.unit_price,
+                            gross_amount=p_amount,
+                            after_sales_adjustment=round(p_after, 2),
+                            discount=round(p_discount, 2),
+                            net_amount=round(p_net, 2),
+                        ))
+                else:
+                    sale_details.append(ReceivableSaleItem(
+                        date=sale.sale_date,
+                        sale_no=sale.sale_no,
+                        product_name=sale.product_name or "成品",
+                        batch_name=sale.batch_no,
+                        slaughter_date=sale.slaughter_date,
+                        processing_plant_code=sale.factory,
+                        spec=sale.product_name or "成品",
+                        quantity=sale.quantity,
+                        weight_kg=sale.weight,
+                        unit_price=sale.unit_price,
+                        gross_amount=_to_decimal(sale.total_amount),
+                        after_sales_adjustment=_to_decimal(sale.after_sales_adjustment),
+                        discount=_to_decimal(sale.discount),
+                        net_amount=_to_decimal(sale.net_amount),
+                    ))
         sale_details.sort(key=lambda x: x.date)
 
         # 折扣明细
@@ -2324,6 +2543,13 @@ async def list_receivable_statements(
                         sale_no=sale.sale_no,
                         discount_amount=_to_decimal(sale.discount),
                         reason=None,
+                    ))
+                if sale.balance_adjustment:
+                    discount_details.append(ReceivableDiscountItem(
+                        date=sale.sale_date,
+                        sale_no=sale.sale_no,
+                        discount_amount=_to_decimal(sale.balance_adjustment),
+                        reason=sale.balance_adjustment_reason or "账平调整",
                     ))
         for sale in all_fp_sales:
             if (start is None or sale.sale_date >= start) and (end is None or sale.sale_date <= end):
@@ -2342,6 +2568,13 @@ async def list_receivable_statements(
                         sale_no=sale.sale_no,
                         discount_amount=_to_decimal(sale.discount),
                         reason=None,
+                    ))
+                if sale.balance_adjustment:
+                    discount_details.append(ReceivableDiscountItem(
+                        date=sale.sale_date,
+                        sale_no=sale.sale_no,
+                        discount_amount=_to_decimal(sale.balance_adjustment),
+                        reason=sale.balance_adjustment_reason or "账平调整",
                     ))
         discount_details.sort(key=lambda x: x.date)
 
@@ -2375,59 +2608,300 @@ async def list_receivable_statements(
         aftersales_details.sort(key=lambda x: x.date)
 
         # 收支明细（真实银行流水 + 客户预付款 + 售后退款）
+        # 合并收款：按 transaction_id 分组，多条相同 transaction_id 的销售单收款合并为一条
+        from collections import defaultdict
+
+        # 整鱼收款
+        wf_receipt_groups = defaultdict(list)
         for receipt in all_wf_receipts:
-            if (start is None or receipt.receipt_date >= start) and (end is None or receipt.receipt_date <= end):
+            if (start is None or _txn_date(receipt) >= start) and (end is None or _txn_date(receipt) <= end):
                 if receipt.payment_method != 'balance':  # 余额抵扣是内部调整，非银行流水
+                    wf_receipt_groups[receipt.transaction_id].append(receipt)
+
+        for txn_id, receipts in wf_receipt_groups.items():
+            if txn_id is None or len(receipts) == 1:
+                # 非合并收款，显示关联销售单号
+                for receipt in receipts:
+                    sale = next((s for s in all_wf_sales if s.id == receipt.sale_id), None)
                     receipt_details.append(ReceivableReceiptItem(
-                        date=receipt.receipt_date,
+                        date=_txn_date(receipt),
                         amount=_to_decimal(receipt.amount),
                         payment_method=receipt.payment_method,
-                        reference_no=None,
+                        reference_no=sale.sale_no if sale else None,
                     ))
+            else:
+                # 合并收款：合并为一条记录，显示关联销售单
+                # 使用 transaction.amount 作为权威值（合并收款时保存的实收金额）
+                txn = receipts[0].transaction
+                total_amount = _to_decimal(txn.amount) if txn else sum(_to_decimal(r.amount) for r in receipts)
+                raw_total = sum(_to_decimal(r.amount) for r in receipts)
+
+                # 检测数据异常：receipt 总和远大于权威值（如旧代码每个 receipt 都存了总额）
+                is_data_corrupted = raw_total > total_amount * Decimal("1.5")
+
+                # 正常数据：直接显示 receipt 金额
+                if not is_data_corrupted:
+                    related_sales = []
+                    for r in receipts:
+                        sale = next((s for s in all_wf_sales if s.id == r.sale_id), None)
+                        related_sales.append({
+                            "sale_no": sale.sale_no if sale else f"#{r.sale_id}",
+                            "amount": float(_to_decimal(r.amount)),
+                            "payable_amount": float(_to_decimal(sale.net_amount)) if sale else 0,
+                        })
+                else:
+                    # 数据异常：按 FIFO（销售日期从早到晚）重新分配
+                    # 先排序：销售日期早的在前面
+                    sorted_pairs = sorted(
+                        [(r, next((s for s in all_wf_sales if s.id == r.sale_id), None)) for r in receipts],
+                        key=lambda x: (x[1].sale_date if x[1] else _txn_date(x[0]), x[1].id if x[1] else 0),
+                    )
+                    remaining = total_amount
+                    related_sales = []
+                    for r, sale in sorted_pairs:
+                        payable = _to_decimal(sale.net_amount) if sale else Decimal("0")
+                        if remaining <= 0:
+                            display_amount = Decimal("0")
+                        else:
+                            display_amount = min(payable, remaining)
+                            remaining -= display_amount
+                        related_sales.append({
+                            "sale_no": sale.sale_no if sale else f"#{r.sale_id}",
+                            "amount": float(display_amount),
+                            "payable_amount": float(payable),
+                        })
+
+                receipt_details.append(ReceivableReceiptItem(
+                    date=_txn_date(receipts[0]),
+                    amount=total_amount,
+                    payment_method="batch_collect",
+                    reference_no=f"合并收款：{len(receipts)} 个销售单",
+                    is_batch_collect=True,
+                    related_sales=related_sales,
+                ))
+
+        # 成品收款（旧版）
+        fp_receipt_groups = defaultdict(list)
         for receipt in all_fp_receipts:
-            if (start is None or receipt.receipt_date >= start) and (end is None or receipt.receipt_date <= end):
-                if receipt.payment_method != 'balance':  # 余额抵扣是内部调整，非银行流水
+            if (start is None or _txn_date(receipt) >= start) and (end is None or _txn_date(receipt) <= end):
+                if receipt.payment_method != 'balance':
+                    fp_receipt_groups[receipt.transaction_id].append(receipt)
+
+        for txn_id, receipts in fp_receipt_groups.items():
+            if txn_id is None or len(receipts) == 1:
+                # 非合并收款，显示关联销售单号
+                for receipt in receipts:
+                    sale = next((s for s in all_fp_sales if s.id == receipt.sale_id), None)
                     receipt_details.append(ReceivableReceiptItem(
-                        date=receipt.receipt_date,
+                        date=_txn_date(receipt),
                         amount=_to_decimal(receipt.amount),
                         payment_method=receipt.payment_method,
-                        reference_no=None,
+                        reference_no=f"FP-{sale.id}" if sale else None,
                     ))
+            else:
+                # 合并收款：使用 transaction.amount 作为权威值
+                txn = receipts[0].transaction
+                total_amount = _to_decimal(txn.amount) if txn else sum(_to_decimal(r.amount) for r in receipts)
+                raw_total = sum(_to_decimal(r.amount) for r in receipts)
+
+                # 正常数据：直接显示 receipt 金额
+                if not (raw_total > total_amount * Decimal("1.5")):
+                    related_sales = []
+                    for r in receipts:
+                        sale = next((s for s in all_fp_sales if s.id == r.sale_id), None)
+                        related_sales.append({
+                            "sale_no": f"FP-{sale.id}" if sale else f"#{r.sale_id}",
+                            "amount": float(_to_decimal(r.amount)),
+                            "payable_amount": float(_to_decimal(sale.net_amount)) if sale else 0,
+                        })
+                else:
+                    # 数据异常：按 FIFO（销售日期从早到晚）重新分配
+                    sorted_pairs = sorted(
+                        [(r, next((s for s in all_fp_sales if s.id == r.sale_id), None)) for r in receipts],
+                        key=lambda x: (x[1].sale_date if x[1] else _txn_date(x[0]), x[1].id if x[1] else 0),
+                    )
+                    remaining = total_amount
+                    related_sales = []
+                    for r, sale in sorted_pairs:
+                        payable = _to_decimal(sale.net_amount) if sale else Decimal("0")
+                        if remaining <= 0:
+                            display_amount = Decimal("0")
+                        else:
+                            display_amount = min(payable, remaining)
+                            remaining -= display_amount
+                        related_sales.append({
+                            "sale_no": f"FP-{sale.id}" if sale else f"#{r.sale_id}",
+                            "amount": float(display_amount),
+                            "payable_amount": float(payable),
+                        })
+
+                receipt_details.append(ReceivableReceiptItem(
+                    date=_txn_date(receipts[0]),
+                    amount=total_amount,
+                    payment_method="batch_collect",
+                    reference_no=f"合并收款：{len(receipts)} 个销售单",
+                    is_batch_collect=True,
+                    related_sales=related_sales,
+                ))
+
+        # 以销定采 V2 收款
+        fp_v2_receipt_groups = defaultdict(list)
         for receipt in all_fp_v2_receipts:
-            if (start is None or receipt.receipt_date >= start) and (end is None or receipt.receipt_date <= end):
-                if receipt.payment_method != 'balance':  # 余额抵扣是内部调整，非银行流水
+            if (start is None or _txn_date(receipt) >= start) and (end is None or _txn_date(receipt) <= end):
+                if receipt.payment_method != 'balance':
+                    fp_v2_receipt_groups[receipt.transaction_id].append(receipt)
+
+        for txn_id, receipts in fp_v2_receipt_groups.items():
+            if txn_id is None or len(receipts) == 1:
+                # 非合并收款，显示关联销售单号
+                for receipt in receipts:
+                    sale = next((s for s in all_fp_v2_sales if s.id == receipt.sale_v2_id), None)
                     receipt_details.append(ReceivableReceiptItem(
-                        date=receipt.receipt_date,
+                        date=_txn_date(receipt),
                         amount=_to_decimal(receipt.amount),
                         payment_method=receipt.payment_method,
-                        reference_no=None,
+                        reference_no=sale.sale_no if sale else None,
                     ))
+            else:
+                # 合并收款：使用 transaction.amount 作为权威值
+                txn = receipts[0].transaction
+                total_amount = _to_decimal(txn.amount) if txn else sum(_to_decimal(r.amount) for r in receipts)
+                raw_total = sum(_to_decimal(r.amount) for r in receipts)
 
-        # 客户预付款（TransactionRecord 中的真实银行收款）
-        from sqlalchemy import and_
-        txn_conditions = [
-            TransactionRecord.counterparty_id == customer.id,
-            TransactionRecord.type == "income",
-            TransactionRecord.category == "customer_deposit",
-            TransactionRecord.is_confirmed.is_(True),
-        ]
-        if start is not None:
-            txn_conditions.append(TransactionRecord.transaction_date >= start)
-        if end is not None:
-            txn_conditions.append(TransactionRecord.transaction_date <= end)
+                # 正常数据：直接显示 receipt 金额
+                if not (raw_total > total_amount * Decimal("1.5")):
+                    related_sales = []
+                    for r in receipts:
+                        sale = next((s for s in all_fp_v2_sales if s.id == r.sale_v2_id), None)
+                        related_sales.append({
+                            "sale_no": sale.sale_no if sale else f"#{r.sale_v2_id}",
+                            "amount": float(_to_decimal(r.amount)),
+                            "payable_amount": float(_to_decimal(sale.net_amount)) if sale else 0,
+                        })
+                else:
+                    # 数据异常：按 FIFO（销售日期从早到晚）重新分配
+                    sorted_pairs = sorted(
+                        [(r, next((s for s in all_fp_v2_sales if s.id == r.sale_v2_id), None)) for r in receipts],
+                        key=lambda x: (x[1].sale_date if x[1] else _txn_date(x[0]), x[1].id if x[1] else 0),
+                    )
+                    remaining = total_amount
+                    related_sales = []
+                    for r, sale in sorted_pairs:
+                        payable = _to_decimal(sale.net_amount) if sale else Decimal("0")
+                        if remaining <= 0:
+                            display_amount = Decimal("0")
+                        else:
+                            display_amount = min(payable, remaining)
+                            remaining -= display_amount
+                        related_sales.append({
+                            "sale_no": sale.sale_no if sale else f"#{r.sale_v2_id}",
+                            "amount": float(display_amount),
+                            "payable_amount": float(payable),
+                        })
 
-        txn_deposit_result = await db.execute(
-            select(TransactionRecord)
-            .where(and_(*txn_conditions))
-            .order_by(TransactionRecord.transaction_date)
-        )
-        for txn in txn_deposit_result.scalars().all():
-            receipt_details.append(ReceivableReceiptItem(
-                date=txn.transaction_date,
-                amount=_to_decimal(txn.amount),
-                payment_method="prepayment",
-                reference_no=txn.description or txn.reference_no or None,
-            ))
+                receipt_details.append(ReceivableReceiptItem(
+                    date=_txn_date(receipts[0]),
+                    amount=total_amount,
+                    payment_method="batch_collect",
+                    reference_no=f"合并收款：{len(receipts)} 个销售单",
+                    is_batch_collect=True,
+                    related_sales=related_sales,
+                ))
+
+        # 客户预付款（使用已提前查询的 prepayment_txs，按日期过滤，仅显示明细，汇总已在前面计算）
+        for txn in prepayment_txs:
+            if (start is None or txn.transaction_date >= start) and (end is None or txn.transaction_date <= end):
+                # 先查该预付款 txn 实际分配给各销售单的金额（从 receipt 表）
+                txn_receipts: dict[int, Decimal] = {}
+                if txn.id and txn.related_sale_ids:
+                    # 以销定采 V2
+                    fp_receipt_result = await db.execute(
+                        select(FinishedProductReceipt.sale_v2_id, func.sum(FinishedProductReceipt.amount))
+                        .where(FinishedProductReceipt.transaction_id == txn.id)
+                        .group_by(FinishedProductReceipt.sale_v2_id)
+                    )
+                    for sale_id, amount in fp_receipt_result.all():
+                        txn_receipts[sale_id] = _to_decimal(amount)
+                    # 进口整鱼
+                    wf_receipt_result = await db.execute(
+                        select(SalesReceipt.sale_id, func.sum(SalesReceipt.amount))
+                        .where(SalesReceipt.transaction_id == txn.id)
+                        .group_by(SalesReceipt.sale_id)
+                    )
+                    for sale_id, amount in wf_receipt_result.all():
+                        txn_receipts[sale_id] = _to_decimal(amount)
+
+                # 查询关联销售单详情（支持进口销售、以销定采、预包装销售三种类型）
+                related_sale_nos = []
+                related_sales = []
+                if txn.related_sale_ids:
+                    # 进口销售
+                    wf_result = await db.execute(
+                        select(WholeFishSale).where(WholeFishSale.id.in_(txn.related_sale_ids))
+                    )
+                    for sale in wf_result.scalars().all():
+                        if sale.sale_no:
+                            related_sale_nos.append(sale.sale_no)
+                        receipt_amt = txn_receipts.get(sale.id, Decimal("0"))
+                        # 如果没有 receipt 记录（旧数据），回退到显示剩余应付（冲减前）
+                        if receipt_amt > 0:
+                            display_amt = receipt_amt
+                        else:
+                            display_amt = max(Decimal("0"), _to_decimal(sale.net_amount) - _to_decimal(sale.paid_amount) + receipt_amt)
+                        related_sales.append({
+                            "sale_no": sale.sale_no or f"#{sale.id}",
+                            "amount": float(display_amt),
+                            "payable_amount": float(_to_decimal(sale.net_amount)),
+                        })
+                    # 以销定采 V2
+                    fp_v2_result = await db.execute(
+                        select(FinishedProductSaleV2).where(FinishedProductSaleV2.id.in_(txn.related_sale_ids))
+                    )
+                    for sale in fp_v2_result.scalars().all():
+                        if sale.sale_no:
+                            related_sale_nos.append(sale.sale_no)
+                        receipt_amt = txn_receipts.get(sale.id, Decimal("0"))
+                        if receipt_amt > 0:
+                            display_amt = receipt_amt
+                        else:
+                            display_amt = max(Decimal("0"), _to_decimal(sale.net_amount) - _to_decimal(sale.paid_amount) + receipt_amt)
+                        related_sales.append({
+                            "sale_no": sale.sale_no or f"#{sale.id}",
+                            "amount": float(display_amt),
+                            "payable_amount": float(_to_decimal(sale.net_amount)),
+                        })
+                    # 预包装销售（旧版成品销售）
+                    fp_result = await db.execute(
+                        select(FinishedProductSale).where(FinishedProductSale.id.in_(txn.related_sale_ids))
+                    )
+                    for sale in fp_result.scalars().all():
+                        related_sale_nos.append(f"FP-{sale.id}")
+                        receipt_amt = txn_receipts.get(sale.id, Decimal("0"))
+                        if receipt_amt > 0:
+                            display_amt = receipt_amt
+                        else:
+                            display_amt = max(Decimal("0"), _to_decimal(sale.net_amount) - _to_decimal(sale.paid_amount) + receipt_amt)
+                        related_sales.append({
+                            "sale_no": f"FP-{sale.id}",
+                            "amount": float(display_amt),
+                            "payable_amount": float(_to_decimal(sale.net_amount)),
+                        })
+                
+                reference_parts = []
+                if txn.description:
+                    reference_parts.append(txn.description)
+                if txn.reference_no:
+                    reference_parts.append(txn.reference_no)
+                if related_sale_nos and not related_sales:
+                    reference_parts.append(f"关联：{', '.join(related_sale_nos)}")
+                
+                receipt_details.append(ReceivableReceiptItem(
+                    date=txn.transaction_date,
+                    amount=_to_decimal(txn.amount),
+                    payment_method="prepayment",
+                    reference_no=f"客户预付款：{len(related_sales)} 个销售单" if related_sales else (" | ".join(reference_parts) if reference_parts else None),
+                    related_sales=related_sales,
+                ))
 
         # 售后退款（TransactionRecord 中的支出，金额为负）
         refund_conditions = [
@@ -2587,12 +3061,25 @@ async def export_receivable_statements(
         writer.writerow(["收支明细"])
         writer.writerow(["日期", "金额", "类型", "备注"])
         for d in item.receipt_details:
-            writer.writerow([
-                str(d.date),
-                str(d.amount),
-                d.payment_method or "",
-                d.reference_no or "",
-            ])
+            if d.is_batch_collect and d.related_sales:
+                # 合并收款：显示为一条，备注包含关联销售单
+                related_info = "; ".join(
+                    f"{s['sale_no']}: 实收{s['amount']} / 应付{s['payable_amount']}"
+                    for s in d.related_sales
+                )
+                writer.writerow([
+                    str(d.date),
+                    str(d.amount),
+                    "合并收款",
+                    f"{d.reference_no} | {related_info}",
+                ])
+            else:
+                writer.writerow([
+                    str(d.date),
+                    str(d.amount),
+                    d.payment_method or "",
+                    d.reference_no or "",
+                ])
         writer.writerow([])
         writer.writerow([])
 
@@ -2858,9 +3345,9 @@ async def list_payable_statements(
         for p in prods_map_result.scalars().all():
             prods_map.setdefault(p.invoice_id, []).append(p)
 
-        taxes_map = {}
+        _taxes_map = {}
         if not is_usd:
-            taxes_map = await _batch_get_taxes(db, period_inv_ids)
+            _taxes_map = await _batch_get_taxes(db, period_inv_ids)
 
         # 预加载发票的购汇记录映射（避免N+1）
         # 同时支持：单张发票购汇 + 合并购汇 + 批次购汇（batch_id）
@@ -4431,6 +4918,9 @@ async def list_netting_statements(
     domestic_v2_ids_result = await db.execute(
         select(distinct(PurchaseOrderV2.supplier_id)).where(PurchaseOrderV2.supplier_id.isnot(None))
     )
+    material_supplier_ids_result = await db.execute(
+        select(distinct(MaterialPurchaseOrder.supplier_id)).where(MaterialPurchaseOrder.supplier_id.isnot(None))
+    )
 
     all_company_ids = set()
     all_company_ids.update([r[0] for r in sale_ids_result.all() if r[0]])
@@ -4439,6 +4929,7 @@ async def list_netting_statements(
     all_company_ids.update([r[0] for r in inv_supplier_ids_result.all() if r[0]])
     all_company_ids.update([r[0] for r in domestic_po_ids_result.all() if r[0]])
     all_company_ids.update([r[0] for r in domestic_v2_ids_result.all() if r[0]])
+    all_company_ids.update([r[0] for r in material_supplier_ids_result.all() if r[0]])
 
     if company_id:
         company_query = select(Company).where(Company.id == company_id)
@@ -4461,7 +4952,7 @@ async def list_netting_statements(
     for company in companies:
         # ========== 应收端计算 ==========
         sales_result = await db.execute(
-            select(WholeFishSale).where(WholeFishSale.customer_id == company.id)
+            select(WholeFishSale).options(selectinload(WholeFishSale.items)).where(WholeFishSale.customer_id == company.id)
         )
         all_wf_sales = sales_result.scalars().all()
 
@@ -4472,18 +4963,22 @@ async def list_netting_statements(
 
         # 以销定采 V2 销售单（按客户名称匹配）
         fp_v2_sales_result = await db.execute(
-            select(FinishedProductSaleV2).where(FinishedProductSaleV2.customer == company.name)
+            select(FinishedProductSaleV2).options(selectinload(FinishedProductSaleV2.products)).where(FinishedProductSaleV2.customer == company.name)
         )
         all_fp_v2_sales = fp_v2_sales_result.scalars().all()
 
         wf_receipts_result = await db.execute(
-            select(SalesReceipt).join(WholeFishSale, SalesReceipt.sale_id == WholeFishSale.id)
+            select(SalesReceipt)
+            .options(selectinload(SalesReceipt.transaction))
+            .join(WholeFishSale, SalesReceipt.sale_id == WholeFishSale.id)
             .where(WholeFishSale.customer_id == company.id)
         )
         all_wf_receipts = wf_receipts_result.scalars().all()
 
         fp_receipts_result = await db.execute(
-            select(FinishedProductReceipt).join(FinishedProductSale, FinishedProductReceipt.sale_id == FinishedProductSale.id)
+            select(FinishedProductReceipt)
+            .options(selectinload(FinishedProductReceipt.transaction))
+            .join(FinishedProductSale, FinishedProductReceipt.sale_id == FinishedProductSale.id)
             .where(FinishedProductSale.customer_id == company.id)
         )
         all_fp_receipts = fp_receipts_result.scalars().all()
@@ -4491,24 +4986,92 @@ async def list_netting_statements(
         # 以销定采 V2 收款
         fp_v2_receipts_result = await db.execute(
             select(FinishedProductReceipt)
+            .options(selectinload(FinishedProductReceipt.transaction))
             .join(FinishedProductSaleV2, FinishedProductReceipt.sale_v2_id == FinishedProductSaleV2.id)
             .where(FinishedProductSaleV2.customer == company.name)
         )
         all_fp_v2_receipts = fp_v2_receipts_result.scalars().all()
 
-        # 应收期初
+        # 预查询售后退款和预付款（期初和本期都需要）
+        refund_tx_result = await db.execute(
+            select(TransactionRecord)
+            .where(TransactionRecord.counterparty_id == company.id)
+            .where(TransactionRecord.type == "expense")
+            .where(TransactionRecord.category == "sales_refund")
+            .where(TransactionRecord.is_confirmed.is_(True))
+        )
+        refund_txs = refund_tx_result.scalars().all()
+
+        prepayment_tx_result = await db.execute(
+            select(TransactionRecord)
+            .where(TransactionRecord.counterparty_id == company.id)
+            .where(TransactionRecord.type == "income")
+            .where(TransactionRecord.category == "customer_deposit")
+            .where(TransactionRecord.is_confirmed.is_(True))
+        )
+        prepayment_txs = prepayment_tx_result.scalars().all()
+
+        return_orders_result = await db.execute(
+            select(ReturnOrder)
+            .where(ReturnOrder.customer_id == company.id)
+            .where(ReturnOrder.status == "completed")
+        )
+        all_return_orders = return_orders_result.scalars().all()
+
+        # 辅助函数：优先使用交易流水日期
+        def _txn_date(receipt):
+            """优先使用交易流水日期，更准确（支持用户修改后同步）"""
+            return receipt.transaction.transaction_date if receipt.transaction else receipt.receipt_date
+
+        # 应收期初（推导法：截至start之前的销售净额 - 截至start之前的真实收款）
         receivable_opening = Decimal("0")
         if start:
             for s in all_wf_sales:
-                if s.status in ("pending", "partial_paid") and s.sale_date < start:
-                    receivable_opening += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
+                if s.sale_date < start:
+                    receivable_opening += _to_decimal(s.net_amount)
             for s in all_fp_sales:
-                if s.status in ("pending", "partial_paid") and s.sale_date < start:
-                    receivable_opening += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
+                if s.sale_date < start:
+                    receivable_opening += _to_decimal(s.net_amount)
             for s in all_fp_v2_sales:
-                is_unpaid = s.status in ("pending", "partial_paid") or (s.status == "ordered" and not s.paid)
-                if is_unpaid and s.sale_date < start:
-                    receivable_opening += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount or 0))
+                if s.sale_date < start:
+                    receivable_opening += _to_decimal(s.net_amount)
+            # 减去截至start之前的真实收款（过滤 balance，使用 transaction_date 优先，去重）
+            processed_opening_txns = set()
+            for r in all_wf_receipts:
+                if r.payment_method != 'balance' and _txn_date(r) < start:
+                    if r.transaction_id:
+                        if r.transaction_id not in processed_opening_txns:
+                            processed_opening_txns.add(r.transaction_id)
+                            receivable_opening -= _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                    else:
+                        receivable_opening -= _to_decimal(r.amount)
+            for r in all_fp_receipts:
+                if r.payment_method != 'balance' and _txn_date(r) < start:
+                    if r.transaction_id:
+                        if r.transaction_id not in processed_opening_txns:
+                            processed_opening_txns.add(r.transaction_id)
+                            receivable_opening -= _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                    else:
+                        receivable_opening -= _to_decimal(r.amount)
+            for r in all_fp_v2_receipts:
+                if r.payment_method != 'balance' and _txn_date(r) < start:
+                    if r.transaction_id:
+                        if r.transaction_id not in processed_opening_txns:
+                            processed_opening_txns.add(r.transaction_id)
+                            receivable_opening -= _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                    else:
+                        receivable_opening -= _to_decimal(r.amount)
+            # 期初之前的预付款（预付款也冲减应收）
+            for txn in prepayment_txs:
+                if txn.transaction_date < start:
+                    receivable_opening -= _to_decimal(txn.amount)
+            # 期初之前的退款（退款增加应收）
+            for tx in refund_txs:
+                if tx.transaction_date < start:
+                    receivable_opening += _to_decimal(tx.amount)
+            for r in all_return_orders:
+                if r.return_date < start and r.refund_method and r.refund_method.value == "direct_refund":
+                    receivable_opening += _to_decimal(r.refund_amount)
 
         # 应收本期销售
         receivable_current_sales = Decimal("0")
@@ -4522,34 +5085,56 @@ async def list_netting_statements(
             if (start is None or s.sale_date >= start) and (end is None or s.sale_date <= end):
                 receivable_current_sales += _to_decimal(s.net_amount)
 
-        # 应收本期收款
+        # 应收本期收款（过滤 balance，使用 transaction_date 优先，去重 transaction_id）
         receivable_current_receipts = Decimal("0")
+        processed_current_txns = set()
         for r in all_wf_receipts:
-            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
-                receivable_current_receipts += _to_decimal(r.amount)
+            if r.payment_method != 'balance' and (start is None or _txn_date(r) >= start) and (end is None or _txn_date(r) <= end):
+                if r.transaction_id:
+                    if r.transaction_id not in processed_current_txns:
+                        processed_current_txns.add(r.transaction_id)
+                        receivable_current_receipts += _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                else:
+                    receivable_current_receipts += _to_decimal(r.amount)
         for r in all_fp_receipts:
-            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
-                receivable_current_receipts += _to_decimal(r.amount)
+            if r.payment_method != 'balance' and (start is None or _txn_date(r) >= start) and (end is None or _txn_date(r) <= end):
+                if r.transaction_id:
+                    if r.transaction_id not in processed_current_txns:
+                        processed_current_txns.add(r.transaction_id)
+                        receivable_current_receipts += _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                else:
+                    receivable_current_receipts += _to_decimal(r.amount)
         for r in all_fp_v2_receipts:
-            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
-                receivable_current_receipts += _to_decimal(r.amount)
+            if r.payment_method != 'balance' and (start is None or _txn_date(r) >= start) and (end is None or _txn_date(r) <= end):
+                if r.transaction_id:
+                    if r.transaction_id not in processed_current_txns:
+                        processed_current_txns.add(r.transaction_id)
+                        receivable_current_receipts += _to_decimal(r.transaction.amount if r.transaction else r.amount)
+                else:
+                    receivable_current_receipts += _to_decimal(r.amount)
 
-        # 应收期末
-        receivable_closing = Decimal("0")
-        for s in all_wf_sales:
-            if s.status in ("pending", "partial_paid"):
-                receivable_closing += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
-        for s in all_fp_sales:
-            if s.status in ("pending", "partial_paid"):
-                receivable_closing += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount))
-        for s in all_fp_v2_sales:
-            is_unpaid = s.status in ("pending", "partial_paid") or (s.status == "ordered" and not s.paid)
-            if is_unpaid:
-                receivable_closing += max(Decimal("0"), _to_decimal(s.net_amount) - _to_decimal(s.paid_amount or 0))
+        # 客户预付款也计入本期收款（冲减应收）
+        for txn in prepayment_txs:
+            if (start is None or txn.transaction_date >= start) and (end is None or txn.transaction_date <= end):
+                receivable_current_receipts += _to_decimal(txn.amount)
+
+        # 售后退款（减少已收款，即增加应收）
+        for tx in refund_txs:
+            if (start is None or tx.transaction_date >= start) and (end is None or tx.transaction_date <= end):
+                receivable_current_receipts -= _to_decimal(tx.amount)
+
+        # ReturnOrder 直接退款（未走交易流水的情况）
+        for r in all_return_orders:
+            if (start is None or r.return_date >= start) and (end is None or r.return_date <= end):
+                if r.refund_method and r.refund_method.value == "direct_refund":
+                    receivable_current_receipts -= _to_decimal(r.refund_amount)
+
+        # 应收期末（推导值，确保勾稽关系：期末 = 期初 + 本期销售 - 本期收款）
+        receivable_closing = receivable_opening + receivable_current_sales - receivable_current_receipts
 
         # ========== 应付端计算 ==========
         invoice_result = await db.execute(
-            select(ImportInvoice).where(ImportInvoice.supplier_id == company.id)
+            select(ImportInvoice).options(selectinload(ImportInvoice.products)).where(ImportInvoice.supplier_id == company.id)
         )
         all_invoices = invoice_result.scalars().all()
 
@@ -4558,10 +5143,27 @@ async def list_netting_statements(
         )
         all_domestic_pos = domestic_po_result.scalars().all()
 
+        # 预加载国内采购单（PurchaseOrder）产品明细
+        po_items_map = {}
+        if all_domestic_pos:
+            po_ids = [po.id for po in all_domestic_pos]
+            po_items_result = await db.execute(
+                select(PurchaseOrderItem, Product)
+                .join(Product, PurchaseOrderItem.product_id == Product.id, isouter=True)
+                .where(PurchaseOrderItem.order_id.in_(po_ids))
+            )
+            for item, product in po_items_result.all():
+                po_items_map.setdefault(item.order_id, []).append((item, product))
+
         domestic_v2_result = await db.execute(
-            select(PurchaseOrderV2).where(PurchaseOrderV2.supplier_id == company.id)
+            select(PurchaseOrderV2).options(selectinload(PurchaseOrderV2.products)).where(PurchaseOrderV2.supplier_id == company.id)
         )
         all_domestic_v2 = domestic_v2_result.scalars().all()
+
+        material_po_result = await db.execute(
+            select(MaterialPurchaseOrder).options(selectinload(MaterialPurchaseOrder.items)).where(MaterialPurchaseOrder.supplier_id == company.id)
+        )
+        all_material_pos = material_po_result.scalars().all()
 
         invoice_ids = [inv.id for inv in all_invoices]
         exchange_result = await db.execute(
@@ -4577,6 +5179,15 @@ async def list_netting_statements(
             .where(TransactionRecord.category == "goods_payment")
         )
         all_domestic_payments = domestic_payment_result.scalars().all()
+
+        # 辅料采购付款（TransactionRecord）
+        material_payment_result = await db.execute(
+            select(TransactionRecord)
+            .where(TransactionRecord.counterparty_id == company.id)
+            .where(TransactionRecord.type == "expense")
+            .where(TransactionRecord.category == "packaging_consumables")
+        )
+        all_material_payments = material_payment_result.scalars().all()
 
         is_usd = (company.currency or "CNY") == "USD"
 
@@ -4596,11 +5207,15 @@ async def list_netting_statements(
 
         for po in all_domestic_pos:
             if start is not None and po.order_date < start:
-                payable_opening += _to_decimal(po.total_amount)
+                payable_opening += _to_decimal(po.total_amount) - _to_decimal(po.after_sales_adjustment if hasattr(po, 'after_sales_adjustment') else 0)
 
         for po in all_domestic_v2:
             if start is not None and po.purchase_date < start:
-                payable_opening += _to_decimal(po.total_amount)
+                payable_opening += _to_decimal(po.total_amount) - _to_decimal(po.after_sales_adjustment)
+
+        for po in all_material_pos:
+            if start is not None and po.order_date < start:
+                payable_opening += _to_decimal(po.actual_total) - _to_decimal(po.after_sales_adjustment)
 
         if is_usd:
             opening_payments = sum(_to_decimal(ex.amount_usd) for ex in all_exchanges if start is not None and ex.exchange_date < start)
@@ -4608,6 +5223,10 @@ async def list_netting_statements(
             opening_payments = sum(_to_decimal(ex.amount_cny) for ex in all_exchanges if start is not None and ex.exchange_date < start)
         # 减去国内采购付款的期初部分
         for t in all_domestic_payments:
+            if start is not None and t.transaction_date < start:
+                opening_payments += _to_decimal(t.amount)
+        # 减去辅料采购付款的期初部分
+        for t in all_material_payments:
             if start is not None and t.transaction_date < start:
                 opening_payments += _to_decimal(t.amount)
         payable_opening -= opening_payments
@@ -4625,11 +5244,15 @@ async def list_netting_statements(
 
         for po in all_domestic_pos:
             if (start is None or po.order_date >= start) and (end is None or po.order_date <= end):
-                payable_current_purchase += _to_decimal(po.total_amount)
+                payable_current_purchase += _to_decimal(po.total_amount) - _to_decimal(po.after_sales_adjustment if hasattr(po, 'after_sales_adjustment') else 0)
 
         for po in all_domestic_v2:
             if (start is None or po.purchase_date >= start) and (end is None or po.purchase_date <= end):
-                payable_current_purchase += _to_decimal(po.total_amount)
+                payable_current_purchase += _to_decimal(po.total_amount) - _to_decimal(po.after_sales_adjustment)
+
+        for po in all_material_pos:
+            if (start is None or po.order_date >= start) and (end is None or po.order_date <= end):
+                payable_current_purchase += _to_decimal(po.actual_total) - _to_decimal(po.after_sales_adjustment)
 
         # 应付本期付款（购汇 + 国内采购付款）
         if is_usd:
@@ -4641,6 +5264,11 @@ async def list_netting_statements(
             )
         # 加上国内采购付款（TransactionRecord goods_payment）
         for t in all_domestic_payments:
+            if (start is None or t.transaction_date >= start) and (end is None or t.transaction_date <= end):
+                payable_current_payments += _to_decimal(t.amount)
+
+        # 加上辅料采购付款（TransactionRecord packaging_consumables）
+        for t in all_material_payments:
             if (start is None or t.transaction_date >= start) and (end is None or t.transaction_date <= end):
                 payable_current_payments += _to_decimal(t.amount)
 
@@ -4664,183 +5292,453 @@ async def list_netting_statements(
             continue
 
         # ========== 预查询产品/批次名称 ==========
-        # 整鱼销售的批次名称
+        # 整鱼销售的批次名称、宰杀日期、加工厂EU编号
         wf_batch_ids = {s.batch_id for s in all_wf_sales if s.batch_id}
         wf_batch_map = {}
+        wf_batch_extra = {}
         if wf_batch_ids:
-            from app.models import Batch
-            batch_result = await db.execute(select(Batch.id, Batch.batch_code).where(Batch.id.in_(wf_batch_ids)))
+            batch_result = await db.execute(select(Batch.id, Batch.batch_name).where(Batch.id.in_(wf_batch_ids)))
             wf_batch_map = {r[0]: r[1] for r in batch_result.all()}
+
+            batch_extra_result = await db.execute(
+                select(BatchInvoice.batch_id, ImportInvoice.kill_date, Company.code)
+                .join(ImportInvoice, BatchInvoice.invoice_id == ImportInvoice.id)
+                .join(Company, ImportInvoice.processing_plant_id == Company.id, isouter=True)
+                .where(BatchInvoice.batch_id.in_(wf_batch_ids))
+            )
+            batch_extra_raw: dict[int, dict] = {}
+            for batch_id, kill_date, plant_code in batch_extra_result.all():
+                d = batch_extra_raw.setdefault(batch_id, {"kill_dates": [], "plant_codes": []})
+                if kill_date:
+                    d["kill_dates"].append(kill_date)
+                if plant_code:
+                    d["plant_codes"].append(plant_code)
+            wf_batch_extra = {
+                bid: {
+                    "slaughter_date": min(d["kill_dates"]) if d["kill_dates"] else None,
+                    "processing_plant_code": d["plant_codes"][0] if d["plant_codes"] else None,
+                }
+                for bid, d in batch_extra_raw.items()
+            }
 
         # 旧版成品销售的产品名称
         fp_product_ids = {s.product_id for s in all_fp_sales if s.product_id}
         fp_product_map = {}
         if fp_product_ids:
-            from app.models import Product
             prod_result = await db.execute(select(Product.id, Product.name).where(Product.id.in_(fp_product_ids)))
             fp_product_map = {r[0]: r[1] for r in prod_result.all()}
 
-        # ========== 构建销售明细 ==========
+        # ========== 构建销售明细（按规格展开）==========
         sale_details = []
         for s in all_wf_sales:
             if (start is None or s.sale_date >= start) and (end is None or s.sale_date <= end):
-                sale_details.append(ReceivableSaleItem(
-                    date=s.sale_date,
-                    sale_no=s.sale_no,
-                    product_name="三文鱼",
-                    batch_no=wf_batch_map.get(s.batch_id, None),
-                    spec=s.spec or "整鱼",
-                    quantity=s.box_count,
-                    weight_kg=s.weight_kg,
-                    unit_price=s.unit_price,
-                    gross_amount=_to_decimal(s.gross_amount),
-                    net_amount=_to_decimal(s.net_amount),
-                ))
+                wf_items = s.items or []
+                batch_extra = wf_batch_extra.get(s.batch_id, {})
+                if wf_items:
+                    total_gross = sum(_to_decimal(item.amount) for item in wf_items)
+                    total_after = _to_decimal(s.after_sales_adjustment)
+                    total_discount = _to_decimal(s.discount)
+                    for item in wf_items:
+                        item_amount = _to_decimal(item.amount)
+                        ratio = item_amount / total_gross if total_gross else Decimal("0")
+                        item_after = total_after * ratio
+                        item_discount = total_discount * ratio
+                        sale_details.append(ReceivableSaleItem(
+                            date=s.sale_date,
+                            sale_no=s.sale_no,
+                            product_name="三文鱼",
+                            batch_name=wf_batch_map.get(s.batch_id, None),
+                            slaughter_date=batch_extra.get("slaughter_date"),
+                            processing_plant_code=batch_extra.get("processing_plant_code"),
+                            spec=item.spec or s.spec or "整鱼",
+                            quantity=item.box_count,
+                            weight_kg=item.weight_kg,
+                            unit_price=item.unit_price,
+                            gross_amount=item_amount,
+                            after_sales_adjustment=item_after,
+                            discount=item_discount,
+                            net_amount=item_amount - item_after - item_discount,
+                        ))
+                else:
+                    # 无规格明细时退回到主单
+                    sale_details.append(ReceivableSaleItem(
+                        date=s.sale_date,
+                        sale_no=s.sale_no,
+                        product_name="三文鱼",
+                        batch_name=wf_batch_map.get(s.batch_id, None),
+                        slaughter_date=batch_extra.get("slaughter_date"),
+                        processing_plant_code=batch_extra.get("processing_plant_code"),
+                        spec=s.spec or "整鱼",
+                        quantity=s.box_count,
+                        weight_kg=s.weight_kg,
+                        unit_price=s.unit_price,
+                        gross_amount=_to_decimal(s.gross_amount),
+                        after_sales_adjustment=_to_decimal(s.after_sales_adjustment),
+                        discount=_to_decimal(s.discount),
+                        net_amount=_to_decimal(s.net_amount),
+                    ))
         for s in all_fp_sales:
             if (start is None or s.sale_date >= start) and (end is None or s.sale_date <= end):
                 sale_details.append(ReceivableSaleItem(
                     date=s.sale_date,
                     sale_no=f"FP-{s.id}",
                     product_name=fp_product_map.get(s.product_id, None),
-                    batch_no=None,
+                    batch_name=None,
                     spec="成品",
                     quantity=s.quantity,
                     weight_kg=s.total_weight_kg,
                     unit_price=s.unit_price,
                     gross_amount=_to_decimal(s.gross_amount),
+                    after_sales_adjustment=_to_decimal(s.after_sales_adjustment),
+                    discount=_to_decimal(s.discount),
                     net_amount=_to_decimal(s.net_amount),
                 ))
         for s in all_fp_v2_sales:
             if (start is None or s.sale_date >= start) and (end is None or s.sale_date <= end):
-                sale_details.append(ReceivableSaleItem(
-                    date=s.sale_date,
-                    sale_no=s.sale_no,
-                    product_name=s.product_name,
-                    batch_no=s.batch_no,
-                    spec=s.product_name or "成品",
-                    quantity=s.quantity,
-                    weight_kg=s.weight,
-                    unit_price=s.unit_price,
-                    gross_amount=_to_decimal(s.total_amount),
-                    net_amount=_to_decimal(s.net_amount),
-                ))
+                products = s.products or []
+                if products:
+                    total_gross = sum(_to_decimal(p.total_amount) for p in products)
+                    total_after = _to_decimal(s.after_sales_adjustment)
+                    total_discount = _to_decimal(s.discount)
+                    for p in products:
+                        item_amount = _to_decimal(p.total_amount)
+                        ratio = item_amount / total_gross if total_gross else Decimal("0")
+                        item_after = total_after * ratio
+                        item_discount = total_discount * ratio
+                        sale_details.append(ReceivableSaleItem(
+                            date=s.sale_date,
+                            sale_no=s.sale_no,
+                            product_name=p.product_name or s.product_name,
+                            batch_name=s.batch_no,
+                            spec=p.product_spec or s.product_name or "成品",
+                            quantity=p.box_count,
+                            weight_kg=p.weight_kg,
+                            unit_price=p.unit_price,
+                            gross_amount=item_amount,
+                            after_sales_adjustment=item_after,
+                            discount=item_discount,
+                            net_amount=item_amount - item_after - item_discount,
+                        ))
+                else:
+                    sale_details.append(ReceivableSaleItem(
+                        date=s.sale_date,
+                        sale_no=s.sale_no,
+                        product_name=s.product_name,
+                        batch_name=s.batch_no,
+                        spec=s.product_name or "成品",
+                        quantity=s.quantity,
+                        weight_kg=s.weight,
+                        unit_price=s.unit_price,
+                        gross_amount=_to_decimal(s.total_amount),
+                        after_sales_adjustment=_to_decimal(s.after_sales_adjustment),
+                        discount=_to_decimal(s.discount),
+                        net_amount=_to_decimal(s.net_amount),
+                    ))
         sale_details.sort(key=lambda x: x.date)
 
-        # ========== 构建采购明细 ==========
+        # ========== 构建折扣明细 ==========
+        discount_details = []
+        for s in all_wf_sales:
+            if (start is None or s.sale_date >= start) and (end is None or s.sale_date <= end):
+                if s.discount and s.discount > 0:
+                    discount_details.append(ReceivableDiscountItem(
+                        date=s.sale_date,
+                        sale_no=s.sale_no,
+                        discount_amount=_to_decimal(s.discount),
+                        reason=None,
+                    ))
+        for s in all_fp_sales:
+            if (start is None or s.sale_date >= start) and (end is None or s.sale_date <= end):
+                if s.discount and s.discount > 0:
+                    discount_details.append(ReceivableDiscountItem(
+                        date=s.sale_date,
+                        sale_no=f"FP-{s.id}",
+                        discount_amount=_to_decimal(s.discount),
+                        reason=None,
+                    ))
+        for s in all_fp_v2_sales:
+            if (start is None or s.sale_date >= start) and (end is None or s.sale_date <= end):
+                if s.discount and s.discount > 0:
+                    discount_details.append(ReceivableDiscountItem(
+                        date=s.sale_date,
+                        sale_no=s.sale_no,
+                        discount_amount=_to_decimal(s.discount),
+                        reason=None,
+                    ))
+        discount_details.sort(key=lambda x: x.date)
+
+        # ========== 构建售后明细（销售）==========
+        aftersales_details = []
+        # ReturnOrder 销售退货
+        return_orders_result = await db.execute(
+            select(ReturnOrder)
+            .where(ReturnOrder.customer_id == company.id)
+            .where(ReturnOrder.status == "completed")
+        )
+        all_return_orders = return_orders_result.scalars().all()
+        for r in all_return_orders:
+            if (start is None or r.return_date >= start) and (end is None or r.return_date <= end):
+                sale_no = None
+                if r.whole_fish_sale_id:
+                    sale = next((s for s in all_wf_sales if s.id == r.whole_fish_sale_id), None)
+                    if sale:
+                        sale_no = sale.sale_no
+                return_items_result = await db.execute(
+                    select(ReturnItem).where(ReturnItem.return_order_id == r.id)
+                )
+                return_items = return_items_result.scalars().all()
+                item = return_items[0] if return_items else None
+                aftersales_details.append(ReceivableAftersalesItem(
+                    date=r.return_date,
+                    return_no=r.return_no,
+                    sale_no=sale_no,
+                    quantity=float(item.weight_kg) if item else None,
+                    unit_price=_to_decimal(item.unit_price) if item else None,
+                    amount=_to_decimal(r.refund_amount),
+                    reason=item.remarks if item else r.problem_description,
+                    refund_method=r.refund_method.value if r.refund_method else None,
+                ))
+        aftersales_details.sort(key=lambda x: x.date)
+
+        # ========== 构建采购售后明细 ==========
+        purchase_return_result = await db.execute(
+            select(PurchaseReturnOrder)
+            .where(PurchaseReturnOrder.supplier_id == company.id)
+            .where(PurchaseReturnOrder.status == "completed")
+        )
+        all_purchase_returns = purchase_return_result.scalars().all()
+        purchase_return_details = []
+        for pr in all_purchase_returns:
+            if (start is None or pr.return_date >= start) and (end is None or pr.return_date <= end):
+                purchase_return_details.append({
+                    "date": pr.return_date,
+                    "return_no": pr.return_no,
+                    "amount": float(_to_decimal(pr.refund_amount)),
+                    "reason": pr.problem_description,
+                    "refund_method": pr.refund_method.value if pr.refund_method else None,
+                })
+        purchase_return_details.sort(key=lambda x: x["date"])
+
+        # ========== 构建采购明细（按产品明细展开） ==========
         purchase_details = []
         for inv in all_invoices:
             if (start is None or inv.invoice_date >= start) and (end is None or inv.invoice_date <= end):
-                prod_result = await db.execute(select(InvoiceProduct).where(InvoiceProduct.invoice_id == inv.id))
-                prods = prod_result.scalars().all()
-                amount_usd = sum(_to_decimal(p.total_amount) for p in prods) or _to_decimal(inv.total_amount_usd)
+                prods = inv.products or []
                 ex = await _get_invoice_exchange(db, inv.id, None)
                 rate = _to_decimal(ex.exchange_rate) if ex else Decimal("7.0")
-                amount_cny = amount_usd * (rate or Decimal("7.0"))
-                # 取第一个产品信息作为显示
-                first_prod = prods[0] if prods else None
-                purchase_details.append(PayablePurchaseItem(
-                    date=inv.invoice_date,
-                    invoice_no=inv.invoice_no,
-                    product_name=first_prod.product_name if first_prod else None,
-                    spec=first_prod.product_spec if first_prod else None,
-                    batch_no=None,
-                    quantity=sum(p.box_count for p in prods) if prods else None,
-                    weight_kg=sum(p.net_weight_kg for p in prods) if prods else None,
-                    unit_price=first_prod.unit_price if first_prod else None,
-                    amount_usd=amount_usd,
-                    exchange_rate=rate,
-                    amount_cny=round(amount_cny, 2),
-                ))
+                if not prods:
+                    amount_usd = _to_decimal(inv.total_amount_usd)
+                    amount_cny = amount_usd * (rate or Decimal("7.0"))
+                    purchase_details.append(PayablePurchaseItem(
+                        date=inv.invoice_date,
+                        invoice_no=inv.invoice_no,
+                        product_name=None,
+                        spec=None,
+                        batch_no=None,
+                        quantity=None,
+                        weight_kg=None,
+                        unit_price=None,
+                        amount_usd=amount_usd,
+                        exchange_rate=rate,
+                        amount_cny=round(amount_cny, 2),
+                        after_sales_adjustment=Decimal("0"),
+                    ))
+                else:
+                    for p in prods:
+                        p_amount_usd = _to_decimal(p.total_amount)
+                        p_amount_cny = p_amount_usd * (rate or Decimal("7.0"))
+                        purchase_details.append(PayablePurchaseItem(
+                            date=inv.invoice_date,
+                            invoice_no=inv.invoice_no,
+                            product_name=p.product_name,
+                            spec=p.product_spec,
+                            batch_no=None,
+                            quantity=p.box_count,
+                            weight_kg=p.net_weight_kg,
+                            unit_price=p.unit_price,
+                            amount_usd=p_amount_usd,
+                            exchange_rate=rate,
+                            amount_cny=round(p_amount_cny, 2),
+                            after_sales_adjustment=Decimal("0"),
+                        ))
         for po in all_domestic_pos:
             if (start is None or po.order_date >= start) and (end is None or po.order_date <= end):
-                purchase_details.append(PayablePurchaseItem(
-                    date=po.order_date,
-                    invoice_no=po.order_no or f"PO-{po.id}",
-                    product_name=None,
-                    spec=None,
-                    batch_no=None,
-                    quantity=None,
-                    weight_kg=None,
-                    unit_price=None,
-                    amount_usd=Decimal("0"),
-                    amount_cny=_to_decimal(po.total_amount),
-                ))
+                po_after = _to_decimal(po.after_sales_adjustment) if hasattr(po, 'after_sales_adjustment') else Decimal("0")
+                total_po_amount = _to_decimal(po.total_amount)
+                line_items = po_items_map.get(po.id, [])
+                if not line_items:
+                    purchase_details.append(PayablePurchaseItem(
+                        date=po.order_date,
+                        invoice_no=po.order_no or f"PO-{po.id}",
+                        product_name=None,
+                        spec=None,
+                        batch_no=None,
+                        quantity=None,
+                        weight_kg=None,
+                        unit_price=None,
+                        amount_usd=Decimal("0"),
+                        amount_cny=round(total_po_amount, 2),
+                        after_sales_adjustment=po_after,
+                    ))
+                else:
+                    for item, product in line_items:
+                        item_amount = _to_decimal(item.total_amount)
+                        ratio = item_amount / total_po_amount if total_po_amount else Decimal("0")
+                        item_after = po_after * ratio
+                        purchase_details.append(PayablePurchaseItem(
+                            date=po.order_date,
+                            invoice_no=po.order_no or f"PO-{po.id}",
+                            product_name=product.name if product else None,
+                            spec=product.spec if product else None,
+                            batch_no=None,
+                            quantity=int(item.qty) if item.qty is not None else None,
+                            weight_kg=item.qty,
+                            unit_price=item.unit_price,
+                            amount_usd=Decimal("0"),
+                            amount_cny=round(item_amount, 2),
+                            after_sales_adjustment=round(item_after, 2),
+                        ))
         for po in all_domestic_v2:
             if (start is None or po.purchase_date >= start) and (end is None or po.purchase_date <= end):
-                # 取第一个产品信息
-                first_prod = po.products[0] if po.products else None
-                total_qty = sum(p.box_count for p in po.products) if po.products else None
-                total_wt = sum(p.weight_kg for p in po.products) if po.products else None
-                purchase_details.append(PayablePurchaseItem(
-                    date=po.purchase_date,
-                    invoice_no=po.purchase_no or f"PO-{po.id}",
-                    product_name=first_prod.product_name if first_prod else None,
-                    spec=first_prod.product_spec if first_prod else None,
-                    batch_no=first_prod.batch if first_prod else None,
-                    quantity=total_qty,
-                    weight_kg=total_wt,
-                    unit_price=first_prod.unit_price if first_prod else None,
-                    amount_usd=Decimal("0"),
-                    amount_cny=_to_decimal(po.total_amount),
-                ))
+                po_after = _to_decimal(po.after_sales_adjustment) if hasattr(po, 'after_sales_adjustment') else Decimal("0")
+                total_po_amount = _to_decimal(po.total_amount)
+                products = po.products or []
+                if not products:
+                    purchase_details.append(PayablePurchaseItem(
+                        date=po.purchase_date,
+                        invoice_no=po.purchase_no or f"PO-{po.id}",
+                        product_name=None,
+                        spec=None,
+                        batch_no=None,
+                        quantity=None,
+                        weight_kg=None,
+                        unit_price=None,
+                        amount_usd=Decimal("0"),
+                        amount_cny=round(total_po_amount, 2),
+                        after_sales_adjustment=po_after,
+                    ))
+                else:
+                    for p in products:
+                        p_amount = _to_decimal(p.total_amount)
+                        ratio = p_amount / total_po_amount if total_po_amount else Decimal("0")
+                        p_after = po_after * ratio
+                        purchase_details.append(PayablePurchaseItem(
+                            date=po.purchase_date,
+                            invoice_no=po.purchase_no or f"PO-{po.id}",
+                            product_name=p.product_name,
+                            spec=p.product_spec,
+                            batch_no=p.batch,
+                            quantity=p.box_count,
+                            weight_kg=p.weight_kg,
+                            unit_price=p.unit_price,
+                            amount_usd=Decimal("0"),
+                            amount_cny=round(p_amount, 2),
+                            after_sales_adjustment=round(p_after, 2),
+                        ))
+        for po in all_material_pos:
+            if (start is None or po.order_date >= start) and (end is None or po.order_date <= end):
+                po_after = _to_decimal(po.after_sales_adjustment)
+                total_po_amount = _to_decimal(po.actual_total)
+                material_items = po.items or []
+                if not material_items:
+                    purchase_details.append(PayablePurchaseItem(
+                        date=po.order_date,
+                        invoice_no=po.order_no,
+                        product_name="辅料采购",
+                        spec=None,
+                        batch_no=None,
+                        quantity=None,
+                        weight_kg=None,
+                        unit_price=None,
+                        amount_usd=Decimal("0"),
+                        amount_cny=round(total_po_amount, 2),
+                        after_sales_adjustment=po_after,
+                    ))
+                else:
+                    for item in material_items:
+                        p_amount = _to_decimal(item.actual_amount)
+                        ratio = p_amount / total_po_amount if total_po_amount else Decimal("0")
+                        item_after = po_after * ratio
+                        product_name = item.product.name if item.product else None
+                        spec = item.product.spec if item.product else None
+                        purchase_details.append(PayablePurchaseItem(
+                            date=po.order_date,
+                            invoice_no=po.order_no,
+                            product_name=product_name,
+                            spec=spec,
+                            batch_no=None,
+                            quantity=item.box_count if item.box_count is not None else None,
+                            weight_kg=None,
+                            unit_price=item.actual_unit_price,
+                            amount_usd=Decimal("0"),
+                            amount_cny=round(p_amount, 2),
+                            after_sales_adjustment=round(item_after, 2),
+                        ))
         purchase_details.sort(key=lambda x: x.date)
 
-        # ========== 构建收支明细 ==========
+        # ========== 构建收支明细（从交易流水获取，排除对冲结算内部记录）==========
         payment_details = []
-        # 应收收款
-        for r in all_wf_receipts:
-            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
+        
+        # 查询与客户相关的实际交易流水记录（排除余额抵扣等虚拟交易，保留对冲结算）
+        txn_result = await db.execute(
+            select(TransactionRecord)
+            .where(TransactionRecord.counterparty_id == company.id)
+            .where(TransactionRecord.category != "balance_deduction")
+            .where(TransactionRecord.is_confirmed)
+        )
+        all_txn = txn_result.scalars().all()
+        
+        for t in all_txn:
+            if (start is None or t.transaction_date >= start) and (end is None or t.transaction_date <= end):
+                txn_type = "receipt" if t.type == "income" else "payment"
+                description = t.category
+                if t.category == "customer_deposit":
+                    description = "客户预付款"
+                elif t.category == "goods_payment":
+                    description = "采购付款"
+                elif t.category == "packaging_consumables":
+                    description = "辅料采购付款"
+                elif t.category == "main_business_income":
+                    description = "主营业务收入"
+                elif t.category == "main_business_revenue":
+                    description = "主营业务收入"
+                elif t.category == "other_income":
+                    description = "其他收入"
+                elif t.category == "other_expense":
+                    description = "其他支出"
+                elif t.category == "scan_fee":
+                    description = "扫码费"
+                elif t.category == "import_payment":
+                    description = "进口付款"
+                else:
+                    description = t.category
+                
                 payment_details.append(NettingPaymentItem(
-                    date=r.receipt_date,
-                    description="销售收款",
-                    amount=_to_decimal(r.amount),
-                    type="receipt",
-                    notes=r.notes,
+                    date=t.transaction_date,
+                    description=description,
+                    amount=_to_decimal(t.amount),
+                    type=txn_type,
+                    notes=t.description or t.reference_no,
                 ))
-        for r in all_fp_receipts:
-            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
-                payment_details.append(NettingPaymentItem(
-                    date=r.receipt_date,
-                    description="成品销售收款",
-                    amount=_to_decimal(r.amount),
-                    type="receipt",
-                    notes=r.notes,
-                ))
-        for r in all_fp_v2_receipts:
-            if (start is None or r.receipt_date >= start) and (end is None or r.receipt_date <= end):
-                payment_details.append(NettingPaymentItem(
-                    date=r.receipt_date,
-                    description="销售收款",
-                    amount=_to_decimal(r.amount),
-                    type="receipt",
-                    notes=r.notes,
-                ))
-        # 应付付款（进口购汇 + 国内付款）
+        
+        # 进口购汇付款（ExchangeRecord）
         for ex in all_exchanges:
-            if (start is None or ex.payment_date >= start) and (end is None or ex.payment_date <= end):
+            if (start is None or ex.exchange_date >= start) and (end is None or ex.exchange_date <= end):
                 payment_details.append(NettingPaymentItem(
-                    date=ex.payment_date,
+                    date=ex.exchange_date,
                     description="进口购汇付款",
-                    amount=_to_decimal(ex.payment_amount),
+                    amount=_to_decimal(ex.amount_cny) + _to_decimal(ex.fee_cny),
                     type="payment",
                     notes=ex.notes,
                 ))
-        for t in all_domestic_payments:
-            if (start is None or t.transaction_date >= start) and (end is None or t.transaction_date <= end):
-                payment_details.append(NettingPaymentItem(
-                    date=t.transaction_date,
-                    description="采购付款",
-                    amount=_to_decimal(t.amount),
-                    type="payment",
-                    notes=t.description,
-                ))
+        
         payment_details.sort(key=lambda x: x.date)
 
         items.append(NettingStatementItem(
             company_id=company.id,
             company_name=company.name,
             company_code=company.code,
-            company_type="both" if (all_wf_sales or all_fp_sales) and (all_invoices or all_domestic_pos or all_domestic_v2) else ("customer" if (all_wf_sales or all_fp_sales) else "supplier"),
+            company_type="both" if (all_wf_sales or all_fp_sales) and (all_invoices or all_domestic_pos or all_domestic_v2 or all_material_pos) else ("customer" if (all_wf_sales or all_fp_sales) else "supplier"),
             receivable_opening=round(receivable_opening, 2),
             receivable_current_sales=round(receivable_current_sales, 2),
             receivable_current_receipts=round(receivable_current_receipts, 2),
@@ -4854,8 +5752,11 @@ async def list_netting_statements(
             netting_closing=round(netting_closing, 2),
             netting_direction=netting_direction,
             sale_details=sale_details,
+            discount_details=discount_details,
+            aftersales_details=aftersales_details,
             purchase_details=purchase_details,
             payment_details=payment_details,
+            purchase_return_details=purchase_return_details,
         ))
 
         if netting_closing > 0:
@@ -4899,7 +5800,7 @@ async def list_customs_broker_statements(
 
     today = _dt.now().date()
     if not start_date:
-        start_date = today.replace(day=1).isoformat()
+        start_date = "2000-01-01"
     if not end_date:
         end_date = today.isoformat()
 

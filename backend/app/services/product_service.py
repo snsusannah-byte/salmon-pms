@@ -40,7 +40,7 @@ class ProductService:
 
         filters = []
         if categories:
-            cat_values = [str(cat) for cat in categories]
+            cat_values = [cat.value for cat in categories]
             filters.append(Product.category.in_(cat_values))
         elif category:
             filters.append(Product.category == category)

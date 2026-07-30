@@ -40,6 +40,10 @@ class FinishedProductSale(Base, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text)
     # V3: 新增总重量（份数 × 每份重量(g) / 1000）
     total_weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), default=Decimal("0"))
+    # V4: 与销售/售后对账保持一致
+    after_sales_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    balance_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    balance_adjustment_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     receipts: Mapped[list["FinishedProductReceipt"]] = relationship(
         "FinishedProductReceipt",
@@ -78,6 +82,8 @@ class FinishedProductReceipt(Base, TimestampMixin):
     transaction_id: Mapped[int | None] = mapped_column(ForeignKey("transaction_records.id"), nullable=True)
     receipt_date: Mapped[Date] = mapped_column(Date, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    # 创建该收款时关联单据显示的应付/待付金额（用于交易流水中展示“应付”）
+    payable_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
     payment_method: Mapped[str] = mapped_column(String(50))
     bank_account_id: Mapped[int | None] = mapped_column(ForeignKey("bank_accounts.id"))
     reference_no: Mapped[str | None] = mapped_column(String(100))
@@ -112,7 +118,10 @@ class FinishedProductSaleV2(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     sale_no: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
-    sale_type: Mapped[str | None] = mapped_column(String(20), default="whole_fish")
+    sale_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    # 关联采购入库单（以销定采：整鱼来源）
+    source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # 以销定采：销售单先行，不关联采购单（采购单反过来关联销售单）
     customer: Mapped[str | None] = mapped_column(String(100), nullable=True)
     salesperson: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -124,9 +133,11 @@ class FinishedProductSaleV2(Base, TimestampMixin):
     sale_date: Mapped[Date | None] = mapped_column(Date, nullable=True)
     discount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
     scan_fee: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    freight: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))  # 运费
     rounding: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
     after_sales_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
     commission: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    balance_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
     actual_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     net_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
@@ -148,6 +159,13 @@ class FinishedProductSaleV2(Base, TimestampMixin):
         lazy="selectin",
         cascade="all, delete-orphan",
     )
+    receipts: Mapped[list["FinishedProductReceipt"]] = relationship(
+        "FinishedProductReceipt",
+        foreign_keys="FinishedProductReceipt.sale_v2_id",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+        overlaps="sale_v2",
+    )
     return_orders: Mapped[list["ReturnOrder"]] = relationship(
         "ReturnOrder",
         foreign_keys="ReturnOrder.finished_product_sale_v2_id",
@@ -164,12 +182,19 @@ class FinishedSaleProductV2(Base, TimestampMixin):
     sale_id: Mapped[int] = mapped_column(ForeignKey("finished_product_sales_v2.id"), nullable=False)
     # 成品定义V2：关联SKU（系列→SPU→规格→SKU）
     variant_id: Mapped[int | None] = mapped_column(ForeignKey("product_variants.id"), nullable=True)
+    # 关联库存产品（用于单位换算/库存扣减）
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"), nullable=True)
     product_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     product_spec: Mapped[str] = mapped_column(String(100), nullable=False)
     factory: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    batch: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 库存批次号
     slaughter_date: Mapped[Date | None] = mapped_column(Date, nullable=True)  # 宰杀日期（产品明细级别）
     box_count: Mapped[int] = mapped_column(Integer, default=0)
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
+    # 销售单位：界面输入单位（如 "盘"），为空时使用产品基础单位
+    sale_unit: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 基础数量：换算为产品基础单位后的数量（如 600 只）
+    base_quantity: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"))
     total_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
     commission_rate: Mapped[Decimal] = mapped_column(Numeric(10, 4), default=Decimal("0"))
@@ -178,6 +203,7 @@ class FinishedSaleProductV2(Base, TimestampMixin):
 
     sale: Mapped["FinishedProductSaleV2"] = relationship("FinishedProductSaleV2", back_populates="products")
     variant: Mapped[Optional["ProductVariant"]] = relationship("ProductVariant", lazy="raise")
+    product: Mapped[Optional["Product"]] = relationship("Product", lazy="raise")
 
 
 

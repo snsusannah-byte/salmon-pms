@@ -141,6 +141,8 @@ class TransactionRecordBase(BaseModel):
 
 class TransactionRecordCreate(TransactionRecordBase):
     related_sale_ids: list[int] | None = Field(None, description="关联销售单ID列表（合并收款时）")
+    related_purchase_ids: list[int] | None = Field(None, description="关联辅料采购单ID列表（对冲结算时）")
+    related_purchase_inbound_ids: list[int] | None = Field(None, description="关联采购入库单ID列表（对冲结算时）")
     related_invoice_no: str | None = Field(None, description="关联发票号（填写发票号如8353，后端自动查找对应ID）")
     pass
 
@@ -162,6 +164,8 @@ class TransactionRecordUpdate(BaseModel):
     related_exchange_id: int | None = None
     related_invoice_no: str | None = Field(None, description="关联发票号（填写发票号如8353，后端自动查找对应ID）")
     related_sale_ids: list[int] | None = None
+    related_purchase_ids: list[int] | None = None
+    related_purchase_inbound_ids: list[int] | None = None
     is_confirmed: bool | None = None
     notes: str | None = None
 
@@ -172,12 +176,29 @@ class TransactionRecordResponse(TransactionRecordBase):
     id: int
     is_locked: bool = False
     related_sale_ids: list[int] | None = None
+    related_purchase_ids: list[int] | None = None
+    related_purchase_inbound_ids: list[int] | None = None
     created_at: datetime
     updated_at: datetime
 
     @field_validator("related_sale_ids", mode="before")
     @classmethod
     def parse_related_sale_ids(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        return None
+
+    @field_validator("related_purchase_ids", "related_purchase_inbound_ids", mode="before")
+    @classmethod
+    def parse_related_purchase_ids(cls, v):
         if v is None:
             return None
         if isinstance(v, list):

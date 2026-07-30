@@ -121,6 +121,10 @@ export function BatchCollectDialog({ open, onOpenChange, sales }: BatchCollectDi
   }, [open, totalAmount]);
 
   const handleSubmit = () => {
+    // 防止重复提交（快速双击按钮）
+    if (collectMutation.isPending) {
+      return;
+    }
     if (!isBalancePayment && !bankAccountId) {
       toast.error("请选择收款账户");
       return;

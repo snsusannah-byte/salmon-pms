@@ -237,6 +237,7 @@ class WarehouseV2Service:
                 "warehouse_name": wh.name,
                 "product_id": stock.product_id,
                 "product_name": product.name,
+                "product_spec": product.spec,
                 "product_category": product.category,
                 "batch_id": stock.batch_id,
                 "batch_no": batch_no,

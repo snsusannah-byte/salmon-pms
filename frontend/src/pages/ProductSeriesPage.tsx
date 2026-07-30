@@ -36,7 +36,7 @@ export function ProductSeriesPage() {
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ProductSeries | null>(null);
-  const [form, setForm] = useState({ code: "", name: "", sort_order: 0, notes: "" });
+  const [form, setForm] = useState({ code: "", name: "", sort_order: "" as string | number, notes: "" });
   const [submitting, setSubmitting] = useState(false);
 
   const fetchSeries = async () => {
@@ -60,7 +60,7 @@ export function ProductSeriesPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ code: "", name: "", sort_order: 0, notes: "" });
+    setForm({ code: "", name: "", sort_order: "", notes: "" });
     setDialogOpen(true);
   };
 
@@ -86,10 +86,15 @@ export function ProductSeriesPage() {
         })
       }, "更新成功");
     } else {
-      res = await apiPost("/v1/finished-products/series", {
-        ...form,
-        sort_order: Number(form.sort_order)
-      }, "创建成功");
+      const body: any = {
+        name: form.name,
+        sort_order: form.sort_order ? Number(form.sort_order) : undefined,
+        notes: form.notes || undefined,
+      };
+      if (form.code.trim()) {
+        body.code = form.code.trim();
+      }
+      res = await apiPost("/v1/finished-products/series", body, "创建成功");
     }
     setSubmitting(false);
     if (res.ok) {
@@ -197,7 +202,7 @@ export function ProductSeriesPage() {
                 <Input
                   value={form.code}
                   onChange={(e) => setForm({ ...form, code: e.target.value })}
-                  placeholder="如 CX"
+                  placeholder="留空自动生成（如 S6）"
                   disabled={!!editing}
                 />
               </div>
@@ -207,6 +212,7 @@ export function ProductSeriesPage() {
                   type="number"
                   value={form.sort_order}
                   onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })}
+                  placeholder="留空自动排序"
                 />
               </div>
             </div>
@@ -231,7 +237,7 @@ export function ProductSeriesPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               取消
             </Button>
-            <Button onClick={handleSubmit} disabled={submitting || !form.code || !form.name}>
+            <Button onClick={handleSubmit} disabled={submitting || !form.name.trim()}>
               {submitting && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
               {editing ? "保存" : "创建"}
             </Button>

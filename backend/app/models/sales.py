@@ -36,6 +36,9 @@ class WholeFishSale(Base, TimestampMixin):
     rounding_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
     after_sales_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
     discount: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    discount_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    balance_adjustment: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
+    balance_adjustment_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     commission: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0"))
     net_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     paid_amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), default=Decimal("0"))
@@ -83,7 +86,9 @@ class SalesReceipt(Base, TimestampMixin):
     sale_id: Mapped[int] = mapped_column(ForeignKey("whole_fish_sales.id"), nullable=False)
     receipt_date: Mapped[Date] = mapped_column(Date, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
-    payment_method: Mapped[str] = mapped_column(String(50))  # cash, transfer, check, scan
+    # 创建该收款时关联单据显示的应付/待付金额（用于交易流水中展示“应付”）
+    payable_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    payment_method: Mapped[str] = mapped_column(String(50))  # cash, transfer, check, scan, balance, netting
     bank_account_id: Mapped[int | None] = mapped_column(ForeignKey("bank_accounts.id"))
     reference_no: Mapped[str | None] = mapped_column(String(100))
     notes: Mapped[str | None] = mapped_column(Text)

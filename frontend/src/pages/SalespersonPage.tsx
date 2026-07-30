@@ -28,7 +28,8 @@ interface Salesperson {
   name: string;
   phone: string | null;
   email: string | null;
-  commission_rate: number; // 提成单价 元/kg
+  commission_type: string;
+  commission_rate: number;
   is_active: boolean;
   notes: string | null;
   created_at: string;
@@ -44,6 +45,7 @@ export function SalespersonPage() {
   const [formName, setFormName] = useState("");
   const [formPhone, setFormPhone] = useState("");
   const [formEmail, setFormEmail] = useState("");
+  const [formType, setFormType] = useState<"per_kg" | "percentage_of_receipt">("per_kg");
   const [formRate, setFormRate] = useState("");
   const [formNotes, setFormNotes] = useState("");
 
@@ -97,6 +99,7 @@ export function SalespersonPage() {
     setFormName("");
     setFormPhone("");
     setFormEmail("");
+    setFormType("per_kg");
     setFormRate("");
     setFormNotes("");
     setEditing(null);
@@ -112,6 +115,7 @@ export function SalespersonPage() {
     setFormName(sp.name);
     setFormPhone(sp.phone ?? "");
     setFormEmail(sp.email ?? "");
+    setFormType((sp.commission_type as "per_kg" | "percentage_of_receipt") || "per_kg");
     setFormRate(String(sp.commission_rate));
     setFormNotes(sp.notes ?? "");
     setDialogOpen(true);
@@ -126,8 +130,9 @@ export function SalespersonPage() {
       name: formName,
       phone: formPhone || null,
       email: formEmail || null,
+      commission_type: formType,
       commission_rate: formRate ? parseFloat(formRate) : 0,
-      is_active: true,
+      is_active: editing ? editing.is_active : true,
       notes: formNotes || null,
     };
     if (editing) {
@@ -172,7 +177,8 @@ export function SalespersonPage() {
               <TableHead>姓名</TableHead>
               <TableHead>电话</TableHead>
               <TableHead>邮箱</TableHead>
-              <TableHead>提成单价</TableHead>
+              <TableHead>提成方式</TableHead>
+              <TableHead>提成率</TableHead>
               <TableHead>状态</TableHead>
               <TableHead>备注</TableHead>
               <TableHead className="w-[120px]">操作</TableHead>
@@ -181,13 +187,13 @@ export function SalespersonPage() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">
+                <TableCell colSpan={8} className="text-center py-8">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : (data?.items?.length ?? 0) === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   暂无业务员
                 </TableCell>
               </TableRow>
@@ -202,7 +208,14 @@ export function SalespersonPage() {
                   </TableCell>
                   <TableCell className="text-sm">{sp.phone ?? "-"}</TableCell>
                   <TableCell className="text-sm">{sp.email ?? "-"}</TableCell>
-                  <TableCell className="text-sm font-medium">¥{sp.commission_rate}/kg</TableCell>
+                  <TableCell className="text-sm">
+                    {sp.commission_type === "percentage_of_receipt" ? "按实收金额比例" : "按公斤"}
+                  </TableCell>
+                  <TableCell className="text-sm font-medium">
+                    {sp.commission_type === "percentage_of_receipt"
+                      ? `${sp.commission_rate}‰`
+                      : `¥${sp.commission_rate}/kg`}
+                  </TableCell>
                   <TableCell>
                     {sp.is_active ? (
                       <Badge variant="secondary" className="bg-green-100 text-green-800">在职</Badge>
@@ -250,8 +263,19 @@ export function SalespersonPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>默认提成单价 (元/kg)</Label>
-              <Input type="number" step="0.01" value={formRate} onChange={(e) => setFormRate(e.target.value)} placeholder="如: 0.5" />
+              <Label>提成方式</Label>
+              <select
+                value={formType}
+                onChange={(e) => setFormType(e.target.value as "per_kg" | "percentage_of_receipt")}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="per_kg">按公斤 (元/kg)</option>
+                <option value="percentage_of_receipt">按实收金额比例 (‰)</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label>{formType === "percentage_of_receipt" ? "提成比例 (‰)" : "提成单价 (元/kg)"}</Label>
+              <Input type="number" step="0.01" value={formRate} onChange={(e) => setFormRate(e.target.value)} placeholder={formType === "percentage_of_receipt" ? "如: 5 表示 5‰" : "如: 0.5"} />
             </div>
             <div className="space-y-2">
               <Label>备注</Label>

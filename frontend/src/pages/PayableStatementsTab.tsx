@@ -205,6 +205,7 @@ export function PayableStatementsTab() {
       <style>{`
         @media print {
           nav, aside, .sidebar, [role="navigation"] { display: none !important; }
+          [role="tablist"] { display: none !important; }
           .print-hidden-query { display: none !important; }
           body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .print-content { display: block !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
@@ -219,7 +220,7 @@ export function PayableStatementsTab() {
       <div className="space-y-4">
         {/* Tabs 切换 */}
         <Tabs value={activeTab} onValueChange={(v: string) => { setActiveTab(v as "import" | "domestic" | "customs_broker"); setDoSearch(false); }}>
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-3 print:hidden">
             <TabsTrigger value="import" className="flex items-center gap-2">
               <Globe className="h-4 w-4" /> 进口采购应付
             </TabsTrigger>
@@ -347,7 +348,7 @@ export function PayableStatementsTab() {
                           <p className="text-sm">对账周期：{periodText}</p>
                         </div>
 
-                        {/* 屏幕汇总 */}
+                        {/* 屏幕汇总（打印时隐藏，只保留底部汇总行） */}
                         <div className="bg-muted/30 rounded-lg p-4 space-y-2 print:hidden">
                           <div className="flex items-center justify-between">
                             <div className="text-lg font-semibold">
@@ -389,6 +390,32 @@ export function PayableStatementsTab() {
                             </>
                           )}
                         </div>
+
+                        {/* 打印汇总（报关行应付） */}
+                        {activeTab === "customs_broker" && activeItem && (
+                          <div className="hidden print:block border-t border-b border-gray-300 py-2 mb-4">
+                            <div className="grid grid-cols-4 gap-2 text-center text-sm">
+                              <div>
+                                <div className="text-xs text-gray-600">期初欠款</div>
+                                <div className="font-medium">{fmt$(activeItem.opening_balance)}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs text-gray-600">本期费用</div>
+                                <div className="font-medium">{fmt$(activeItem.current_fees || 0)}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs text-gray-600">本期付款</div>
+                                <div className="font-medium">{fmt$(activeItem.current_payments)}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs text-gray-600">期末欠款</div>
+                                <div className={cn("font-medium", Number(activeItem.closing_balance) > 0 ? "text-red-700" : "text-green-700")}>
+                                  {fmt$(activeItem.closing_balance)}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         {/* 采购明细 + 购汇明细（进口采购并列布局） */}
                         {activeTab === "import" && (
@@ -478,6 +505,33 @@ export function PayableStatementsTab() {
                                 </Table>
                               </div>
                             </div>
+                          </div>
+                        )}
+
+                        {/* 打印专用汇总行（进口采购） */}
+                        {activeTab === "import" && activeItem && (
+                          <div className="hidden print:block mt-4">
+                            <h4 className="text-sm font-bold mb-2">进口采购汇总</h4>
+                            <table className="w-full text-sm border-collapse border border-gray-300">
+                              <tbody>
+                                <tr>
+                                  <td className="border border-gray-300 px-2 py-1 font-medium bg-gray-50">采购发票数</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-right">{(activeItem.purchase_details || []).length}</td>
+                                  <td className="border border-gray-300 px-2 py-1 font-medium bg-gray-50">进口总金额(USD)</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-right">${Number(activeItem.total_import_usd || 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</td>
+                                  <td className="border border-gray-300 px-2 py-1 font-medium bg-gray-50">购汇记录数</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-right">{(activeItem.exchange_details || []).length}</td>
+                                </tr>
+                                <tr>
+                                  <td className="border border-gray-300 px-2 py-1 font-medium bg-gray-50">已购汇(USD)</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-right text-green-700">${Number(activeItem.total_exchanged_usd || 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</td>
+                                  <td className="border border-gray-300 px-2 py-1 font-medium bg-gray-50">未购汇(USD)</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-right text-orange-700">${Number(activeItem.total_unexchanged_usd || 0).toLocaleString("en-US", {minimumFractionDigits: 2})}</td>
+                                  <td className="border border-gray-300 px-2 py-1 font-medium bg-gray-50">购汇合计(CNY)</td>
+                                  <td className="border border-gray-300 px-2 py-1 text-right text-blue-700">{fmt$(activeItem.total_exchanged_cny)}</td>
+                                </tr>
+                              </tbody>
+                            </table>
                           </div>
                         )}
 

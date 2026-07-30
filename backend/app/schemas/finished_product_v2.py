@@ -307,3 +307,150 @@ class FinishedProductSaleWithItemsCreate(BaseModel):
     salesperson_id: int | None = None
     notes: str | None = None
     items: list[dict] | None = None
+
+
+# ==================== FinishedProductSaleV2 Schemas ====================
+
+class FinishedProductReceiptV2Response(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    sale_v2_id: int | None = None
+    transaction_id: int | None = None
+    receipt_date: date
+    amount: Decimal
+    payment_method: str | None = None
+    bank_account_id: int | None = None
+    reference_no: str | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class FinishedSaleProductV2Base(BaseModel):
+    variant_id: int | None = None
+    product_id: int | None = None
+    product_name: str | None = None
+    product_spec: str
+    factory: str | None = None
+    slaughter_date: date | None = None
+    box_count: int = 0
+    weight_kg: Decimal = Decimal("0")
+    sale_unit: str | None = None
+    base_quantity: Decimal | None = None
+    unit_price: Decimal = Decimal("0")
+    total_amount: Decimal = Decimal("0")
+    commission_rate: Decimal = Decimal("0")
+    commission_amount: Decimal = Decimal("0")
+    after_sales_adjustment: Decimal = Decimal("0")
+
+
+class FinishedSaleProductV2Create(FinishedSaleProductV2Base):
+    pass
+
+
+class FinishedSaleProductV2Update(FinishedSaleProductV2Base):
+    id: int | None = None
+
+
+class FinishedSaleProductV2Response(FinishedSaleProductV2Base):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    sale_id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class FinishedProductSaleV2Base(BaseModel):
+    sale_no: str | None = None
+    sale_type: str
+    source_id: int | None = None
+    source_no: str | None = None
+    customer: str | None = None
+    salesperson: str | None = None
+    product_name: str | None = None
+    quantity: Decimal | None = Decimal("0")
+    weight: Decimal | None = Decimal("0")
+    unit_price: Decimal | None = Decimal("0")
+    total_amount: Decimal | None = Decimal("0")
+    sale_date: date | None = None
+    discount: Decimal = Decimal("0")
+    scan_fee: Decimal = Decimal("0")
+    freight: Decimal = Decimal("0")
+    rounding: Decimal = Decimal("0")
+    after_sales_adjustment: Decimal = Decimal("0")
+    commission: Decimal = Decimal("0")
+    balance_adjustment: Decimal = Decimal("0")
+    actual_amount: Decimal = Decimal("0")
+    net_amount: Decimal | None = Decimal("0")
+    paid_amount: Decimal = Decimal("0")
+    paid: int = 0
+    remark: str | None = None
+    status: str = "pending"
+    batch_no: str | None = None
+    slaughter_date: date | None = None
+    factory: str | None = None
+    delivery_address: str | None = None
+    logistics_info: str | None = None
+
+
+class FinishedProductSaleV2Create(FinishedProductSaleV2Base):
+    products: list[FinishedSaleProductV2Create] = []
+
+
+class FinishedProductSaleV2Update(BaseModel):
+    sale_no: str | None = None
+    sale_type: str | None = None
+    source_id: int | None = None
+    source_no: str | None = None
+    customer: str | None = None
+    salesperson: str | None = None
+    product_name: str | None = None
+    quantity: Decimal | None = None
+    weight: Decimal | None = None
+    unit_price: Decimal | None = None
+    total_amount: Decimal | None = None
+    sale_date: date | None = None
+    discount: Decimal | None = None
+    scan_fee: Decimal | None = None
+    freight: Decimal | None = None
+    rounding: Decimal | None = None
+    after_sales_adjustment: Decimal | None = None
+    commission: Decimal | None = None
+    balance_adjustment: Decimal | None = None
+    actual_amount: Decimal | None = None
+    net_amount: Decimal | None = None
+    paid: int | None = None
+    remark: str | None = None
+    status: str | None = None
+    batch_no: str | None = None
+    slaughter_date: date | None = None
+    factory: str | None = None
+    delivery_address: str | None = None
+    logistics_info: str | None = None
+    products: list[FinishedSaleProductV2Update] | None = None
+
+
+class FinishedProductSaleV2Response(FinishedProductSaleV2Base):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    products: list[FinishedSaleProductV2Response] = []
+    receipts: list[FinishedProductReceiptV2Response] = []
+
+
+class FinishedProductSaleV2ListResponse(BaseModel):
+    total: int
+    items: list[FinishedProductSaleV2Response]
+    skip: int
+    limit: int
+
+
+class FinishedProductSaleV2ReceiptCreate(BaseModel):
+    receipt_date: date
+    amount: Decimal
+    payment_method: str
+    bank_account_id: int | None = None
+    reference_no: str | None = None
+    notes: str | None = None
+    transaction_id: int | None = None

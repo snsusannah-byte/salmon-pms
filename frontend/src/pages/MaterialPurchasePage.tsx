@@ -722,6 +722,30 @@ export default function MaterialPurchasePage() {
           </div>
         )}
 
+        {/* 汇总行 */}
+        <div className="flex-none border-t bg-gray-100 px-4 py-2 grid grid-cols-5 gap-4 text-sm">
+          <div>
+            <span className="text-muted-foreground">采购单数：</span>
+            <span className="font-medium">{filtered.length} 单</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">待入库：</span>
+            <span className="font-medium text-yellow-700">{pendingCount} 单</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">总箱数：</span>
+            <span className="font-medium">{totalBoxes.toLocaleString()}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">总数量：</span>
+            <span className="font-medium">{totalQty.toLocaleString()}</span>
+          </div>
+          <div>
+            <span className="text-muted-foreground">总金额：</span>
+            <span className="font-medium text-blue-600">¥{fmtMoney(totalAmount)}</span>
+          </div>
+        </div>
+
         {/* 分页 */}
         {totalPages > 1 && (
           <div className="flex-none border-t bg-gray-50 px-4 py-2 flex items-center justify-between text-sm">

@@ -52,6 +52,8 @@ interface PurchaseOrder {
   total_amount: number;
   after_sales_adjustment?: number;
   net_amount?: number;
+  paid_amount?: number;
+  payment_status?: string;
   total_weight: number;
   total_boxes: number;
   factories?: string[];
@@ -504,17 +506,18 @@ export function PurchaseOrderEntry() {
                   <TableHead className="sticky top-0 bg-background z-10 text-right">金额(元)</TableHead>
                   <TableHead className="sticky top-0 bg-background z-10 text-right">售后扣款</TableHead>
                   <TableHead className="sticky top-0 bg-background z-10 text-right">净金额</TableHead>
+                  <TableHead className="sticky top-0 bg-background z-10">付款状态</TableHead>
                   <TableHead className="sticky top-0 bg-background z-10 w-[100px]">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">加载中...</TableCell>
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">加载中...</TableCell>
                   </TableRow>
                 ) : filteredOrders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                       {search ? '无匹配数据' : '暂无采购入库单'}
                     </TableCell>
                   </TableRow>
@@ -584,6 +587,15 @@ export function PurchaseOrderEntry() {
                             <span>¥{o.net_amount.toFixed(2)}</span>
                           ) : (
                             o.total_amount ? `¥${o.total_amount.toFixed(2)}` : '-'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {o.payment_status === 'paid' ? (
+                            <Badge variant="outline" className="text-green-600 border-green-200 bg-green-50">已付款</Badge>
+                          ) : o.payment_status === 'partial' ? (
+                            <Badge variant="outline" className="text-orange-600 border-orange-200 bg-orange-50">部分付款</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-gray-600">待付款</Badge>
                           )}
                         </TableCell>
                         <TableCell>

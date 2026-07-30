@@ -152,6 +152,9 @@ async def _build_sale_response(db: AsyncSession, sale: WholeFishSale) -> WholeFi
         rounding_adjustment=sale.rounding_adjustment,
         after_sales_adjustment=combined_aftersales,
         discount=sale.discount,
+        discount_reason=sale.discount_reason,
+        balance_adjustment=sale.balance_adjustment,
+        balance_adjustment_reason=sale.balance_adjustment_reason,
         commission=sale.commission,
         net_amount=sale.net_amount,
         paid_amount=sale.paid_amount,
@@ -184,6 +187,8 @@ async def list_whole_fish_sales(
     ids: str | None = Query(None, description="销售单ID列表(逗号分隔)"),
     status: str | None = Query(None, description="收款状态(支持逗号分隔多选: pending,partial_paid,fully_paid,after_sales)"),
     search: str | None = Query(None, description="搜索客户名称、批次名称或销售单号"),
+    start_date: date | None = Query(None, description="销售日期开始"),
+    end_date: date | None = Query(None, description="销售日期结束"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
@@ -191,7 +196,8 @@ async def list_whole_fish_sales(
     """整鱼销售列表"""
     id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()] if ids else None
     items, total = await SalesService.list_sales(
-        db=db, batch_id=batch_id, customer_id=customer_id, ids=id_list, status=status, search=search, skip=skip, limit=limit
+        db=db, batch_id=batch_id, customer_id=customer_id, ids=id_list, status=status, search=search,
+        start_date=start_date, end_date=end_date, skip=skip, limit=limit
     )
     result_items = []
     for sale in items:
@@ -205,11 +211,14 @@ async def export_whole_fish_sales(
     customer_id: int | None = Query(None, description="客户ID"),
     status: str | None = Query(None, description="收款状态(支持逗号分隔多选)"),
     search: str | None = Query(None, description="搜索客户名称、批次名称或销售单号"),
+    start_date: date | None = Query(None, description="销售日期开始"),
+    end_date: date | None = Query(None, description="销售日期结束"),
     db: AsyncSession = Depends(get_db),
 ):
     """导出整鱼销售记录为 CSV"""
     items, total = await SalesService.list_sales(
-        db=db, batch_id=batch_id, customer_id=customer_id, status=status, search=search, skip=0, limit=5000
+        db=db, batch_id=batch_id, customer_id=customer_id, status=status, search=search,
+        start_date=start_date, end_date=end_date, skip=0, limit=5000
     )
 
     # 状态映射
@@ -677,7 +686,12 @@ async def batch_import_sales(
                 continue
             
             unit_price_str = str(record.get("unit_price", "")).strip()
-            if not unit_price_str or not unit_price_str.replace(".", "").isdigit():
+            if unit_price_str == "":
+                errors.append({"row": idx + 1, "error": "单价不能为空"})
+                continue
+            try:
+                Decimal(unit_price_str)
+            except Exception:
                 errors.append({"row": idx + 1, "error": "单价必须是有效数字"})
                 continue
             

@@ -125,6 +125,10 @@ class FinishedProductSaleBase(BaseModel):
     notes: str | None = None
     slaughter_date: date | None = None
     total_weight_kg: Decimal | None = None  # V3: 新增总重量(kg)
+    # V4: 与销售/售后对账保持一致
+    after_sales_adjustment: Decimal | None = Decimal("0")
+    balance_adjustment: Decimal | None = Decimal("0")
+    balance_adjustment_reason: str | None = None
     # V4: 支持整鱼销售模式
     sale_type: str | None = "finished_product"  # "finished_product" | "whole_fish"
     spec: str | None = None  # 整鱼规格
@@ -154,6 +158,10 @@ class FinishedProductSaleUpdate(BaseModel):
     notes: str | None = None
     slaughter_date: date | None = None
     total_weight_kg: Decimal | None = None  # V3: 新增
+    # V4: 与销售/售后对账保持一致
+    after_sales_adjustment: Decimal | None = None
+    balance_adjustment: Decimal | None = None
+    balance_adjustment_reason: str | None = None
     # V4: 支持整鱼销售模式
     sale_type: str | None = None
     spec: str | None = None
