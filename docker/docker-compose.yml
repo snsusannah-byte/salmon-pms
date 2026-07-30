@@ -50,6 +50,7 @@ services:
       MINIO_ACCESS_KEY: salmon
       MINIO_SECRET_KEY: salmon12345
       SECRET_KEY: dev-secret-key-change-in-production
+      CORS_ORIGINS: '["http://192.168.110.64:4100","http://localhost:4100","http://127.0.0.1:4100"]'
     ports:
       - "8000:8000"
     depends_on:
@@ -64,18 +65,19 @@ services:
       - /app/.venv
 
   frontend:
-    build:
-      context: ../frontend
-      dockerfile: Dockerfile
+    image: node:22-alpine
+    working_dir: /app
     ports:
-      - "5173:5173"
+      - "4100:4100"
     depends_on:
       - backend
     volumes:
       - ../frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=/api
+      - API_PROXY_TARGET=http://backend:8000
+    command: ["sh", "-c", "corepack enable pnpm && pnpm install && pnpm run dev -- --host 0.0.0.0 --port 4100"]
 
 volumes:
   postgres_data:

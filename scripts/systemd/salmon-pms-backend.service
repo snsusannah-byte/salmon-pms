@@ -1,0 +1,25 @@
+[Unit]
+Description=Salmon PMS 后端服务
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=sannah
+WorkingDirectory=/home/sannah/.openclaw/workspace-codeingman/projects/salmon-pms/backend
+Environment="PATH=/home/sannah/.nvm/versions/node/v22.22.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="DATABASE_URL=postgresql+asyncpg://salmon:001978@localhost:5432/salmon_pms"
+Environment="REDIS_URL=redis://localhost:6379/0"
+Environment="MINIO_ENDPOINT=localhost:9000"
+Environment="MINIO_ACCESS_KEY=salmon"
+Environment="MINIO_SECRET_KEY=salmon12345"
+Environment="SECRET_KEY=dev-secret-key-change-in-production"
+Environment="DEBUG=true"
+Environment="CORS_ORIGINS=[\"http://192.168.110.64:4100\",\"http://localhost:4100\",\"http://127.0.0.1:4100\"]"
+ExecStart=/home/sannah/.openclaw/workspace-codeingman/projects/salmon-pms/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
