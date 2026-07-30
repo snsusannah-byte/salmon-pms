@@ -410,7 +410,7 @@ export default function MaterialPurchasePage() {
       </div>
 
       {/* 操作栏 */}
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className={cn("flex items-center gap-2 flex-wrap p-2 rounded-md border transition-colors", hasSelection ? "bg-primary/5 border-primary/20" : "border-transparent")}>
         <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)}>
           <Plus className="h-4 w-4 mr-1" />
           辅料采购
@@ -527,6 +527,7 @@ export default function MaterialPurchasePage() {
                     )}
                     onClick={() => {
                       setSelectedRow(order);
+                      setSelectedIds(new Set([order.id]));
                       // 获取详情
                       setDetailLoading(true);
                       fetchOrderDetail(order.id)
@@ -534,7 +535,7 @@ export default function MaterialPurchasePage() {
                         .finally(() => setDetailLoading(false));
                     }}
                   >
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.has(order.id)}
                         onCheckedChange={(checked) =>

@@ -676,7 +676,7 @@ export function FinishedProductSales() {
           </div>
 
           {/* 操作栏 */}
-          <div className="flex items-center gap-2 flex-wrap mb-4">
+          <div className={cn("flex items-center gap-2 flex-wrap mb-4 p-2 rounded-md border transition-colors", hasSelection ? "bg-primary/5 border-primary/20" : "border-transparent")}>
             {isMadeToOrder && <Button size="sm" variant="outline" onClick={() => handleNew('whole_fish')}><ShoppingCart className="h-4 w-4 mr-1" />新建销售单</Button>}
             {!isMadeToOrder && (
               <>
@@ -730,8 +730,8 @@ export function FinishedProductSales() {
                 <tbody>
                   {pageData.length === 0 && <tr><td colSpan={20} className="px-4 py-8 text-center text-gray-400">暂无销售记录</td></tr>}
                   {pageData.map(s => (
-                    <tr key={s.id} className={cn("border-t hover:bg-gray-50 cursor-pointer", selectedSale?.id === s.id && "bg-primary/10")} onClick={() => setSelectedSale(s)}>
-                      <td className="px-3 py-2"><Checkbox checked={selectedIds.has(s.id)} onCheckedChange={(checked) => toggleSelect(s.id, checked)} /></td>
+                    <tr key={s.id} className={cn("border-t hover:bg-gray-50 cursor-pointer", selectedSale?.id === s.id && "bg-primary/10")} onClick={() => { setSelectedSale(s); setSelectedIds(new Set([s.id])); }}>
+                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><Checkbox checked={selectedIds.has(s.id)} onCheckedChange={(checked) => toggleSelect(s.id, checked)} /></td>
                       <td className="px-3 py-2 font-mono text-blue-600 cursor-pointer hover:underline whitespace-nowrap" onClick={() => handleViewDetail(s)}>{s.sale_no}</td>
                       <td className="px-3 py-2 whitespace-nowrap"><Badge variant={s.sale_type === 'whole_fish' ? 'secondary' : 'default'}>{s.sale_type === 'whole_fish' ? '整鱼' : '成品'}</Badge></td>
                       <td className="px-3 py-2 whitespace-nowrap">{s.sale_date}</td>

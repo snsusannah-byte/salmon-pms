@@ -296,7 +296,7 @@ export default function ReturnsPage() {
       </div>
 
       {/* 常驻操作栏（固定在搜索行下方，始终显示） */}
-      <div className="flex items-center gap-2 flex-wrap min-h-[36px]">
+      <div className={cn("flex items-center gap-2 flex-wrap min-h-[36px] p-2 rounded-md border transition-colors", hasSelection ? "bg-primary/5 border-primary/20" : "border-transparent")}>
         <Button variant="ghost" size="sm" onClick={() => { setEditData(null); setFormOpen(true); }} title="新建退货单">
           <Plus className="h-4 w-4 mr-1 text-orange-600" /><span className="text-orange-600">新建退货单</span>
         </Button>
@@ -368,8 +368,12 @@ export default function ReturnsPage() {
               data.items.map((item: any) => {
                 const status = statusMap[item.status] ?? { label: item.status, color: "" };
                 return (
-                  <TableRow key={item.id}>
-                    <TableCell>
+                  <TableRow
+                    key={item.id}
+                    className={cn("cursor-pointer hover:bg-gray-50", selectedIds.has(item.id) && "bg-primary/5")}
+                    onClick={() => setSelectedIds(new Set([item.id]))}
+                  >
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <Checkbox checked={selectedIds.has(item.id)} onCheckedChange={(checked) => toggleSelect(item.id, !!checked)} />
                     </TableCell>
                     <TableCell 
