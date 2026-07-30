@@ -6,10 +6,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle, Building2 } from "lucide-react";
+import { CheckCircle, Building2, Plus, Trash2 } from "lucide-react";
 
 const SUPPLIER_CATEGORIES = [
   { value: "raw_material", label: "原料供应" },
@@ -56,6 +64,17 @@ interface Supplier {
   notes: string | null;
   is_active?: boolean;
   created_at?: string;
+  bank_accounts?: BankAccountItem[];
+}
+
+interface BankAccountItem {
+  id?: number;
+  account_name: string;
+  bank_name: string;
+  account_number: string;
+  currency: string;
+  is_active: boolean;
+  notes: string;
 }
 
 interface SupplierFormDialogProps {
@@ -67,6 +86,20 @@ interface SupplierFormDialogProps {
 export function SupplierFormDialog({ open, onOpenChange, initialData }: SupplierFormDialogProps) {
   const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState<BankAccountItem[]>([]);
+
+  const emptyBankAccount = (): BankAccountItem => ({
+    account_name: "",
+    bank_name: "",
+    account_number: "",
+    currency: "CNY",
+    is_active: true,
+    notes: "",
+  });
+
+  const addBankAccount = () => setBankAccounts((prev) => [...prev, emptyBankAccount()]);
+  const removeBankAccount = (idx: number) => setBankAccounts((prev) => prev.filter((_, i) => i !== idx));
+  const updateBankAccount = (idx: number, field: keyof BankAccountItem, value: any) => setBankAccounts((prev) => prev.map((item, i) => (i === idx ? { ...item, [field]: value } : item)));
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -107,6 +140,18 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
           supplier_category: initialData.supplier_category ?? "",
           notes: initialData.notes ?? "",
         });
+        const accounts = (initialData.bank_accounts || []).map((acc) => ({ ...acc }));
+        if (accounts.length === 0 && (initialData.payee || initialData.bank_name || initialData.bank_account)) {
+          accounts.push({
+            account_name: initialData.payee || "",
+            bank_name: initialData.bank_name || "",
+            account_number: initialData.bank_account || "",
+            currency: initialData.currency || "CNY",
+            is_active: true,
+            notes: "",
+          });
+        }
+        setBankAccounts(accounts);
       } else {
         form.reset({
           name: "",
@@ -124,6 +169,7 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
           supplier_category: "",
           notes: "",
         });
+        setBankAccounts([]);
       }
     }
   }, [open, initialData?.id]);
@@ -131,11 +177,30 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      const payload = {
+      const filteredAccounts = bankAccounts
+        .filter((acc) => acc.account_name.trim() || acc.bank_name.trim() || acc.account_number.trim())
+        .map((acc) => ({
+          ...acc,
+          id: acc.id && acc.id > 0 ? acc.id : undefined,
+          account_name: acc.account_name.trim(),
+          bank_name: acc.bank_name.trim(),
+          account_number: acc.account_number.trim(),
+          notes: acc.notes.trim(),
+        }));
+
+      const payload: any = {
         ...data,
         type: "supplier",
         cooperation_date: data.cooperation_date || undefined,
+        bank_accounts: filteredAccounts,
       };
+
+      // 同步旧版单账户字段到第一个收款账户，保持兼容性
+      if (filteredAccounts.length > 0) {
+        payload.payee = filteredAccounts[0].account_name;
+        payload.bank_name = filteredAccounts[0].bank_name;
+        payload.bank_account = filteredAccounts[0].account_number;
+      }
 
       if (initialData) {
         await api.put(`/v1/companies/${initialData.id}`, payload);
@@ -233,23 +298,86 @@ export function SupplierFormDialog({ open, onOpenChange, initialData }: Supplier
             </div>
           </div>
 
-          {/* 银行信息 */}
-          <div className="border rounded-lg p-4 space-y-3">
-            <div className="text-sm font-medium text-gray-700">收款账户</div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="payee" className="text-xs">收款人</Label>
-                <Input id="payee" {...form.register("payee")} placeholder="收款人名称" />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="bank_name" className="text-xs">开户行</Label>
-                <Input id="bank_name" {...form.register("bank_name")} placeholder="如：中国银行" />
-              </div>
+          {/* 收款账户（可多个） */}
+          <div className="border rounded-lg p-4 space-y-3 bg-gray-50/50">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-700">收款账户</div>
+              <Button type="button" variant="outline" size="sm" onClick={addBankAccount}>
+                <Plus className="h-4 w-4 mr-1" />添加账户
+              </Button>
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="bank_account" className="text-xs">银行账号</Label>
-              <Input id="bank_account" {...form.register("bank_account")} placeholder="银行账号" />
-            </div>
+            {bankAccounts.length === 0 && (
+              <div className="text-sm text-muted-foreground">暂无收款账户，点击上方按钮添加</div>
+            )}
+            {bankAccounts.map((acc, idx) => (
+              <div key={idx} className="border rounded-md p-3 space-y-3 bg-white">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-muted-foreground">账户 {idx + 1}</span>
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeBankAccount(idx)}>
+                    <Trash2 className="h-4 w-4 text-red-500" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-2">
+                    <Label className="text-xs">户名</Label>
+                    <Input
+                      value={acc.account_name}
+                      onChange={(e) => updateBankAccount(idx, "account_name", e.target.value)}
+                      placeholder="收款账户名/户名"
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label className="text-xs">币种</Label>
+                    <Select
+                      value={acc.currency}
+                      onValueChange={(v) => updateBankAccount(idx, "currency", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue>{acc.currency}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CNY">CNY 人民币</SelectItem>
+                        <SelectItem value="USD">USD 美元</SelectItem>
+                        <SelectItem value="EUR">EUR 欧元</SelectItem>
+                        <SelectItem value="NOK">NOK 挪威克朗</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label className="text-xs">开户行</Label>
+                  <Input
+                    value={acc.bank_name}
+                    onChange={(e) => updateBankAccount(idx, "bank_name", e.target.value)}
+                    placeholder="开户银行"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label className="text-xs">银行账号</Label>
+                  <Input
+                    value={acc.account_number}
+                    onChange={(e) => updateBankAccount(idx, "account_number", e.target.value)}
+                    placeholder="银行账号"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label className="text-xs">备注</Label>
+                  <Input
+                    value={acc.notes}
+                    onChange={(e) => updateBankAccount(idx, "notes", e.target.value)}
+                    placeholder="备注"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id={`bank_active_${idx}`}
+                    checked={acc.is_active}
+                    onCheckedChange={(checked) => updateBankAccount(idx, "is_active", checked === true)}
+                  />
+                  <Label htmlFor={`bank_active_${idx}`} className="text-xs font-normal cursor-pointer">启用</Label>
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* 其他信息 */}

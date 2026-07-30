@@ -48,6 +48,17 @@ interface Supplier {
   created_at: string;
   payable_cny: number | null;
   payable_usd: number | null;
+  bank_accounts?: BankAccountItem[];
+}
+
+interface BankAccountItem {
+  id?: number;
+  account_name: string;
+  bank_name: string;
+  account_number: string;
+  currency: string;
+  is_active: boolean;
+  notes: string;
 }
 
 interface CompanyListResponse {

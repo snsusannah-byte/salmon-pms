@@ -115,8 +115,8 @@ const generatePrintHTML = (data: SalePrintData) => {
   const bankBlocks = data.receipt_accounts
     .map(
       (acc, idx) => `
-      <div class="bank" style="margin-bottom:10px;">
-        ${data.receipt_accounts.length > 1 ? `<div class="bank-title">收款信息 ${idx + 1}</div>` : `<div class="bank-title">收款信息</div>`}
+      <div class="bank" style="flex:1;min-width:0;margin-bottom:10px;">
+        <div class="bank-title">收款信息 ${idx + 1}</div>
         <div class="bank-row"><span class="label">户名：</span><span class="value">${acc.account_name || "-"}</span></div>
         <div class="bank-row"><span class="label">账号：</span><span class="value">${acc.account_number || "-"}</span></div>
         <div class="bank-row"><span class="label">开户行：</span><span class="value">${acc.bank_name || "-"}</span></div>
@@ -126,7 +126,7 @@ const generatePrintHTML = (data: SalePrintData) => {
     .join("");
 
   const bankSection = data.receipt_accounts.length > 0
-    ? bankBlocks
+    ? `<div class="bank-section" style="display:flex;gap:16px;align-items:flex-start;">${bankBlocks}</div>`
     : `
       <div class="bank">
         <div class="bank-title">收款信息</div>
