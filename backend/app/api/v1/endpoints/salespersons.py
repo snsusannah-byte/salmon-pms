@@ -1,11 +1,15 @@
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models import CommissionRecord, Salesperson, User
+from app.models import CommissionRecord, FinishedProductCommission, Salesperson, User
+from app.models.finished_product import FinishedProductSale
+from app.models.sales import WholeFishSale
 from app.schemas.company import (
     SalespersonCreate,
     SalespersonUpdate,
@@ -160,11 +164,33 @@ async def delete_salesperson(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """删除业务员（软删除：标记停用）"""
+    """删除业务员（软删除：标记停用，并清理关联销售/提成记录）"""
     result = await db.execute(select(Salesperson).where(Salesperson.id == sp_id))
     sp = result.scalar_one_or_none()
     if not sp:
         raise HTTPException(status_code=404, detail="业务员不存在")
+
+    # 清除进口销售（整鱼销售）中的业务员关联和提成字段
+    await db.execute(
+        update(WholeFishSale)
+        .where(WholeFishSale.salesperson_id == sp_id)
+        .values(salesperson_id=None, commission=Decimal("0"))
+    )
+    # 清除成品销售中的业务员关联和提成字段
+    await db.execute(
+        update(FinishedProductSale)
+        .where(FinishedProductSale.salesperson_id == sp_id)
+        .values(salesperson_id=None, commission=Decimal("0"))
+    )
+    # 删除关联提成记录（进口销售提成）
+    await db.execute(
+        delete(CommissionRecord).where(CommissionRecord.salesperson_id == sp_id)
+    )
+    # 删除关联提成记录（成品销售提成）
+    await db.execute(
+        delete(FinishedProductCommission).where(FinishedProductCommission.salesperson_id == sp_id)
+    )
+
     sp.is_active = False
     await db.commit()
     return None
