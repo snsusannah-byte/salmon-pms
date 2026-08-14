@@ -693,12 +693,15 @@ async def list_batch_reports(
                 )
             )
             for txn in other_exp_result.scalars().all():
-                if txn.category == "clearance_payment":
-                    total_clearance_extra += _to_decimal(txn.amount)
+                if txn.category in ("clearance_payment", "import_tax"):
+                    # 清关费和税费已通过 ClearanceCost / ImportTax 表核算，
+                    # 交易流水中的付款记录不再重复计入成本。
+                    continue
                 else:
                     total_other_expenses += _to_decimal(txn.amount)
 
-        # 清关费合计包含额外支出
+        # 清关费合计 = 报关行清关费（已包含在 total_clearance 中）
+        # total_clearance_extra 仅保留非重复付款性质的额外支出（当前已无不重复项）。
         total_clearance += total_clearance_extra
 
         # 汇率默认值
@@ -1134,17 +1137,10 @@ async def _calc_batch_financials(db: AsyncSession, batch) -> dict:
             ).order_by(TransactionRecord.transaction_date.desc())
         )
         for txn in other_exp_result.scalars().all():
-            if txn.category == "clearance_payment":
-                total_clearance_extra += _to_decimal(txn.amount)
-                clearance_extra_items.append({
-                    "id": txn.id,
-                    "date": str(txn.transaction_date) if txn.transaction_date else None,
-                    "amount": round(_to_decimal(txn.amount), 2),
-                    "counterparty_name": txn.counterparty_name,
-                    "description": txn.description,
-                    "reference_no": txn.reference_no,
-                    "category": txn.category,
-                })
+            if txn.category in ("clearance_payment", "import_tax"):
+                # 清关费/税费已由 ClearanceCost / ImportTax 表单独核算，
+                # 对应交易流水仅作付款记录，不计入成本。
+                continue
             else:
                 total_other_expenses += _to_decimal(txn.amount)
                 other_expenses_data.append({
@@ -1330,13 +1326,14 @@ async def get_batch_report(
                     _to_decimal(cb_clearance_item.other_costs)
                 )
 
-        # 其他支出
+        # 其他支出（税费/清关费已由 ImportTax / ClearanceCost 表核算，对应付款流水不再重复计入）
         cb_other_expenses = Decimal("0")
         if cb_inv_ids:
             cb_other_result = await db.execute(
                 select(func.sum(TransactionRecord.amount)).where(
                     TransactionRecord.type == "expense",
                     TransactionRecord.related_invoice_id.in_(cb_inv_ids),
+                    TransactionRecord.category.notin_(["import_tax", "clearance_payment"]),
                 )
             )
             cb_other_expenses = _to_decimal(cb_other_result.scalar())
