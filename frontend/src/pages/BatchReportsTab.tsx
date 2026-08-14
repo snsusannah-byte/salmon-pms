@@ -160,7 +160,8 @@ function generateBatchReportHTML(detailData: any, lang: "zh" | "en"): string {
       ${Number(detailData.shrinkage || 0) !== 0 ? `<div class="row red"><span>${isEn ? 'Shrinkage' : '账面损耗'}(${Number(detailData.total_weight_kg || 0).toLocaleString()}kg - ${Number(detailData.total_sales_weight || 0).toLocaleString()}kg = ${Number((detailData.total_weight_kg || 0) - (detailData.total_sales_weight || 0)).toLocaleString()}kg)</span><span>-${fmt$(detailData.shrinkage)}</span></div>` : ''}
       ${Number(detailData.total_commission || 0) !== 0 ? `<div class="row red"><span>${isEn ? 'Commission' : '业务员提成'}</span><span>-${fmt$(detailData.total_commission)}</span></div>` : ''}
       <div class="row red"><span>${isEn ? 'Exchange Total' : '购汇合计'}</span><span>-${fmt$(Number(detailData.total_exchange_payment || 0) + Number(detailData.total_exchange_fee || 0))}</span></div>
-      <div class="row red"><span>${isEn ? 'Import Cost Total' : '进口费用合计'}</span><span>-${fmt$(Number(detailData.total_taxes || 0) + Number(detailData.total_clearance_cost || 0))}</span></div>
+      <div class="row red"><span>${isEn ? 'Total Taxes' : '税费合计'}</span><span>-${fmt$(detailData.total_taxes)}</span></div>
+      <div class="row red"><span>${isEn ? 'Clearance Total' : '清关费合计'}</span><span>-${fmt$(detailData.total_clearance_cost)}</span></div>
       <div class="row bold ${Number(detailData.net_profit) >= 0 ? 'green' : 'red'}" style="border-top:1px solid #ddd;margin-top:2pt;padding-top:2pt"><span>${t.netProfit}</span><span>${fmt$(detailData.net_profit)}</span></div>
     </div>
   </div>
@@ -785,8 +786,12 @@ export function BatchReportsTab() {
                           <span className="text-red-500">-{fmt$(Number(detailData.total_exchange_payment || 0) + Number(detailData.total_exchange_fee || 0))}</span>
                         </div>
                         <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "进口费用合计" : "Import Cost Total"}</span>
-                          <span className="text-red-500">-{fmt$(Number(detailData.total_taxes || 0) + Number(detailData.total_clearance_cost || 0))}</span>
+                          <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "税费合计" : "Total Taxes"}</span>
+                          <span className="text-red-500">-{fmt$(detailData.total_taxes)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground pl-2">{detailLang === "zh" ? "清关费合计" : "Clearance Total"}</span>
+                          <span className="text-red-500">-{fmt$(detailData.total_clearance_cost)}</span>
                         </div>
                         <div className="flex justify-between text-xs font-medium border-t pt-1">
                           <span className={clsProfit(Number(detailData.net_profit))}>{detailLang === "zh" ? "净利润" : "Net Profit"}</span>
