@@ -438,7 +438,8 @@ export function BatchReportsTab() {
                 <TableHead className="text-xs text-right">采购金额</TableHead>
                 <TableHead className="text-xs text-right">销售净额(CNY)</TableHead>
                 <TableHead className="text-xs text-right">购汇合计(CNY)</TableHead>
-                <TableHead className="text-xs text-right">进口费用合计(CNY)</TableHead>
+                <TableHead className="text-xs text-right">税费合计(CNY)</TableHead>
+                <TableHead className="text-xs text-right">清关费合计(CNY)</TableHead>
                 <TableHead className="text-xs text-right">期初净利润留存</TableHead>
                 <TableHead className="text-xs text-right">本期经营净利润</TableHead>
                 <TableHead className="text-xs text-right">累计净利润总额</TableHead>
@@ -448,13 +449,13 @@ export function BatchReportsTab() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={15} className="text-center py-8">
+                  <TableCell colSpan={16} className="text-center py-8">
                     <Loader2 className="h-5 w-5 animate-spin mx-auto" />
                   </TableCell>
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={15} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={16} className="text-center text-muted-foreground py-8">
                     暂无数据
                   </TableCell>
                 </TableRow>
@@ -499,7 +500,8 @@ export function BatchReportsTab() {
                         fmt$(Number(item.total_exchange_payment || 0) + Number(item.total_exchange_fee || 0))
                       )}
                     </TableCell>
-                    <TableCell className="text-xs text-right">{fmt$(Number(item.total_taxes || 0) + Number(item.total_clearance_cost || 0))}</TableCell>
+                    <TableCell className="text-xs text-right">{fmt$(Number(item.total_taxes || 0))}</TableCell>
+                    <TableCell className="text-xs text-right">{fmt$(Number(item.total_clearance_cost || 0))}</TableCell>
                     <TableCell className="text-xs text-right">{fmt$(item.cumulative_profit)}</TableCell>
                     <TableCell className={cn("text-xs text-right font-medium", clsProfit(Number(item.net_profit)))}>
                       {fmt$(item.net_profit)}
