@@ -682,27 +682,10 @@ async def list_batch_reports(
             )
             total_commission = _to_decimal(commission_result.scalar())
 
-        # 其他支出（通过交易流水关联到该批次发票的额外支出，排除清关费支付）
+        # 其他支出：不再计入批次财报损益分析
         total_other_expenses = Decimal("0")
-        total_clearance_extra = Decimal("0")
-        if invoice_ids:
-            other_exp_result = await db.execute(
-                select(TransactionRecord).where(
-                    TransactionRecord.type == "expense",
-                    TransactionRecord.related_invoice_id.in_(invoice_ids),
-                )
-            )
-            for txn in other_exp_result.scalars().all():
-                if txn.category in ("clearance_payment", "import_tax"):
-                    # 清关费和税费已通过 ClearanceCost / ImportTax 表核算，
-                    # 交易流水中的付款记录不再重复计入成本。
-                    continue
-                else:
-                    total_other_expenses += _to_decimal(txn.amount)
 
         # 清关费合计 = 报关行清关费（已包含在 total_clearance 中）
-        # total_clearance_extra 仅保留非重复付款性质的额外支出（当前已无不重复项）。
-        total_clearance += total_clearance_extra
 
         # 汇率默认值
         if exchange_rate is None or exchange_rate == 0:
@@ -711,9 +694,9 @@ async def list_batch_reports(
         # 采购成本(CNY)
         total_purchase_cny = total_purchase_usd * exchange_rate
 
-        # 支出合计
+        # 支出合计（不再包含其他支出）
         total_taxes = total_import_duty + total_import_vat
-        total_expenses = total_taxes + total_clearance + total_exchange_payment + total_exchange_fee + total_other_expenses
+        total_expenses = total_taxes + total_clearance + total_exchange_payment + total_exchange_fee
 
         # 损耗
         shrinkage = Decimal("0")
@@ -756,7 +739,7 @@ async def list_batch_reports(
             total_sales_weight=round(total_sales_weight, 3),
             sales_count=len(sales_list),
             total_expenses=round(total_expenses, 2),
-            total_other_expenses=round(total_other_expenses, 2),
+            total_other_expenses=Decimal("0"),
             shrinkage=shrinkage,
             net_profit=round(net_profit, 2),
             profit_margin=profit_margin,
@@ -1124,41 +1107,17 @@ async def _calc_batch_financials(db: AsyncSession, batch) -> dict:
         - total_balance_adjustment
     )
 
-    # 其他支出（通过交易流水关联到该批次发票的额外支出）
+    # 其他支出：不再计入批次财报损益分析
     other_expenses_data = []
     total_other_expenses = Decimal("0")
-    total_clearance_extra = Decimal("0")  # 清关费额外支出（category == "clearance_payment"）
+    total_clearance_extra = Decimal("0")
     clearance_extra_items = []
-    if all_inv_ids:
-        other_exp_result = await db.execute(
-            select(TransactionRecord).where(
-                TransactionRecord.type == "expense",
-                TransactionRecord.related_invoice_id.in_(all_inv_ids),
-            ).order_by(TransactionRecord.transaction_date.desc())
-        )
-        for txn in other_exp_result.scalars().all():
-            if txn.category in ("clearance_payment", "import_tax"):
-                # 清关费/税费已由 ClearanceCost / ImportTax 表单独核算，
-                # 对应交易流水仅作付款记录，不计入成本。
-                continue
-            else:
-                total_other_expenses += _to_decimal(txn.amount)
-                other_expenses_data.append({
-                    "id": txn.id,
-                    "date": str(txn.transaction_date) if txn.transaction_date else None,
-                    "amount": round(_to_decimal(txn.amount), 2),
-                    "counterparty_name": txn.counterparty_name,
-                    "description": txn.description,
-                    "reference_no": txn.reference_no,
-                    "category": txn.category,
-                })
 
-    # 清关费合计 = 报关行清关费 + 额外清关支出
-    total_clearance += total_clearance_extra
+    # 清关费合计 = 报关行清关费（已包含在 total_clearance 中）
 
     # 支出合计
     total_taxes = total_import_duty + total_import_vat
-    total_expenses = total_taxes + total_clearance + total_exchange_payment + total_exchange_fee + total_other_expenses
+    total_expenses = total_taxes + total_clearance + total_exchange_payment + total_exchange_fee
 
     # 损耗
     shrinkage = Decimal("0")
@@ -1326,19 +1285,10 @@ async def get_batch_report(
                     _to_decimal(cb_clearance_item.other_costs)
                 )
 
-        # 其他支出（税费/清关费已由 ImportTax / ClearanceCost 表核算，对应付款流水不再重复计入）
+        # 其他支出：不再计入批次财报损益分析
         cb_other_expenses = Decimal("0")
-        if cb_inv_ids:
-            cb_other_result = await db.execute(
-                select(func.sum(TransactionRecord.amount)).where(
-                    TransactionRecord.type == "expense",
-                    TransactionRecord.related_invoice_id.in_(cb_inv_ids),
-                    TransactionRecord.category.notin_(["import_tax", "clearance_payment"]),
-                )
-            )
-            cb_other_expenses = _to_decimal(cb_other_result.scalar())
 
-        cb_expenses = cb_ex_payment + cb_ex_fee + cb_taxes + cb_clearance + cb_other_expenses
+        cb_expenses = cb_ex_payment + cb_ex_fee + cb_taxes + cb_clearance
 
         # 业务员提成
         cb_commission = Decimal("0")
@@ -1413,7 +1363,7 @@ async def get_batch_report(
         total_balance_adjustment=round(total_balance_adjustment, 2),
         sales_count=sales_count,
         total_expenses=round(total_expenses, 2),
-        total_other_expenses=round(total_other_expenses, 2),
+        total_other_expenses=Decimal("0"),
         shrinkage=shrinkage,
         net_profit=round(net_profit, 2),
         profit_margin=profit_margin,
@@ -1422,7 +1372,7 @@ async def get_batch_report(
         is_exchange_estimated=is_exchange_estimated,
         invoices=[BatchReportInvoiceDetail(**d) for d in invoice_details_raw],
         sales=sales_data,
-        other_expenses=other_expenses_data,
+        other_expenses=[],
     )
 
 

@@ -1003,8 +1003,16 @@ class FinanceService:
                 # 没有匹配的销售单，返回空结果
                 filters.append(TransactionRecord.id == -1)
         if invoice_no:
-            # 模糊匹配关联发票号
-            filters.append(TransactionRecord.related_invoice_no.ilike(f"%{invoice_no}%"))
+            # 模糊匹配关联发票号：支持 related_invoice_no 字符串 和 related_invoice_id 外键
+            invoice_result = await db.execute(
+                select(ImportInvoice.id).where(ImportInvoice.invoice_no.ilike(f"%{invoice_no}%"))
+            )
+            invoice_ids = [row[0] for row in invoice_result.all()]
+            no_filter = TransactionRecord.related_invoice_no.ilike(f"%{invoice_no}%")
+            if invoice_ids:
+                filters.append(or_(no_filter, TransactionRecord.related_invoice_id.in_(invoice_ids)))
+            else:
+                filters.append(no_filter)
         if is_locked is not None:
             filters.append(TransactionRecord.is_locked == is_locked)
         if start_date:
