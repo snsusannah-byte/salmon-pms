@@ -2047,9 +2047,11 @@ async def list_receivable_statements(
                     opening_balance += _to_decimal(s.net_amount)
             
             # 期初之前的收款（使用 _txn_date 优先取交易流水日期，合并收款去重）
+            # 注意：payment_method == 'balance' 是余额抵扣（预付款分配），不是真实银行流水，
+            # 已经在预付款 transaction 中统计，避免重复扣减。
             processed_opening_txns = set()
             for r in all_wf_receipts:
-                if _txn_date(r) < start:
+                if r.payment_method != 'balance' and _txn_date(r) < start:
                     if r.transaction_id:
                         if r.transaction_id not in processed_opening_txns:
                             processed_opening_txns.add(r.transaction_id)
@@ -2057,7 +2059,7 @@ async def list_receivable_statements(
                     else:
                         opening_balance -= _to_decimal(r.amount)
             for r in all_fp_receipts:
-                if _txn_date(r) < start:
+                if r.payment_method != 'balance' and _txn_date(r) < start:
                     if r.transaction_id:
                         if r.transaction_id not in processed_opening_txns:
                             processed_opening_txns.add(r.transaction_id)
@@ -2065,7 +2067,7 @@ async def list_receivable_statements(
                     else:
                         opening_balance -= _to_decimal(r.amount)
             for r in all_fp_v2_receipts:
-                if _txn_date(r) < start:
+                if r.payment_method != 'balance' and _txn_date(r) < start:
                     if r.transaction_id:
                         if r.transaction_id not in processed_opening_txns:
                             processed_opening_txns.add(r.transaction_id)
