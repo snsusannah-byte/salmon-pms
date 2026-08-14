@@ -421,8 +421,8 @@ class DailySlaughterService:
         
         total_days = len(items)
         total_fish_count = sum(r.fish_count or 0 for r in items)
-        total_meat_kg = sum(r.meat_weight_kg for r in items)
-        total_loss_kg = sum(r.loss_weight_kg for r in items)
+        total_meat_kg = sum((r.meat_weight_kg for r in items), Decimal("0"))
+        total_loss_kg = sum((r.loss_weight_kg for r in items), Decimal("0"))
         
         avg_meat_rate = Decimal("0")
         avg_cost_price = Decimal("0")

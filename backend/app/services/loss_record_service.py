@@ -167,7 +167,7 @@ class LossRecordService:
         result = await db.execute(query)
         items = result.scalars().all()
         
-        total_weight = sum(r.weight_kg for r in items)
+        total_weight = sum((r.weight_kg for r in items), Decimal("0"))
         total_quantity = sum(r.quantity for r in items)
         
         by_type = {}
