@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import and_, exists, func, select
+from sqlalchemy import and_, case, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -285,15 +285,20 @@ class BatchService:
         result = await db.execute(
             select(
                 func.count(Batch.id),
-                func.sum(func.case((Batch.status == BatchStatus.OPEN, 1), else_=0)),
-                func.sum(func.case((Batch.status == BatchStatus.LOCKED, 1), else_=0)),
-                func.sum(func.case((Batch.status == BatchStatus.SETTLED, 1), else_=0)),
+                func.sum(case((Batch.status == BatchStatus.OPEN, 1), else_=0)),
+                func.sum(case((Batch.status == BatchStatus.LOCKED, 1), else_=0)),
+                func.sum(case((Batch.status == BatchStatus.SETTLED, 1), else_=0)),
             )
         )
         total, open_c, locked_c, settled_c = result.one()
+
+        invoice_result = await db.execute(select(func.count(BatchInvoice.id)))
+        total_invoices = invoice_result.scalar() or 0
+
         return {
             "total_batches": total or 0,
             "open_count": open_c or 0,
             "locked_count": locked_c or 0,
             "settled_count": settled_c or 0,
+            "total_invoices": total_invoices,
         }

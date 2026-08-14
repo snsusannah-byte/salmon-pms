@@ -132,6 +132,15 @@ async def create_batch(
     return await _build_batch_response(db, batch)
 
 
+@router.get("/summary", response_model=BatchSummary)
+async def get_batch_summary(
+    db: AsyncSession = Depends(get_db),
+):
+    """批次汇总统计"""
+    summary = await BatchService.get_summary(db)
+    return BatchSummary(**summary)
+
+
 @router.get("/{batch_id}", response_model=BatchResponse)
 async def get_batch(
     batch_id: int,
@@ -303,12 +312,3 @@ async def remove_invoice_from_batch(
 
     await BatchService.recalculate_totals(db, batch)
     return None
-
-
-@router.get("/summary", response_model=BatchSummary)
-async def get_batch_summary(
-    db: AsyncSession = Depends(get_db),
-):
-    """批次汇总统计"""
-    summary = await BatchService.get_summary(db)
-    return BatchSummary(**summary)
